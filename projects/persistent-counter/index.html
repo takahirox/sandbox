@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Persistent Counter</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; text-align: center; line-height: 1.6; color: #18314a; background: #f6f8fb; }
+    main { padding: 2rem 1rem; border-radius: 1rem; background: white; }
+    output { display: block; font-size: 4rem; font-variant-numeric: tabular-nums; margin: 1rem 0; }
+    button { font: inherit; font-size: 1.5rem; padding: .5rem 2rem; border: 0; border-radius: .5rem; background: #1758c2; color: white; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+    button:focus-visible { outline: 3px solid #18314a; outline-offset: 4px; }
+    #status { min-height: 3em; }
+    a { color: #1758c2; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Persistent Counter</h1>
+    <p>One shared counter across browsers and devices. Reloading keeps the value.</p>
+    <output id="counter" aria-label="Counter value" aria-live="polite">—</output>
+    <button id="increment" type="button" disabled aria-label="Increment counter by one">+1</button>
+    <p id="status" role="status">Loading counter…</p>
+    <noscript>This counter requires JavaScript.</noscript>
+    <p>GitHub Pages → Cloudflare Worker → D1</p>
+    <a href="../../">Back to sandbox</a>
+  </main>
+  <script type="module" src="./counter.js"></script>
+</body>
+</html>

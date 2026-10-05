@@ -1,2 +1,5 @@
 /_site/
 __pycache__/
+node_modules/
+.wrangler/
+workers/persistent-counter/wrangler.generated.json
