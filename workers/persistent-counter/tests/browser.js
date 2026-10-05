@@ -17,12 +17,13 @@ async function fixture({ migrated = true, configured = true } = {}) {
     const files = {
       '/sandbox/': 'index.html',
       '/sandbox/projects/persistent-counter/': 'projects/persistent-counter/index.html',
-      '/sandbox/projects/persistent-counter/counter.js': 'projects/persistent-counter/counter.js'
+      '/sandbox/projects/persistent-counter/counter.js': 'projects/persistent-counter/counter.js',
+      '/sandbox/projects/persistent-counter/style.css': 'projects/persistent-counter/style.css'
     };
     if (!files[path]) { response.writeHead(404).end(); return; }
     try {
       const body = await readFile(new URL(`../../../_site/${files[path]}`, import.meta.url));
-      response.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : 'text/html');
+      response.setHeader('Content-Type', path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : 'text/html');
       response.end(body);
     } catch {
       response.writeHead(500).end('Build the static site before running browser tests.');
@@ -51,9 +52,20 @@ async function fixture({ migrated = true, configured = true } = {}) {
 
 const button = page => page.getByRole('button', { name: 'Increment counter by one' });
 const valueIs = (page, value) => page.waitForFunction(expected =>
-  document.querySelector('#counter').textContent === String(expected), value);
+  document.querySelector('#counter').textContent === new Intl.NumberFormat('en-US').format(expected), value);
 const connected = page => page.waitForFunction(() =>
-  document.querySelector('#connection').textContent.startsWith('Connected'));
+  document.querySelector('#connection').textContent === 'LIVE');
+
+async function observeFeedback(page) {
+  await page.addInitScript(() => {
+    window.feedback = [];
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args) {
+      window.feedback.push(this.id);
+      return animate.apply(this, args);
+    };
+  });
+}
 
 test('two independent browsers receive push, concurrent increments, reload and reconnect state without polling or write retries', { timeout: 30_000 }, async () => {
   const f = await fixture();
@@ -62,6 +74,7 @@ test('two independent browsers receive push, concurrent increments, reload and r
     const secondContext = await f.browser.newContext();
     const page = await firstContext.newPage();
     const other = await secondContext.newPage();
+    await Promise.all([observeFeedback(page), observeFeedback(other)]);
     const requests = [];
     const errors = [];
     for (const p of [page, other]) {
@@ -85,8 +98,12 @@ test('two independent browsers receive push, concurrent increments, reload and r
     await page.getByRole('link', { name: 'persistent-counter', exact: true }).click();
     await other.goto(page.url());
     await Promise.all([valueIs(page, 0), valueIs(other, 0), connected(page), connected(other)]);
+    assert.deepEqual(await page.evaluate(() => window.feedback), [], 'Initial snapshot should not animate');
+    assert.equal((await page.locator('body').innerText()).trim(), 'Persistent Counter\n\nLIVE\n\n0\nPUSH\n\ncounted together');
     await button(page).click();
     await Promise.all([valueIs(page, 1), valueIs(other, 1)]);
+    assert.deepEqual(await page.evaluate(() => window.feedback), ['increment', 'counter', 'ripple']);
+    assert.deepEqual(await other.evaluate(() => window.feedback), ['counter', 'ripple'], 'Remote update should pulse without a local press');
     await button(other).click();
     await Promise.all([valueIs(page, 2), valueIs(other, 2)]);
     await Promise.all([button(page).click(), button(other).click()]);
@@ -125,7 +142,8 @@ test('two independent browsers receive push, concurrent increments, reload and r
       await route.abort();
     });
     await button(page).click();
-    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('Could not confirm'));
+    await page.waitForFunction(() => !document.querySelector('#notice').hidden);
+    assert.equal(await page.locator('#debug').isVisible(), false);
     await Promise.all([valueIs(page, 6), valueIs(other, 6), connected(page)]);
     await page.unrouteAll();
 
@@ -141,11 +159,16 @@ test('two independent browsers receive push, concurrent increments, reload and r
     });
     await button(page).click();
     await ready;
+    const pendingRequestCount = requests.length;
+    assert.equal(await button(page).evaluate(element => document.activeElement === element), true,
+      'A pending write must retain keyboard focus');
+    await page.keyboard.press('Enter');
+    assert.equal(requests.length, pendingRequestCount, 'Keyboard input during a pending write must not submit again');
     await valueIs(other, 7);
     await button(other).click();
     await Promise.all([valueIs(page, 8), valueIs(other, 8)]);
     releaseResponse();
-    await page.waitForFunction(() => !document.querySelector('#increment').disabled);
+    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-disabled') === 'false');
     await page.unrouteAll();
     const requestCount = requests.length;
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -158,6 +181,127 @@ test('two independent browsers receive push, concurrent increments, reload and r
     const db = await f.worker.getD1Database('DB');
     assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: 8 });
     assert.deepEqual(errors, []);
+  } finally {
+    await f.close();
+  }
+});
+
+test('keyboard and touch work on responsive layouts, large counts fit, and reduced motion skips feedback animations', { timeout: 20_000 }, async () => {
+  const f = await fixture();
+  try {
+    const db = await f.worker.getD1Database('DB');
+    await db.prepare('UPDATE counter SET value = ? WHERE id = 1').bind(128453).run();
+    const context = await f.browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await context.newPage();
+    await observeFeedback(page);
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/`);
+    await connected(page);
+    await valueIs(page, 128453);
+    await page.keyboard.press('Tab');
+    assert.equal(await button(page).evaluate(element => element.matches(':focus-visible')), true);
+    assert.equal(await button(page).evaluate(element => getComputedStyle(element).outlineStyle), 'solid');
+    await page.keyboard.press('Enter');
+    await valueIs(page, 128454);
+    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-disabled') === 'false');
+    await page.keyboard.press('Space');
+    await valueIs(page, 128455);
+
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(() => { window.feedback = []; });
+    await button(page).click();
+    await valueIs(page, 128456);
+    assert.deepEqual(await page.evaluate(() => window.feedback), []);
+    assert.equal(await button(page).evaluate(element => getComputedStyle(element).transitionDuration), '0s');
+
+    const mobileContext = await f.browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    const mobile = await mobileContext.newPage();
+    await observeFeedback(mobile);
+    await mobile.goto(page.url());
+    await connected(mobile);
+    await button(mobile).tap();
+    await Promise.all([valueIs(page, 128457), valueIs(mobile, 128457)]);
+    assert.deepEqual(await page.evaluate(() => window.feedback), [], 'Reduced motion must also suppress remote feedback');
+    assert.deepEqual(await mobile.evaluate(() => window.feedback), ['increment', 'counter', 'ripple']);
+    await mobile.evaluate(() => {
+      window.motionChanged = false;
+      matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', () => {
+        window.motionChanged = true;
+      }, { once: true });
+    });
+    await mobile.emulateMedia({ reducedMotion: 'reduce' });
+    await mobile.waitForFunction(() => window.motionChanged);
+    assert.equal(await mobile.evaluate(() => document.getAnimations().length), 0, 'Enabling reduced motion cancels running effects');
+    for (const viewport of [{ width: 320, height: 568 }, { width: 667, height: 375 }]) {
+      await mobile.setViewportSize(viewport);
+      const rect = await button(mobile).boundingBox();
+      assert.ok(rect.width >= 44 && rect.height >= 44);
+      assert.ok(rect.x >= 0 && rect.x + rect.width <= viewport.width);
+      assert.ok(rect.y >= 0 && rect.y + rect.height <= viewport.height);
+      assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    }
+    await db.prepare('UPDATE counter SET value = ? WHERE id = 1').bind(Number.MAX_SAFE_INTEGER).run();
+    await mobile.setViewportSize({ width: 320, height: 568 });
+    await mobile.reload();
+    await connected(mobile);
+    await valueIs(mobile, Number.MAX_SAFE_INTEGER);
+    assert.equal(await mobile.evaluate(() => {
+      const range = document.createRange();
+      range.selectNodeContents(document.querySelector('#counter'));
+      const rect = range.getBoundingClientRect();
+      return rect.x >= 0 && rect.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth;
+    }), true, 'Largest supported count should fit a narrow screen');
+  } finally {
+    await f.close();
+  }
+});
+
+test('debug mode reports transport, snapshots, reconnects and errors without changing synchronization', { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    const page = await f.browser.newPage();
+    page.setDefaultTimeout(4000);
+    let socketRoute;
+    await page.routeWebSocket(`${f.apiUrl.replace('http:', 'ws:')}/api/counter/ws`, ws => {
+      socketRoute = ws;
+      ws.connectToServer();
+    });
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+    await connected(page);
+    assert.equal(await page.locator('#debug').isVisible(), true);
+    assert.equal(await page.locator('#debug-socket').textContent(), 'Open');
+    assert.equal(await page.locator('#debug-sync').textContent(), 'Synchronized');
+    assert.equal(await page.locator('#debug-api').textContent(), f.apiUrl);
+    assert.equal(await page.locator('#debug-value').textContent(), '0');
+    assert.match(await page.locator('#debug-update').textContent(), /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(await page.locator('#debug-backend').textContent(), /D1/);
+
+    socketRoute.send(JSON.stringify({ value: -1 }));
+    await page.waitForFunction(() => document.querySelector('#debug-sync').textContent === 'Waiting for snapshot');
+    assert.equal(await button(page).isDisabled(), true);
+    assert.match(await page.locator('#status').textContent(), /Invalid WebSocket update/);
+    // Complete the intercepted close handshake, then inspect the backoff state.
+    await socketRoute.close({ code: 1012, reason: 'Simulated connection loss' });
+    await page.waitForFunction(() => document.querySelector('#debug-retry').textContent.endsWith('ms'));
+    await connected(page);
+    assert.ok(Number(await page.locator('#debug-retries').textContent()) >= 1);
+    assert.notEqual(await page.locator('#debug-close').textContent(), 'None');
+    assert.equal(await page.locator('#debug-retry').textContent(), 'None');
+
+    let attempts = 0;
+    await page.route(`${f.apiUrl}/api/counter/increment`, route => {
+      attempts++;
+      return route.fulfill({ status: 503, headers: { 'Access-Control-Allow-Origin': f.origin }, body: 'Unavailable' });
+    });
+    await button(page).click();
+    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('HTTP 503'));
+    await socketRoute.close({ code: 1012, reason: 'Finish intercepted close handshake' });
+    await connected(page);
+    assert.equal(attempts, 1);
+    await valueIs(page, 0);
+    assert.match(await page.locator('#status').textContent(), /no mutation retry/);
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=0`);
+    await connected(page);
+    assert.equal(await page.locator('#debug').isVisible(), false, 'Debug must require the explicit value 1');
   } finally {
     await f.close();
   }
@@ -180,14 +324,19 @@ test('unavailable backend reconnects and synchronizes after D1 recovery', { time
   }
 });
 
-test('unconfigured static preview explains unavailability and never contacts a backend', async () => {
+test('unconfigured preview stays concise, exposes configuration error only in debug, and never contacts a backend', async () => {
   const f = await fixture({ configured: false });
   try {
     const page = await f.browser.newPage();
     let connections = 0;
     page.on('websocket', () => connections++);
     await page.goto(`${f.origin}/sandbox/projects/persistent-counter/`);
-    await page.waitForFunction(() => document.querySelector('#connection').textContent.includes('not configured'));
+    await page.waitForFunction(() => document.querySelector('#connection').textContent === 'Unavailable');
+    assert.equal(await page.locator('#debug').isVisible(), false);
+    assert.ok(!(await page.locator('body').innerText()).includes('API'));
+    await page.goto(`${page.url()}?debug=1`);
+    await page.waitForFunction(() => document.querySelector('#status').textContent.includes('not configured'));
+    assert.equal(await page.locator('#debug').isVisible(), true);
     assert.equal(await button(page).isDisabled(), true);
     assert.equal(connections, 0);
   } finally {
