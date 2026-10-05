@@ -4,11 +4,31 @@ The [demo](https://takahirox.github.io/sandbox/projects/persistent-counter/)
 is plain HTML/JavaScript served by the existing GitHub Pages build. Every open
 page subscribes to `GET /api/counter/ws` using a WebSocket. A single named
 Durable Object (`shared-counter` in the `COUNTER` binding) coordinates all
-subscriptions, reads, and increments. Pressing `+1` sends one
+subscriptions, reads, and increments. Pressing **PUSH** sends one
 `POST /api/counter/increment`; after D1 commits, the object broadcasts `{ value }`
 to every connected browser. No reload or polling is needed to see another
 visitor's increment. `GET /api/counter` remains available for one-off API reads;
 the frontend never uses it.
+
+## Shared game interface
+
+The default page fills the screen with one shared, formatted number, a large
+**PUSH** button, a small **LIVE** indicator, and “counted together.” A press has
+immediate tactile feedback; each changed authoritative value briefly lifts the
+number and sends a restrained ring around the button, including remote updates.
+The initial snapshot and unchanged snapshots do not animate. Reduced-motion
+preferences suppress these effects, including cancelling active effects if the
+preference changes. The native button supports keyboard and touch input with a
+visible keyboard focus ring. Large values scale down to fit mobile screens.
+
+Append `?debug=1` to the existing counter URL to show a collapsible diagnostic
+overlay. It reports WebSocket transport and synchronization state, cumulative
+reconnect attempts, scheduled retry delay, API origin, the last authoritative
+value and receipt time, persistence confirmation, last socket close, and the
+last error. This information stays out of the normal layout. A minimal
+**Reconnecting…**, **Offline · reconnecting…**, or **Unavailable** indicator
+replaces **LIVE** when appropriate. An uncertain push gets a short notice;
+technical error details are retained in debug mode.
 
 ## State and connection model
 
@@ -35,15 +55,16 @@ through one object, appropriate for this shared demo. Database writes outside
 the object (for example, manual SQL) cannot broadcast to subscribers.
 
 Each connection receives a current D1 snapshot before the UI reports
-**Connected** and enables `+1`. Unexpected closure triggers reconnection with
-bounded exponential backoff and jitter; offline clients show **Unavailable**.
+**LIVE** and enables **PUSH**. Unexpected closure triggers reconnection with
+bounded exponential backoff and jitter; offline clients show **Offline · reconnecting…**.
 Every reconnection waits for a fresh authoritative snapshot. The last value
-remains visible with a stale-state notice while reconnecting. Reconnection
+remains visible with the reconnecting indicator while reconnecting. Reconnection
 timers only establish WebSockets; they never fetch the counter periodically.
 
 WebSockets are push-only. Each user click produces exactly one HTTP mutation,
 with no automatic retries or replay after reconnection. A lost POST response
-may mean the write committed: the UI explains this and reconnects to check
+may mean the write committed: the UI shows “Couldn’t confirm that push,” gives
+details in debug mode, and reconnects to check
 authoritative state. The value is rendered only from the ordered WebSocket
 stream, so a delayed HTTP response cannot overwrite a newer broadcast. This
 intentionally does not guarantee delivery of an interrupted click; it avoids
@@ -98,8 +119,9 @@ without automatic retries. If permissions are insufficient, an account owner mus
 token permissions; CI cannot grant itself access.
 
 The generated Wrangler configuration is never published. Only the public API
-URL goes into the Pages artifact. The committed empty URL shows an explanatory
-message during an unconfigured static preview instead of calling production.
+URL goes into the Pages artifact. The committed empty URL shows **Unavailable**
+during an unconfigured static preview instead of calling production; debug mode
+explains the missing configuration.
 
 API references: [D1 creation](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/create/),
 [workers.dev registration](https://developers.cloudflare.com/api/resources/workers/subresources/subdomains/methods/update/),
@@ -139,7 +161,11 @@ push in both directions without reload, concurrent clicks, reload persistence,
 reconnection with a delayed authoritative snapshot, disabled writes before
 synchronization, a committed increment with a lost response, a delayed POST
 response after a newer broadcast, no repeated mutations or periodic HTTP reads,
-D1 agreement, backend recovery, and unconfigured preview behavior. No check
+D1 agreement, backend recovery, and unconfigured preview behavior. They also
+check local/remote animation feedback, keyboard focus and Enter/Space input,
+mobile touch and landscape layout, formatting through the largest safe integer,
+reduced motion (including remote updates and preference changes), a minimal
+normal layout, and debug diagnostics for reconnects and errors. No check
 calls production. Local reinitialization verifies persistence; production
 hibernation and deployment are covered by the post-merge checks below.
 
@@ -165,10 +191,10 @@ These checks require the main-branch deployment and remain pending until it runs
 1. Confirm the Pages workflow successfully provisions/reuses D1, applies remote
    migrations, deploys the Worker and Durable Object migration, and publishes Pages.
 2. Open the published demo in two independent browsers/devices. Confirm both
-   report Connected and the same value. Increment from each and confirm the
+   report LIVE and the same value. Increment from each and confirm the
    other updates immediately without reload. Reload and confirm persistence.
    Disconnect one browser, increment from the other, reconnect, and confirm
-   the first resynchronizes before reporting Connected.
+   the first resynchronizes before reporting LIVE.
 3. Confirm the document comes from GitHub Pages and the WebSocket and POST
    requests go to the discovered
    `sandbox-persistent-counter.<subdomain>.workers.dev` endpoint. Confirm an
@@ -182,3 +208,7 @@ These checks require the main-branch deployment and remain pending until it runs
    idle to allow object hibernation, then increment and confirm broadcasts
    continue with the saved value. Disconnect all clients and reconnect later
    to confirm persistence.
+6. Confirm the published page has the minimal number/PUSH layout and that both
+   local and remote increments visibly react. Check keyboard focus, a mobile
+   viewport, and reduced motion. Open `?debug=1` and confirm live diagnostics
+   appear, then return to the normal URL and confirm they are hidden.
