@@ -24,6 +24,8 @@ test('existing database and subdomain are reused without writes or leaked creden
   ], calls) });
   assert.ok(calls.every(call => call.method === 'GET'));
   assert.equal(result.config.d1_databases[0].database_id, 'existing-id');
+  assert.deepEqual(result.config.durable_objects, config.durable_objects);
+  assert.deepEqual(result.config.migrations, config.migrations);
   assert.equal(result.apiUrl, `https://${config.name}.existing.workers.dev`);
   assert.ok(!JSON.stringify(result).includes(token));
   assert.ok(!JSON.stringify(result).includes(accountId));

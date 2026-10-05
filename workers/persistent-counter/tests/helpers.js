@@ -10,6 +10,7 @@ export function createWorker(options = {}) {
     scriptPath: fileURLToPath(new URL('../src/index.js', import.meta.url)),
     compatibilityDate: config.compatibility_date,
     d1Databases: { DB: 'counter-test' },
+    durableObjects: { COUNTER: { className: 'Counter', useSQLite: true } },
     bindings: config.vars,
     ...options
   });

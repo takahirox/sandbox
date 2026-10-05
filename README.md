@@ -22,7 +22,8 @@ the URL. Directories without an entry point are not published.
 
 See [hello-world](projects/hello-world/index.html) for a minimal example.
 The [Persistent Counter](docs/persistent-counter.md) adds a small Cloudflare
-Worker and D1 backend while keeping its frontend in this static project layout.
+Worker, Durable Object, WebSocket, and D1 backend while keeping its frontend in
+this static project layout.
 All files within a discovered project are public, so keep source-only or private
 files outside it. Use ordinary files and directories; symbolic links are rejected
 by the build. Projects that need build tools can generate static files into this
@@ -51,8 +52,9 @@ merges). It can also be run manually from the Actions tab on `main`. Each build
 includes all discovered projects, so adding one preserves the existing projects.
 Pull requests only validate the build; deployment runs on `main`.
 The workflow also tests the Persistent Counter backend and browser integration.
-On `main`, it provisions D1, applies migrations, and deploys the Worker before
-building the Pages artifact with its public API URL. See the
+On `main`, it provisions D1, applies migrations, and deploys the Worker and
+Durable Object configuration before building the Pages artifact with its public
+API URL. See the
 [counter deployment and local checks](docs/persistent-counter.md) for Node.js
 prerequisites, token permissions, and required post-merge verification.
 

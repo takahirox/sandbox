@@ -18,12 +18,13 @@
 <body>
   <main>
     <h1>Persistent Counter</h1>
-    <p>One shared counter across browsers and devices. Reloading keeps the value.</p>
+    <p>One shared counter across browsers and devices. Open another window to see updates live. Reloading keeps the value.</p>
     <output id="counter" aria-label="Counter value" aria-live="polite">—</output>
     <button id="increment" type="button" disabled aria-label="Increment counter by one">+1</button>
-    <p id="status" role="status">Loading counter…</p>
+    <p id="connection" role="status">Connecting…</p>
+    <p id="status" role="status">Saved in D1. Updates are pushed to every connected browser.</p>
     <noscript>This counter requires JavaScript.</noscript>
-    <p>GitHub Pages → Cloudflare Worker → D1</p>
+    <p>GitHub Pages → WebSocket → Cloudflare Worker → Durable Object → D1</p>
     <a href="../../">Back to sandbox</a>
   </main>
   <script type="module" src="./counter.js"></script>

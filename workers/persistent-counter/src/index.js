@@ -1,3 +1,62 @@
+import { DurableObject } from 'cloudflare:workers';
+
+// D1 is the only source of truth. The object owns ordering and live sockets,
+// never a second persisted counter or an in-memory cache of its value.
+export class Counter extends DurableObject {
+  async fetch(request) {
+    // D1 awaits do not use Durable Object storage's automatic input gates.
+    // Gate the entire read/write + send so snapshots and broadcasts cannot race.
+    return this.ctx.blockConcurrencyWhile(async () => {
+      try {
+        const path = new URL(request.url).pathname;
+        const db = this.env.DB.withSession('first-primary');
+        const result = await db.prepare(path === '/api/counter/increment'
+          ? 'UPDATE counter SET value = value + 1 WHERE id = 1 RETURNING value'
+          : 'SELECT value FROM counter WHERE id = 1'
+        ).first();
+        if (!result || !Number.isSafeInteger(result.value) || result.value < 0) {
+          throw new Error('Invalid counter');
+        }
+        const message = JSON.stringify({ value: result.value });
+        if (path === '/api/counter/ws') {
+          const [client, server] = Object.values(new WebSocketPair());
+          this.ctx.acceptWebSocket(server);
+          server.send(message);
+          return new Response(null, { status: 101, webSocket: client });
+        }
+        if (path === '/api/counter/increment') {
+          for (const socket of this.ctx.getWebSockets()) {
+            try {
+              socket.send(message);
+            } catch {
+              // A disconnected listener must not turn a committed write into
+              // a failed increment or stop delivery to other listeners.
+              try { socket.close(1011, 'Reconnect to synchronize'); } catch {}
+            }
+          }
+        }
+        return Response.json(result);
+      } catch {
+        return Response.json({ error: 'Counter unavailable' }, { status: 503 });
+      }
+    });
+  }
+
+  // Mutations use the existing POST endpoint, once per user click. WebSockets
+  // are a push-only subscription and are managed by the Hibernation API.
+  webSocketMessage(socket) {
+    socket.close(1008, 'Use POST /api/counter/increment');
+  }
+
+  webSocketClose(socket, code, reason) {
+    socket.close(code, reason);
+  }
+
+  webSocketError(socket) {
+    socket.close(1011, 'Reconnect to synchronize');
+  }
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin');
@@ -14,7 +73,8 @@ export default {
 
     const path = new URL(request.url).pathname;
     const method = path === '/api/counter' ? 'GET'
-      : path === '/api/counter/increment' ? 'POST' : null;
+      : path === '/api/counter/increment' ? 'POST'
+      : path === '/api/counter/ws' ? 'GET' : null;
     if (!method) return json({ error: 'Not found' }, 404);
 
     if (request.method === 'OPTIONS') {
@@ -30,20 +90,19 @@ export default {
       headers.set('Allow', `${method}, OPTIONS`);
       return json({ error: 'Method not allowed' }, 405);
     }
-    if (method === 'POST' && origin !== env.ALLOWED_ORIGIN) {
+    if ((method === 'POST' || path === '/api/counter/ws') && origin !== env.ALLOWED_ORIGIN) {
       return json({ error: 'Origin required' }, 403);
+    }
+    if (path === '/api/counter/ws' && request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return json({ error: 'WebSocket upgrade required' }, 426);
     }
 
     try {
-      // Always read the primary so a reload/device sees the latest committed write,
-      // even if read replication is enabled later. A single UPDATE avoids lost writes.
-      const db = env.DB.withSession('first-primary');
-      const result = await db.prepare(method === 'GET'
-        ? 'SELECT value FROM counter WHERE id = 1'
-        : 'UPDATE counter SET value = value + 1 WHERE id = 1 RETURNING value'
-      ).first();
-      if (!result || !Number.isSafeInteger(result.value)) throw new Error('Invalid counter');
-      return json({ value: result.value });
+      const response = await env.COUNTER.getByName('shared-counter').fetch(request);
+      if (response.status === 101) return response;
+      const outgoing = new Response(response.body, response);
+      for (const [key, value] of headers) outgoing.headers.set(key, value);
+      return outgoing;
     } catch {
       return json({ error: 'Counter unavailable' }, 503);
     }
