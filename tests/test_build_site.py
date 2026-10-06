@@ -106,7 +106,7 @@ class BuildSiteTests(unittest.TestCase):
             build_site(self.root)
 
     def test_generated_links_and_assets_work_under_repository_base_path(self):
-        project = self.add_project("hello-world")
+        project = self.add_project("sample-project")
         (project / "style.css").write_text("body { color: blue; }")
         output = build_site(self.root)
         public = self.root / "public"
@@ -120,9 +120,9 @@ class BuildSiteTests(unittest.TestCase):
             base = f"http://127.0.0.1:{server.server_port}/sandbox/"
             with urlopen(base, timeout=5) as response:
                 links = ProjectLinks(response.read().decode()).links
-            self.assertEqual(links, ["./projects/hello-world/"])
+            self.assertEqual(links, ["./projects/sample-project/"])
             with urlopen(base + links[0], timeout=5) as response:
-                self.assertIn(b"<h1>hello-world</h1>", response.read())
+                self.assertIn(b"<h1>sample-project</h1>", response.read())
             with urlopen(base + links[0] + "style.css", timeout=5) as response:
                 self.assertEqual(response.read(), b"body { color: blue; }")
         finally:

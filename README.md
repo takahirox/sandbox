@@ -7,7 +7,7 @@ automatically; there is no project registry to maintain.
 ## Add a project
 
 1. Create `projects/<project-name>/index.html`. Prefer a lowercase name with
-   hyphens, such as `hello-world`, for a readable, stable URL.
+   hyphens, such as `happy-cat`, for a readable, stable URL.
 2. Put any CSS, JavaScript, images, and other static assets in that directory.
    Use relative asset links (for example, `./style.css`), since the site lives
    under `/sandbox/` rather than the domain root.
@@ -20,7 +20,7 @@ name supplies the link title; no metadata, framework, package manifest, or
 per-project deployment configuration is required. Renaming the directory changes
 the URL. Directories without an entry point are not published.
 
-See [hello-world](projects/hello-world/index.html) for a minimal example.
+See [Happy cat](projects/happy-cat/index.html) for a standalone static example.
 The [Persistent Counter](docs/persistent-counter.md) adds a small Cloudflare
 Worker, Durable Object, WebSocket, and D1 backend while keeping its frontend in
 this static project layout.
@@ -63,7 +63,7 @@ One-time repository setup: in **Settings → Pages → Build and deployment**, s
 `github-pages` environment protection rules allow deployment from `main`.
 See [GitHub's Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 After merging, check the **Deploy playground to Pages** workflow in the Actions
-tab and visit the site and `/sandbox/projects/hello-world/` to verify publication.
+tab and visit the site and follow its project links to verify publication.
 No repository setting or workflow edit is needed when adding subsequent projects.
 
 ## Development
