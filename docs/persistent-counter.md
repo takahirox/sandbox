@@ -1,107 +1,167 @@
 # Persistent Counter
 
 The [demo](https://takahirox.github.io/sandbox/projects/persistent-counter/)
-is plain HTML/JavaScript served by the existing GitHub Pages build. Every open
-page subscribes to `GET /api/counter/ws` using a WebSocket. A single named
-Durable Object (`shared-counter` in the `COUNTER` binding) coordinates all
-subscriptions, reads, and increments. Pressing **PUSH** immediately adds one to
-the local display and queues one `POST /api/counter/increment`. Each POST carries
-a unique UUID in its plain-text body; after D1 commits, the object broadcasts
-`{ value, intentId }` to every connected browser. Snapshots and increments from
-legacy API clients with empty POST bodies still use `{ value }`. No reload or
-polling is needed to see another visitor's increment. `GET /api/counter` remains available for one-off API reads;
-the frontend never uses it.
+is plain HTML/JavaScript served by GitHub Pages. Every open page subscribes to
+`GET /api/counter/ws?clientId=<UUID>` using a WebSocket. One named Durable Object
+(`shared-counter` in the `COUNTER` binding) coordinates reads, presses, and
+subscriptions. **PUSH** immediately increments the local display and sends
+`{ type: "increment", intentId: "<UUID>" }` on that connection. Every accepted
+press is saved to Durable Object SQLite storage before its result is broadcast
+to all connected browsers. D1 receives periodic checkpoints. There are no
+per-click frontend HTTP requests, counter polling, or mutation retries.
 
-## Shared game interface
+## Traffic policy and protocol
 
-The default page fills the screen with one shared, formatted number, a large
-**PUSH** button, a small **LIVE** indicator, and “counted together.” A press has
-immediate tactile and numeric feedback; each changed displayed value briefly
-lifts the number and sends a restrained ring around the button, including remote
-updates. The button stays enabled during writes, including keyboard input.
-The initial snapshot and unchanged snapshots do not animate. Reduced-motion
-preferences suppress these effects, including cancelling active effects if the
-preference changes. The native button supports keyboard and touch input with a
-visible keyboard focus ring. Large values scale down to fit mobile screens.
+The browser saves an anonymous client UUID in local storage and reuses it across
+reloads and tabs. If storage is unavailable, it uses a UUID for the current page.
+Each press has a separate UUID to correlate its acknowledgement. Neither
+identifier authenticates a caller or acts as a server-side idempotency key.
 
-Append `?debug=1` to the existing counter URL to show a collapsible diagnostic
-overlay. It reports WebSocket transport and synchronization state, cumulative
-reconnect attempts, scheduled retry delay, API origin, the last authoritative
-value and receipt time, pending optimistic presses, unsent queued presses,
-write-request state, persistence confirmation, last socket close, and the last
-error. Optimistic renders do not overwrite the authoritative diagnostic value
-or its receipt time. This information stays out of the normal layout. A minimal
-**Reconnecting…**, **Offline · reconnecting…**, or **Unavailable** indicator
-replaces **LIVE** when appropriate. An uncertain push gets a short notice;
-technical error details are retained in debug mode.
+The object applies two token buckets before accepting a press:
 
-## State and connection model
+| Key | Sustained refill | Burst capacity |
+| --- | --- | --- |
+| Anonymous client | 15 presses/second | 30 presses |
+| IP, secondary control | 150 presses/second | 300 presses |
 
-D1's existing `counter` row is the **only source of truth**. The Durable Object
-does not cache the value or duplicate it in object storage. It gates each D1
-read/update and the resulting snapshot/broadcast with
-[`blockConcurrencyWhile`](https://developers.cloudflare.com/durable-objects/api/state/#blockconcurrencywhile)
-so asynchronous database work cannot reorder pushed values. Increments use
-`UPDATE … RETURNING value`, and every operation uses a `first-primary` D1
-session. All API access goes through the same object, including existing HTTP
-endpoints. Existing D1 data needs no new schema migration and is preserved.
+Ten clients can each sustain 15 presses/second on one shared IP. Rotating client
+IDs still consumes the shared IP bucket. The address comes from Cloudflare's
+`CF-Connecting-IP` header at connection creation, never a WebSocket message or
+forwarded header. Only its SHA-256 hash is retained. Socket attachments preserve
+the identity across hibernation. These are soft abuse controls; shared networks
+are intentionally given considerably more headroom than one client.
 
-The object uses `ctx.acceptWebSocket`, `ctx.getWebSockets`, and the
-`webSocketMessage`/`webSocketClose`/`webSocketError` handlers from Cloudflare's
-[WebSocket Hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).
-It has no timers or in-memory socket list that would prevent hibernation.
-Hibernation can discard its JavaScript instance while Cloudflare retains live
-sockets. A new instance reads D1 again on the next request. Browser reloads,
-all clients disconnecting, object eviction, and Worker redeployments therefore
-preserve the counter. The SQLite-backed object class configuration enables
-hibernation-compatible coordination without using a second counter database.
-The tradeoff is one D1 primary operation per read or increment and serialization
-through one object, appropriate for this shared demo. Database writes outside
-the object (for example, manual SQL) cannot broadcast to subscribers.
+Rate buckets live in memory to avoid extra persistent writes for every press.
+Both refill completely within two seconds. Normal idle
+[hibernation](https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/)
+outlasts that refill window; an unexpected runtime restart or redeployment may
+grant a fresh burst. Only accepted intents create bucket entries, and checkpoint
+alarms remove fully refilled entries. The persistent daily cap remains effective
+through every kind of restart.
 
-Each connection receives a current D1 snapshot before the UI reports
-**LIVE** and enables **PUSH**. Unexpected closure triggers reconnection with
-bounded exponential backoff and jitter; offline clients show **Offline · reconnecting…**.
-Every reconnection waits for a fresh authoritative snapshot. The last value
-remains visible with the reconnecting indicator while reconnecting. Reconnection
-timers only establish WebSockets; they never fetch the counter periodically.
+At most **20,000 increments per UTC day** are accepted. Count and usage are
+updated in one storage transaction under `blockConcurrencyWhile`, along with
+the durable checkpoint alarm. Parallel HTTP and WebSocket clients share this
+same decision. The day and usage are persisted; recreating an object does not
+reset them. The next UTC day resets usage without resetting the lifetime count.
+When the budget is exhausted, an alarm pushes the midnight reset to subscribed
+pages so **PUSH** becomes available again without a reload or polling. Reads and
+subscriptions remain available at the limit.
 
-WebSockets remain push-only. The browser tracks a map of pending optimistic
-intents and a FIFO queue of unsent intents. Displayed state is the latest
-ordered authoritative value plus the number of pending intents (bounded by the
-largest safe integer). Each accepted press adds its own UUID to both structures
-and renders synchronously before network work. One POST runs at a time; further
-presses remain enabled and queue immediately. A pending write retains keyboard
-focus. Neither remote broadcasts nor network latency discard queued presses.
+An initial/reconnected snapshot and checkpoint updates have this shape:
 
-A committed broadcast carrying a local `intentId` acknowledges that intent and
-removes its optimistic contribution in the same render that applies the new
-authoritative value. Remote increments change the authoritative portion while
-preserving remaining local optimism. HTTP responses acknowledge acceptance too:
-if the stream has already reached the response's value, its optimistic intent
-is removed; otherwise it remains pending until the ordered stream catches up.
-A delayed HTTP response never overwrites a newer streamed value. Thus either
-HTTP/broadcast ordering avoids double-counting. Identifiers correlate acceptance;
-they are **not** server-side idempotency keys and must never be resubmitted.
+```json
+{
+  "type": "snapshot",
+  "value": 123,
+  "budget": { "day": "2026-10-06", "used": 10, "limit": 20000, "resetAt": 1791331200000 },
+  "checkpoint": 120,
+  "checkpointPending": true,
+  "checkpointFailures": 0
+}
+```
 
-A failed or timed-out POST is never retried. If its matching committed broadcast
-already arrived, acceptance is confirmed despite the HTTP failure. Otherwise,
-the browser shows “Couldn’t confirm that push,” retains technical details only
-in debug mode, and reconnects for a fresh authoritative snapshot. After a
-subscription interruption, that snapshot replaces optimism for already-sent
-intents, with a notice for any unconfirmed intent; unsent intents are retained
-and drain once synchronization and the current POST finish. Already-sent
-intents are never placed back in the queue, including after reconnect or a
-back/forward cache restore. Late responses from a superseded connection cannot
-close a newer healthy subscription. A sent request may still commit after a
-snapshot; its later broadcast applies as authoritative state without replay.
-Queue state lives in the current page and does not survive a full page reload.
+Each accepted intent broadcasts the same fields with `type: "incrementResult"`,
+`outcome: "accepted"`, and its `intentId`. Rejections go only to the initiating
+socket with `outcome: "rejected"`, the same authoritative state, a `reason`
+(`client_rate_limit`, `ip_rate_limit`, `daily_limit`, or `counter_full`), and
+`retryAfterMs`. Invalid/binary/oversized messages close the connection with code
+1008 before writing. A persistence error closes it with code 1011 so the browser
+resynchronizes; it must never assume an uncertain intent is safe to replay.
 
-An interrupted sent press cannot be guaranteed without persistent backend
-deduplication: it may have committed even if both its acknowledgement and
-broadcast were lost. This design makes uncertainty visible and reconciles from
-D1 instead of silently resubmitting and risking duplicate increments. There are
-no periodic HTTP reads or mutation retry timers.
+`GET /api/counter` remains available for one-off reads; the frontend does not use
+it. Legacy `POST /api/counter/increment` is also retained, with the same budget,
+limits, immediate DO persistence, and broadcasts. Its plain-text body can be an
+intent UUID or empty. An optional `clientId` query parameter supplies anonymous
+identity. Without it, legacy callers share a client bucket derived from their
+IP hash, so changing intent IDs cannot bypass the primary limit. Acceptance
+returns HTTP 200; rejection returns HTTP 429 with the structured result and
+`Retry-After` when applicable. Existing callers reading `value`/`intentId` keep
+working. The frontend sends all intents through WebSockets.
+
+## Persistent state and D1 checkpoints
+
+Durable Object SQLite is the **authoritative source of truth**. Its single
+`authoritative_counter` row contains the count, UTC day, budget usage, completed
+D1 checkpoint, pending flush time, and checkpoint failure count. Each accepted
+press updates one row and awaits `storage.sync()` before acknowledgement or
+broadcast. This survives hibernation, all clients disconnecting, eviction, and
+Worker redeployment. The existing SQLite-backed class migration and shared
+object name remain unchanged.
+
+On first use, the object imports the existing D1 `counter` row. D1 has no historic
+click timestamps, so the imported total (capped at 20,000) is conservatively
+charged to the rollout day's budget. This avoids granting another daily allowance
+on migration; the next UTC day starts with zero usage. Subsequent initialization
+always uses DO storage, even when D1 is stale or unavailable. No D1 schema change
+or manual provisioning is needed. Once imported, manual D1 updates do not change
+the live authoritative count and are unsupported.
+
+A persisted alarm flushes pending state **after five seconds or 100 accepted
+increments**, whichever comes first. Threshold flushes advance the existing
+alarm instead of writing D1 inside the increment path. Real-time broadcasts
+still occur once per accepted press. Quiet tails flush even with no connected
+clients or new requests. The
+[Alarm API](https://developers.cloudflare.com/durable-objects/api/alarms/)
+can wake a hibernated/recreated object; delivery may be delayed by the runtime.
+There are no DO JavaScript timers or shutdown hooks.
+
+Flushes use an absolute `UPDATE counter SET value = MAX(value, ?) … RETURNING
+value` in a `first-primary` D1 session. Re-execution after a crash between D1
+success and recording completion cannot duplicate increments or regress D1.
+The object then persists checkpoint completion. Failed D1 flushes leave the
+acknowledged count intact, increment the diagnostic failure count, and persist
+another alarm with backoff from 30 seconds up to one hour. New presses do not
+bypass that backoff. Flushes resume when D1 recovers. D1 is useful for queryable,
+eventually consistent checkpoints; it can lag the live API.
+
+This bounds normal accepted-click storage work to one DO row per press plus
+alarm/checkpoint bookkeeping, with no rate-bucket storage writes. Even the
+unbatched quiet case has roughly 60,000 DO row/alarm writes for 20,000 clicks;
+bursts require far fewer checkpoint writes. The 100-click test records only two
+D1 writes for 110 accepted clicks, including its quiet tail. See Cloudflare's
+[storage/request accounting](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+The click cap bounds successful mutations; rejected traffic, subscriptions,
+checkpoint failures, and other projects still consume shared infrastructure
+resources. These controls do not replace authentication or guarantee unlimited
+read/subscription traffic within the free allocation.
+
+## Interface and optimistic reconciliation
+
+The default page fills the screen with one formatted number, a large **PUSH**
+button, a small **LIVE** indicator, and “counted together.” Each press renders
+synchronously before sending. Displayed state is the ordered authoritative value
+plus the number of pending local intents, bounded by the largest safe integer.
+A matching accepted or rejected result removes that intent's optimistic
+contribution in the same render that applies the authoritative value. Remote
+increments preserve remaining local optimism. Acceptance and rejection therefore
+both reconcile without double-counting.
+
+The button remains responsive while acknowledgements are pending and retains
+keyboard focus. An excessive burst shows **Too fast**. Exhausting the budget
+shows **Daily limit reached** and disables **PUSH** while keeping **LIVE** reads
+and subscriptions. Default UI contains no infrastructure logs. Each changed
+displayed value briefly lifts the number and adds a restrained button ring,
+including remote updates; unchanged snapshots do not animate. Reduced motion
+suppresses effects and cancels active ones when preferences change. Keyboard,
+touch, focus rings, and mobile formatting remain supported.
+
+The initial authoritative snapshot must arrive before **LIVE** or enabled
+presses. Disconnections trigger bounded exponential backoff with jitter, showing
+**Reconnecting…** or **Offline · reconnecting…**. Already-sent intents are never
+resent. A snapshot replaces their optimism and shows “Couldn’t confirm that
+push” if acknowledgements were lost. Remaining unsent intents can then drain.
+An acknowledgement timeout (10 seconds) reconnects the subscription without
+replaying mutations. Page reload discards pending page-local state. This makes
+uncertainty visible when a click committed but its acknowledgement was lost.
+
+Append `?debug=1` to show a collapsible diagnostic overlay: WebSocket and
+synchronization state, reconnect count and delay, anonymous client, API origin,
+last authoritative value/time, pending/queued intents, DO persistence confirmation,
+D1 checkpoint and failure count, daily usage/reset time, accepted/rejected local
+presses, last rejection reason, server retry delay, socket close, and errors.
+Optimistic renders do not overwrite the authoritative diagnostic value/time.
+Technical diagnostics remain hidden in the normal layout.
 
 ## Deployment
 
@@ -180,34 +240,31 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-`npm test` uses the Workers runtime and real local D1 to check the migration,
-concurrent atomic increments, ordered WebSocket broadcasts to multiple clients,
-initial/reconnected snapshots, intent-correlated acknowledgements to every
-listener, invalid intent rejection before writes, closed listeners, read-only
-socket messages, persistence across Worker/object reinitialization, routing,
-and origin checks.
-It also checks provisioning with mocked Cloudflare API responses, including
-first creation, reuse, pagination, and failures. The dry run validates the
-Wrangler configuration and bundle. Applying local migrations twice validates
-Wrangler's migration history and verifies the second application is a no-op.
-The browser checks serve the built site under `/sandbox/` and use two independent
-browser contexts connected simultaneously to a real local Worker. They verify
-push in both directions without reload, concurrent clicks, reload persistence,
-reconnection with a delayed authoritative snapshot, disabled writes before
-synchronization, a committed increment with both acknowledgements lost, a delayed
-POST response after a newer broadcast, synchronous feedback on eight rapid
-presses, distinct queued intents, interleaved remote updates without
-double-counting,
-HTTP acceptance before its broadcast, lost HTTP responses confirmed through
-broadcasts, preservation of unsent presses after committed and uncommitted
-uncertain writes, late success/failure responses after reconnect, no repeated
-mutations or periodic HTTP reads, D1 agreement, backend recovery, and
-unconfigured preview behavior. They also check local/remote animation feedback, keyboard focus and Enter/Space input,
-mobile touch and landscape layout, formatting through the largest safe integer,
-reduced motion (including remote updates and preference changes), a minimal
-normal layout, and debug diagnostics for reconnects and errors. No check
-calls production. Local reinitialization verifies persistence; production
-hibernation and deployment are covered by the post-merge checks below.
+`npm test` exercises the production class in workerd with real local D1 and
+Durable Object SQLite. It covers 15 presses/sec, excessive bursts, ten clients
+sharing an IP, rotated IDs, private socket rejections, HTTP compatibility,
+concurrent HTTP/socket budget-boundary races, midnight resets, ordered per-click
+broadcasts, malformed messages, origin/method checks, initial D1 import, and
+recreation with unflushed clicks and an exhausted budget. Test-only subclass
+controls provide deterministic time and boundary state; no test routes ship in
+the Worker. A D1 trigger counts checkpoint writes, and DO row accounting checks
+that rate controls add no per-click persistent writes. Failure/recovery and
+repeated flushes check eventual, idempotent convergence. A separate real-alarm
+test checkpoints with no readers or connected clients. Provisioning tests use
+mocked Cloudflare responses, with no external writes.
+
+The dry run validates the Wrangler configuration/bundle. Applying local migrations
+twice verifies migration history and a no-op second application. Browser tests
+serve the built site under `/sandbox/` and connect independent browser contexts
+to a real local Worker. They cover synchronous eight-press optimism, interleaved
+remote updates, burst rejection rollback, daily-limit UI and pushed reset,
+uncommitted/committed lost acknowledgements without replay, reconnect snapshot
+gating, reload persistence, and eventual D1 agreement. They assert the frontend
+makes no HTTP backend reads or mutations and introduces no polling. Keyboard,
+focus, touch, responsive layouts, extreme value formatting, local/remote effects,
+reduced motion, debug visibility, unconfigured preview, and backend recovery
+remain covered. Local tests do not call production. Production lifecycle and
+publication checks remain pending below until deployment.
 
 For an interactive preview, apply the local migration and run `npm run dev` in
 the Worker directory. From the repository root, build the site and set the
@@ -226,7 +283,9 @@ from production.
 
 ## Required post-merge verification (pending)
 
-These checks require the main-branch deployment and remain pending until it runs:
+These checks require the main-branch deployment and remain pending until it runs.
+If importing D1 exhausts the rollout day's budget, verify read/subscription state
+immediately and perform press checks after the next UTC reset.
 
 1. Confirm the Pages workflow successfully provisions/reuses D1, applies remote
    migrations, deploys the Worker and Durable Object migration, and publishes Pages.
@@ -238,13 +297,14 @@ These checks require the main-branch deployment and remain pending until it runs
 3. Press eight times rapidly and confirm eight immediate local increments and
    eventual agreement between both clients and D1. Confirm the button remains
    responsive during network delay and reconnects never replay sent presses.
-   Confirm the document comes from GitHub Pages and the WebSocket and POST
-   requests go to the discovered
+   Confirm the document comes from GitHub Pages and the WebSocket handshake and
+   increment messages go to the discovered
    `sandbox-persistent-counter.<subdomain>.workers.dev` endpoint. Confirm an
    idle page has no periodic HTTP counter requests in the network panel.
 4. Confirm the Cloudflare Worker has `DB` and `COUNTER` bindings, the
    `Counter` class uses the Hibernation API, and the D1 `counter` row
-   agrees with the API. A read-only SQL query is sufficient:
+   converges to the API after a checkpoint flush (normally five seconds, with
+   runtime alarm delays possible). A read-only SQL query is sufficient:
    `SELECT value FROM counter WHERE id = 1`.
 5. Run the workflow again on `main` and confirm the database is reused, applied
    migrations are skipped, and the value survives redeployment. Leave clients
@@ -255,3 +315,9 @@ These checks require the main-branch deployment and remain pending until it runs
    local and remote increments visibly react. Check keyboard focus, a mobile
    viewport, and reduced motion. Open `?debug=1` and confirm live diagnostics
    appear, then return to the normal URL and confirm they are hidden.
+7. Confirm normal rapid presses remain responsive and `?debug=1` shows budget
+   usage, UTC reset time, rejection details, and eventual D1 checkpoint completion.
+   Verify the 20,000 boundary and automated/IP limits through the local tests; do
+   not exhaust the production daily budget for verification. If the production
+   budget is reached through normal use, confirm reads stay LIVE and the pushed
+   midnight reset re-enables PUSH.
