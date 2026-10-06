@@ -175,10 +175,14 @@ export class Counter extends DurableObject {
           return Response.json(result, { status: result.outcome === 'accepted' ? 200 : 429,
             headers: result.retryAfterMs ? { 'Retry-After': String(Math.ceil(result.retryAfterMs / 1000)) } : {} });
         }
+        const previousDay = this.state().day;
         const state = this.currentState();
         await this.schedule(state);
         await this.ctx.storage.sync();
         const snapshot = { type: 'snapshot', ...this.snapshot(state) };
+        // A read/subscription can precede the midnight alarm and cancel it.
+        // Push the persisted rollover so existing daily-limited pages unlock.
+        if (state.day !== previousDay) this.broadcast(snapshot);
         if (path === '/api/counter/ws') {
           const [client, server] = Object.values(new WebSocketPair());
           this.ctx.acceptWebSocket(server);

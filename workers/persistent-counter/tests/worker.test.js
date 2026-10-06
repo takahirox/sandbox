@@ -196,6 +196,59 @@ test('concurrent HTTP and socket intents stop exactly at 20,000; reads/subscript
   }
 });
 
+for (const trigger of ['read', 'subscription']) {
+  test(`${trigger} before the midnight alarm pushes the persisted daily reset to existing subscribers`, async () => {
+    const worker = createControlledWorker();
+    const subscriptions = [];
+    const midnight = Date.parse('2030-01-02T00:00:00Z');
+    try {
+      await migrate(worker);
+      const db = await worker.getD1Database('DB');
+      await db.prepare('UPDATE counter SET value = 50000 WHERE id = 1').run();
+      await control(worker, { now: future,
+        seed: { value: 50_000, day: '2030-01-01', used: 20_000 } });
+      const existing = await subscribe(worker);
+      subscriptions.push(existing);
+      await received(existing, 1);
+      assert.equal(existing.events[0].budget.used, 20_000);
+      assert.equal((await control(worker)).alarmAt, midnight);
+
+      const before = await control(worker, { now: midnight });
+      assert.equal(before.state.used, 20_000, 'Advancing the clock does not run the reset or alarm');
+      let snapshot;
+      if (trigger === 'read') {
+        const response = await request(worker);
+        assert.equal(response.status, 200);
+        snapshot = await response.json();
+      } else {
+        const fresh = await subscribe(worker);
+        subscriptions.push(fresh);
+        await received(fresh, 1);
+        snapshot = fresh.events[0];
+      }
+      assert.equal(snapshot.budget.day, '2030-01-02');
+      assert.equal(snapshot.budget.used, 0);
+      await received(existing, 2);
+      assert.deepEqual(existing.events[1], snapshot, 'Existing pages unlock without polling or an alarm');
+      const reset = await control(worker);
+      assert.equal(reset.state.day, '2030-01-02');
+      assert.equal(reset.state.used, 0);
+      assert.equal(reset.alarmAt, null);
+      assert.equal(reset.checkpointPending, false);
+
+      await request(worker);
+      assert.equal(existing.events.length, 2, 'Same-day reads do not broadcast another reset');
+      assert.equal((await increment(worker)).status, 200);
+      await received(existing, 3);
+      assert.equal(existing.events[2].budget.used, 1);
+      assert.equal(existing.events[2].value, 50_001);
+    } finally {
+      subscriptions.forEach(s => s.socket.close());
+      await worker.dispose();
+    }
+  });
+}
+
 test('D1 batches 100 clicks, absolute checkpoints are idempotent, and every acceptance broadcasts immediately', async () => {
   const worker = createControlledWorker();
   const subscriptions = [];

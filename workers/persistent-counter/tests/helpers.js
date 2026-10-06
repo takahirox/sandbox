@@ -63,7 +63,8 @@ export function createControlledWorker(options = {}) {
             await this.ctx.storage.sync();
           });
           if (command.alarm) await this.alarm();
-          return Response.json({ ...this.snapshot(), state: this.state(),
+          // Inspect persisted state without rolling the day before a real event.
+          return Response.json({ ...this.snapshot(this.state()), state: this.state(),
             alarmAt: await this.ctx.storage.getAlarm(),
             rateBuckets: this.buckets.size, persistedRowsWritten: this.persistedRowsWritten });
         }
