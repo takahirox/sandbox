@@ -87,10 +87,12 @@ export class Counter extends DurableObject {
   async acceptIntent(identity, intentId) {
     let result;
     let consumed;
+    let resetSnapshot;
     // The count, daily usage, and alarm are one durable transaction.
     // Gate the entire decision + send so parallel sockets/HTTP cannot overflow
     // the budget or reorder acknowledgements while awaiting persistence.
     await this.ctx.storage.transaction(async () => {
+      const previousDay = this.state().day;
       const state = this.currentState();
       const now = this.now();
       let reason;
@@ -123,11 +125,18 @@ export class Counter extends DurableObject {
       result = { type: 'incrementResult', outcome: reason ? 'rejected' : 'accepted',
         ...(intentId ? { intentId } : {}), ...this.snapshot(state),
         ...(reason ? { reason, retryAfterMs } : {}) };
+      if (reason && state.day !== previousDay) {
+        resetSnapshot = { type: 'snapshot', ...this.snapshot(state) };
+      }
     });
     await this.ctx.storage.sync();
     if (consumed) {
       for (const bucket of consumed) this.buckets.set(bucket.key, bucket);
       this.broadcast(result);
+    } else if (resetSnapshot) {
+      // A rejected intent can reset the day and cancel the midnight alarm.
+      // Push the persisted reset to all subscribers; keep the rejection private.
+      this.broadcast(resetSnapshot);
     }
     return result;
   }

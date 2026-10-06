@@ -249,6 +249,80 @@ for (const trigger of ['read', 'subscription']) {
   });
 }
 
+for (const transport of ['HTTP', 'WebSocket']) {
+  test(`rejected ${transport} intent before the midnight alarm pushes the persisted reset without broadcasting the rejection`, async () => {
+    const worker = createControlledWorker();
+    const subscriptions = [];
+    const midnight = Date.parse('2030-01-02T00:00:00Z');
+    try {
+      await migrate(worker);
+      await control(worker, { now: midnight - 10_000,
+        seed: { value: 50_000, day: '2030-01-01', used: 19_969 } });
+      const clientId = crypto.randomUUID();
+      const actor = await subscribe(worker, clientId);
+      const observer = await subscribe(worker);
+      subscriptions.push(actor, observer);
+      await Promise.all([received(actor, 1), received(observer, 1)]);
+      // Schedule a checkpoint before midnight, then exhaust a fully refilled
+      // client bucket and the daily budget just before the day changes.
+      assert.equal((await increment(worker, clientId)).status, 200);
+      await control(worker, { now: midnight - 1 });
+      for (let i = 0; i < 30; i++) {
+        assert.equal((await increment(worker, clientId)).status, 200);
+      }
+      const flushed = await control(worker, { alarm: true });
+      assert.equal(flushed.checkpointPending, false);
+      assert.equal(await checkpoint(worker), 50_031);
+      assert.equal(flushed.alarmAt, midnight);
+      await Promise.all([received(actor, 33), received(observer, 33)]);
+      assert.equal(observer.events.at(-1).budget.used, 20_000);
+
+      const before = await control(worker, { now: midnight });
+      assert.equal(before.state.used, 20_000, 'The midnight alarm has not run');
+      let intentId;
+      let rejection;
+      if (transport === 'HTTP') {
+        intentId = crypto.randomUUID();
+        const response = await request(worker, `/api/counter/increment?clientId=${clientId}`, 'POST',
+          { Origin: origin, 'CF-Connecting-IP': '192.0.2.1' }, intentId);
+        assert.equal(response.status, 429);
+        rejection = await response.json();
+        await received(actor, 34);
+      } else {
+        intentId = send(actor);
+        await received(actor, 35);
+        rejection = actor.events.at(-1);
+      }
+      assert.equal(rejection.intentId, intentId);
+      assert.equal(rejection.outcome, 'rejected');
+      assert.equal(rejection.reason, 'client_rate_limit');
+      assert.ok(rejection.retryAfterMs > 0);
+      assert.equal(rejection.budget.used, 0);
+      await received(observer, 34);
+      const snapshot = observer.events.at(-1);
+      assert.equal(snapshot.type, 'snapshot');
+      assert.equal(snapshot.value, 50_031, 'A rejected intent does not increment the count');
+      assert.equal(snapshot.budget.day, '2030-01-02');
+      assert.equal(snapshot.budget.used, 0, 'Daily-limited pages unlock without polling or an alarm');
+      assert.equal(snapshot.intentId, undefined, 'The triggering rejection remains private');
+      assert.equal(snapshot.outcome, undefined);
+      assert.deepEqual(actor.events[33], snapshot);
+      const reset = await control(worker);
+      assert.equal(reset.state.day, snapshot.budget.day);
+      assert.equal(reset.state.used, 0);
+      assert.equal(reset.alarmAt, null);
+      assert.equal(reset.checkpointPending, false);
+
+      assert.equal((await increment(worker, clientId)).status, 429);
+      await request(worker);
+      assert.equal(observer.events.length, 34, 'Same-day rejections and reads do not push another reset');
+    } finally {
+      subscriptions.forEach(s => s.socket.close());
+      await worker.dispose();
+    }
+  });
+}
+
 test('D1 batches 100 clicks, absolute checkpoints are idempotent, and every acceptance broadcasts immediately', async () => {
   const worker = createControlledWorker();
   const subscriptions = [];
