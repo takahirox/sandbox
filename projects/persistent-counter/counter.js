@@ -19,7 +19,20 @@ let synchronized = false;
 let authoritativeValue = null;
 const pending = new Map();
 const queue = [];
-let sending = null;
+let clientId = crypto.randomUUID();
+try {
+  const saved = localStorage.getItem('persistent-counter-client');
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(saved)) clientId = saved;
+  else localStorage.setItem('persistent-counter-client', clientId);
+} catch { /* A private/storage-disabled page still gets an anonymous identity. */ }
+let budget;
+let checkpoint;
+let checkpointFailures = 0;
+let acceptedCount = 0;
+let rejectedCount = 0;
+let lastRejection = 'None';
+let retryAfterMs = 0;
+let acknowledgementTimer;
 let retryTimer;
 let syncTimer;
 let failures = 0;
@@ -37,9 +50,17 @@ function updateDebug() {
     value: authoritativeValue === null ? 'None' : String(authoritativeValue),
     pending: String(pending.size),
     queued: String(queue.length),
-    write: sending ? 'Sending' : 'Idle',
+    write: pending.size ? 'Awaiting acknowledgement' : 'Idle',
     update: lastUpdate || 'None',
-    backend: authoritativeValue === null ? 'Not confirmed' : 'Authoritative D1 value received'
+    backend: authoritativeValue === null ? 'Not confirmed' : 'Persisted Durable Object value received',
+    client: clientId,
+    budget: budget ? `${budget.used} / ${budget.limit} (${budget.day} UTC)` : 'Unknown',
+    reset: budget ? new Date(budget.resetAt).toISOString() : 'Unknown',
+    checkpoint: checkpoint === undefined ? 'Unknown' : `${checkpoint} (${checkpoint === authoritativeValue ? 'current' : 'pending'}; ${checkpointFailures} failures)`,
+    accepted: String(acceptedCount),
+    rejected: String(rejectedCount),
+    reason: lastRejection,
+    throttle: `${retryAfterMs} ms`
   };
   for (const [key, value] of Object.entries(fields)) {
     document.querySelector(`#debug-${key}`).textContent = value;
@@ -91,9 +112,10 @@ function showValue(value) {
 }
 
 function updateButton() {
-  increment.disabled = !synchronized;
-  increment.setAttribute('aria-disabled', String(!synchronized));
-  increment.setAttribute('aria-busy', String(pending.size > 0 || Boolean(sending)));
+  const disabled = !synchronized || budget?.used >= budget?.limit;
+  increment.disabled = disabled;
+  increment.setAttribute('aria-disabled', String(disabled));
+  increment.setAttribute('aria-busy', String(pending.size > 0));
 }
 
 function render() {
@@ -107,49 +129,43 @@ function unconfirmedPush() {
   notice.hidden = false;
 }
 
-async function sendNext() {
-  if (sending || !synchronized || stopped || !queue.length) return;
-  const intent = queue.shift();
-  sending = intent;
-  intent.sent = true;
-  const requestSocket = socket;
+function awaitAcknowledgements() {
+  clearTimeout(acknowledgementTimer);
+  const oldest = Array.from(pending.values()).find(intent => intent.sent);
+  if (!oldest || !synchronized) return;
+  const current = socket;
+  acknowledgementTimer = setTimeout(() => {
+    if (socket !== current || !synchronized) return;
+    recordError('Timed out waiting for a push acknowledgement; no mutation retry.');
+    unconfirmedPush();
+    synchronized = false;
+    updateButton();
+    setConnection('reconnecting', 'Reconnecting…');
+    current.close();
+  }, Math.max(0, oldest.sentAt + 10_000 - Date.now()));
+}
+
+function sendNext() {
+  if (!synchronized || stopped || socket?.readyState !== WebSocket.OPEN) return;
+  while (queue.length) {
+    const intent = queue.shift();
+    // Once a send is attempted, never replay it, including after a timeout or
+    // reconnect. A new authoritative snapshot resolves uncertain optimism.
+    intent.sent = true;
+    intent.sentAt = Date.now();
+    try {
+      socket.send(JSON.stringify({ type: 'increment', intentId: intent.id }));
+    } catch (error) {
+      recordError(`Could not send push: ${error.message}; no mutation retry.`);
+      unconfirmedPush();
+      synchronized = false;
+      socket.close();
+      break;
+    }
+  }
   updateButton();
   updateDebug();
-  try {
-    const response = await fetch(`${apiUrl}/api/counter/increment`, {
-      method: 'POST', body: intent.id, cache: 'no-store', credentials: 'omit',
-      signal: AbortSignal.timeout(10_000)
-    });
-    if (!response.ok) throw new Error(`Counter request failed (HTTP ${response.status})`);
-    const { value, intentId } = await response.json();
-    if (!Number.isSafeInteger(value) || value < 0 || intentId !== intent.id) {
-      throw new Error('Invalid increment acknowledgement');
-    }
-    intent.confirmed = true;
-    intent.acceptedValue = value;
-    // HTTP acknowledges acceptance, but never overwrites the ordered stream.
-    if (authoritativeValue >= value) pending.delete(intent.id);
-  } catch (error) {
-    recordError(intent.confirmed
-      ? `HTTP response failed: ${error.message}. Acceptance confirmed by authoritative broadcast; no mutation retry.`
-      : `Could not confirm the increment: ${error.message}. It may have been saved; no mutation retry.`);
-    // A matching committed broadcast is sufficient even if HTTP fails.
-    if (!intent.confirmed) {
-      pending.delete(intent.id);
-      unconfirmedPush();
-      if (socket === requestSocket) {
-        synchronized = false;
-        setConnection('reconnecting', 'Reconnecting…');
-        socket?.close();
-      }
-    }
-  } finally {
-    sending = null;
-    if (synchronized) render();
-    else updateButton();
-    updateDebug();
-    void sendNext();
-  }
+  awaitAcknowledgements();
 }
 
 function connect() {
@@ -161,6 +177,7 @@ function connect() {
   nextRetry = 'None';
   const url = new URL('/api/counter/ws', apiUrl);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.searchParams.set('clientId', clientId);
   const current = new WebSocket(url);
   socket = current;
   setConnection('connecting', failures ? 'Reconnecting…' : 'Connecting…');
@@ -175,31 +192,48 @@ function connect() {
   current.addEventListener('message', event => {
     if (socket !== current || stopped || current.readyState !== WebSocket.OPEN) return;
     try {
-      const { value, intentId } = JSON.parse(event.data);
-      if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid counter');
+      const message = JSON.parse(event.data);
+      const { value, intentId, outcome } = message;
+      if (!Number.isSafeInteger(value) || value < 0
+          || !message.budget || !Number.isSafeInteger(message.budget.used)
+          || message.budget.used < 0 || message.budget.used > message.budget.limit
+          || !Number.isSafeInteger(message.budget.limit) || message.budget.limit <= 0
+          || !Number.isFinite(message.budget.resetAt)
+          || !['snapshot', 'incrementResult'].includes(message.type)
+          || (message.type === 'incrementResult' && !['accepted', 'rejected'].includes(outcome))) {
+        throw new Error('Invalid counter');
+      }
       if (!synchronized) {
-        // A new snapshot replaces sent optimism, never replays it. Unsent
-        // intents remain queued and resume once this subscription is live.
         for (const [id, intent] of pending) {
           if (intent.sent) {
-            if (!intent.confirmed) {
-              recordError('Reconnected with an unconfirmed sent increment; reconciled from D1, no mutation retry.');
-              unconfirmedPush();
-            }
+            recordError('Reconnected with an unconfirmed sent increment; reconciled from Durable Object storage, no mutation retry.');
+            unconfirmedPush();
             pending.delete(id);
           }
         }
       }
-      // Keep recognizing an in-flight acknowledgement even if a reconnect
-      // snapshot has already replaced that intent's optimistic contribution.
-      const accepted = pending.get(intentId) || (sending?.id === intentId ? sending : null);
-      if (accepted?.sent) {
-        accepted.confirmed = true;
+      const local = pending.get(intentId);
+      if (local?.sent) {
         pending.delete(intentId);
+        if (outcome === 'accepted') {
+          acceptedCount++;
+          notice.hidden = true;
+        } else {
+          rejectedCount++;
+          lastRejection = message.reason;
+          retryAfterMs = message.retryAfterMs;
+          notice.textContent = message.reason === 'daily_limit' ? 'Daily limit reached'
+            : message.reason === 'counter_full' ? 'Counter full' : 'Too fast';
+          notice.hidden = false;
+        }
       }
-      for (const [id, intent] of pending) {
-        if (intent.acceptedValue !== undefined && intent.acceptedValue <= value) pending.delete(id);
-      }
+      budget = message.budget;
+      checkpoint = message.checkpoint;
+      checkpointFailures = message.checkpointFailures;
+      if (budget.used >= budget.limit) {
+        notice.textContent = 'Daily limit reached';
+        notice.hidden = false;
+      } else if (notice.textContent === 'Daily limit reached') notice.hidden = true;
       authoritativeValue = value;
       lastUpdate = new Date().toISOString();
       synchronized = true;
@@ -207,7 +241,8 @@ function connect() {
       failures = 0;
       clearTimeout(syncTimer);
       setConnection('live', 'LIVE');
-      void sendNext();
+      sendNext();
+      awaitAcknowledgements();
     } catch (error) {
       recordError(`Invalid WebSocket update: ${error.message}`);
       synchronized = false;
@@ -224,6 +259,7 @@ function connect() {
   current.addEventListener('close', event => {
     if (socket !== current || stopped) return;
     clearTimeout(syncTimer);
+    clearTimeout(acknowledgementTimer);
     synchronized = false;
     updateButton();
     failures++;
@@ -238,17 +274,17 @@ function connect() {
 }
 
 increment.addEventListener('click', () => {
-  if (!synchronized || stopped) return;
+  if (!synchronized || stopped || increment.disabled) return;
   animate(increment, [
     { transform: 'translateY(6px)' },
     { transform: 'translateY(0)' }
   ], 160);
-  const intent = { id: crypto.randomUUID(), sent: false, confirmed: false };
+  const intent = { id: crypto.randomUUID(), sent: false };
   pending.set(intent.id, intent);
   queue.push(intent);
   notice.hidden = true;
   render();
-  void sendNext();
+  sendNext();
 });
 
 window.addEventListener('online', () => {
@@ -266,6 +302,7 @@ window.addEventListener('pagehide', () => {
   synchronized = false;
   clearTimeout(retryTimer);
   clearTimeout(syncTimer);
+  clearTimeout(acknowledgementTimer);
   socket?.close();
   updateButton();
   updateDebug();
