@@ -4,11 +4,23 @@ import { DurableObject } from 'cloudflare:workers';
 // never a second persisted counter or an in-memory cache of its value.
 export class Counter extends DurableObject {
   async fetch(request) {
+    const path = new URL(request.url).pathname;
+    let intentId;
+    if (path === '/api/counter/increment') {
+      // Plain text keeps this a simple CORS POST. Empty bodies remain compatible
+      // with existing API clients; identifiers correlate broadcasts, not retries.
+      const body = await request.text();
+      if (body) {
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body)) {
+          return Response.json({ error: 'Invalid increment intent' }, { status: 400 });
+        }
+        intentId = body;
+      }
+    }
     // D1 awaits do not use Durable Object storage's automatic input gates.
     // Gate the entire read/write + send so snapshots and broadcasts cannot race.
     return this.ctx.blockConcurrencyWhile(async () => {
       try {
-        const path = new URL(request.url).pathname;
         const db = this.env.DB.withSession('first-primary');
         const result = await db.prepare(path === '/api/counter/increment'
           ? 'UPDATE counter SET value = value + 1 WHERE id = 1 RETURNING value'
@@ -17,7 +29,8 @@ export class Counter extends DurableObject {
         if (!result || !Number.isSafeInteger(result.value) || result.value < 0) {
           throw new Error('Invalid counter');
         }
-        const message = JSON.stringify({ value: result.value });
+        const acknowledgement = intentId ? { value: result.value, intentId } : result;
+        const message = JSON.stringify(acknowledgement);
         if (path === '/api/counter/ws') {
           const [client, server] = Object.values(new WebSocketPair());
           this.ctx.acceptWebSocket(server);
@@ -35,7 +48,7 @@ export class Counter extends DurableObject {
             }
           }
         }
-        return Response.json(result);
+        return Response.json(acknowledgement);
       } catch {
         return Response.json({ error: 'Counter unavailable' }, { status: 503 });
       }

@@ -6,8 +6,8 @@ import test from 'node:test';
 import { config, createWorker, migrate } from './helpers.js';
 
 const origin = config.vars.ALLOWED_ORIGIN;
-const request = (worker, path = '/api/counter', method = 'GET', headers = { Origin: origin }) =>
-  worker.dispatchFetch(`https://counter.test${path}`, { method, headers });
+const request = (worker, path = '/api/counter', method = 'GET', headers = { Origin: origin }, body) =>
+  worker.dispatchFetch(`https://counter.test${path}`, { method, headers, body });
 
 test('migration, atomic increments, reload, and restart preserve one shared counter', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'counter-'));
@@ -83,9 +83,14 @@ async function subscribe(worker) {
   assert.equal(response.status, 101);
   const socket = response.webSocket;
   const messages = [];
-  socket.addEventListener('message', event => messages.push(JSON.parse(event.data).value));
+  const events = [];
+  socket.addEventListener('message', event => {
+    const update = JSON.parse(event.data);
+    messages.push(update.value);
+    events.push(update);
+  });
   socket.accept();
-  return { socket, messages };
+  return { socket, messages, events };
 }
 
 async function received(subscription, length) {
@@ -176,6 +181,44 @@ test('socket messages cannot mutate the counter and a closed listener does not b
     assert.deepEqual(await received(listener, 2), [0, 1]);
     listener.socket.close();
   } finally {
+    await worker.dispose();
+  }
+});
+
+
+test('increment intents are acknowledged with their committed value to all listeners; invalid intents never write', async () => {
+  const worker = createWorker();
+  const subscriptions = [];
+  try {
+    await migrate(worker);
+    const first = await subscribe(worker);
+    const second = await subscribe(worker);
+    subscriptions.push(first, second);
+    await Promise.all([received(first, 1), received(second, 1)]);
+    const intentIds = Array.from({ length: 8 }, () => crypto.randomUUID());
+    for (const [index, intentId] of intentIds.entries()) {
+      const response = await request(worker, '/api/counter/increment', 'POST',
+        { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8' }, intentId);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+      assert.deepEqual(await response.json(), { value: index + 1, intentId });
+    }
+    await Promise.all([received(first, 9), received(second, 9)]);
+    const expected = [{ value: 0 }, ...intentIds.map((intentId, index) => ({ value: index + 1, intentId }))];
+    assert.deepEqual(first.events, expected);
+    assert.deepEqual(second.events, expected);
+    for (const body of ['not-an-intent', JSON.stringify({ intentId: intentIds[0] }), 'a'.repeat(100)]) {
+      const response = await request(worker, '/api/counter/increment', 'POST', { Origin: origin }, body);
+      assert.equal(response.status, 400);
+      assert.deepEqual(await response.json(), { error: 'Invalid increment intent' });
+    }
+    assert.deepEqual(await (await request(worker)).json(), { value: 8 });
+    const reconnected = await subscribe(worker);
+    subscriptions.push(reconnected);
+    await received(reconnected, 1);
+    assert.deepEqual(reconnected.events, [{ value: 8 }], 'Snapshot is current state, never a replayed acknowledgement');
+  } finally {
+    for (const { socket } of subscriptions) socket.close();
     await worker.dispose();
   }
 });
