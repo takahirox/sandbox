@@ -16,7 +16,10 @@ let lastClose = 'None';
 let apiUrl;
 let socket;
 let synchronized = false;
-let saving = false;
+let authoritativeValue = null;
+const pending = new Map();
+const queue = [];
+let sending = null;
 let retryTimer;
 let syncTimer;
 let failures = 0;
@@ -31,9 +34,12 @@ function updateDebug() {
     retries: String(reconnectAttempts),
     retry: nextRetry,
     api: apiUrl || 'Not configured',
-    value: lastValue === null ? 'None' : String(lastValue),
+    value: authoritativeValue === null ? 'None' : String(authoritativeValue),
+    pending: String(pending.size),
+    queued: String(queue.length),
+    write: sending ? 'Sending' : 'Idle',
     update: lastUpdate || 'None',
-    backend: lastValue === null ? 'Not confirmed' : 'Authoritative D1 value received'
+    backend: authoritativeValue === null ? 'Not confirmed' : 'Authoritative D1 value received'
   };
   for (const [key, value] of Object.entries(fields)) {
     document.querySelector(`#debug-${key}`).textContent = value;
@@ -82,15 +88,68 @@ function showValue(value) {
     ], 450);
   }
   lastValue = value;
-  lastUpdate = new Date().toISOString();
 }
 
 function updateButton() {
   increment.disabled = !synchronized;
-  // Keep keyboard focus while a write is pending; the click guard below and
-  // aria-disabled prevent duplicate submissions without removing focus.
-  increment.setAttribute('aria-disabled', String(!synchronized || saving));
-  increment.setAttribute('aria-busy', String(saving));
+  increment.setAttribute('aria-disabled', String(!synchronized));
+  increment.setAttribute('aria-busy', String(pending.size > 0 || Boolean(sending)));
+}
+
+function render() {
+  showValue(Math.min(Number.MAX_SAFE_INTEGER, authoritativeValue + pending.size));
+  updateButton();
+  updateDebug();
+}
+
+function unconfirmedPush() {
+  notice.textContent = 'Couldn’t confirm that push.';
+  notice.hidden = false;
+}
+
+async function sendNext() {
+  if (sending || !synchronized || stopped || !queue.length) return;
+  const intent = queue.shift();
+  sending = intent;
+  intent.sent = true;
+  const requestSocket = socket;
+  updateButton();
+  updateDebug();
+  try {
+    const response = await fetch(`${apiUrl}/api/counter/increment`, {
+      method: 'POST', body: intent.id, cache: 'no-store', credentials: 'omit',
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!response.ok) throw new Error(`Counter request failed (HTTP ${response.status})`);
+    const { value, intentId } = await response.json();
+    if (!Number.isSafeInteger(value) || value < 0 || intentId !== intent.id) {
+      throw new Error('Invalid increment acknowledgement');
+    }
+    intent.confirmed = true;
+    intent.acceptedValue = value;
+    // HTTP acknowledges acceptance, but never overwrites the ordered stream.
+    if (authoritativeValue >= value) pending.delete(intent.id);
+  } catch (error) {
+    recordError(intent.confirmed
+      ? `HTTP response failed: ${error.message}. Acceptance confirmed by authoritative broadcast; no mutation retry.`
+      : `Could not confirm the increment: ${error.message}. It may have been saved; no mutation retry.`);
+    // A matching committed broadcast is sufficient even if HTTP fails.
+    if (!intent.confirmed) {
+      pending.delete(intent.id);
+      unconfirmedPush();
+      if (socket === requestSocket) {
+        synchronized = false;
+        setConnection('reconnecting', 'Reconnecting…');
+        socket?.close();
+      }
+    }
+  } finally {
+    sending = null;
+    if (synchronized) render();
+    else updateButton();
+    updateDebug();
+    void sendNext();
+  }
 }
 
 function connect() {
@@ -114,16 +173,41 @@ function connect() {
     current.close();
   }, 10_000);
   current.addEventListener('message', event => {
-    if (socket !== current) return;
+    if (socket !== current || stopped || current.readyState !== WebSocket.OPEN) return;
     try {
-      const { value } = JSON.parse(event.data);
+      const { value, intentId } = JSON.parse(event.data);
       if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid counter');
-      showValue(value);
+      if (!synchronized) {
+        // A new snapshot replaces sent optimism, never replays it. Unsent
+        // intents remain queued and resume once this subscription is live.
+        for (const [id, intent] of pending) {
+          if (intent.sent) {
+            if (!intent.confirmed) {
+              recordError('Reconnected with an unconfirmed sent increment; reconciled from D1, no mutation retry.');
+              unconfirmedPush();
+            }
+            pending.delete(id);
+          }
+        }
+      }
+      // Keep recognizing an in-flight acknowledgement even if a reconnect
+      // snapshot has already replaced that intent's optimistic contribution.
+      const accepted = pending.get(intentId) || (sending?.id === intentId ? sending : null);
+      if (accepted?.sent) {
+        accepted.confirmed = true;
+        pending.delete(intentId);
+      }
+      for (const [id, intent] of pending) {
+        if (intent.acceptedValue !== undefined && intent.acceptedValue <= value) pending.delete(id);
+      }
+      authoritativeValue = value;
+      lastUpdate = new Date().toISOString();
       synchronized = true;
+      render();
       failures = 0;
       clearTimeout(syncTimer);
       setConnection('live', 'LIVE');
-      updateButton();
+      void sendNext();
     } catch (error) {
       recordError(`Invalid WebSocket update: ${error.message}`);
       synchronized = false;
@@ -153,35 +237,18 @@ function connect() {
   });
 }
 
-increment.addEventListener('click', async () => {
-  if (!synchronized || saving) return;
+increment.addEventListener('click', () => {
+  if (!synchronized || stopped) return;
   animate(increment, [
     { transform: 'translateY(6px)' },
     { transform: 'translateY(0)' }
   ], 160);
-  saving = true;
-  updateButton();
+  const intent = { id: crypto.randomUUID(), sent: false, confirmed: false };
+  pending.set(intent.id, intent);
+  queue.push(intent);
   notice.hidden = true;
-  try {
-    const response = await fetch(`${apiUrl}/api/counter/increment`, {
-      method: 'POST', cache: 'no-store', credentials: 'omit', signal: AbortSignal.timeout(10_000)
-    });
-    if (!response.ok) throw new Error(`Counter request failed (HTTP ${response.status})`);
-    const { value } = await response.json();
-    if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid counter');
-    // Display values only from the ordered push stream; a POST response could
-    // arrive after a newer broadcast and must not overwrite it.
-  } catch (error) {
-    recordError(`Could not confirm the increment: ${error.message}. It may have been saved; no mutation retry.`);
-    notice.textContent = 'Couldn’t confirm that push.';
-    notice.hidden = false;
-    synchronized = false;
-    setConnection('reconnecting', 'Reconnecting…');
-    socket?.close();
-  } finally {
-    saving = false;
-    updateButton();
-  }
+  render();
+  void sendNext();
 });
 
 window.addEventListener('online', () => {

@@ -83,6 +83,13 @@ test('two independent browsers receive push, concurrent increments, reload and r
         if (request.url().startsWith(f.apiUrl)) requests.push({ url: request.url(), method: request.method() });
       });
     }
+    let pageRoute;
+    let dropBroadcast = false;
+    await page.routeWebSocket(`${f.apiUrl.replace('http:', 'ws:')}/api/counter/ws`, ws => {
+      pageRoute = ws;
+      const server = ws.connectToServer();
+      server.onMessage(message => { if (!dropBroadcast || !JSON.parse(message).intentId) ws.send(message); });
+    });
     let reconnectRoute;
     let reconnectServer;
     let heldSnapshot;
@@ -135,6 +142,7 @@ test('two independent browsers receive push, concurrent increments, reload and r
     // A's committed POST loses its response. Both browsers must see the saved
     // value and the reconnect must not repeat that increment.
     let attempts = 0;
+    dropBroadcast = true;
     await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
       attempts++;
       const response = await route.fetch();
@@ -143,9 +151,11 @@ test('two independent browsers receive push, concurrent increments, reload and r
     });
     await button(page).click();
     await page.waitForFunction(() => !document.querySelector('#notice').hidden);
+    await pageRoute.close({ code: 1012, reason: 'Finish intercepted close handshake' });
     assert.equal(await page.locator('#debug').isVisible(), false);
     await Promise.all([valueIs(page, 6), valueIs(other, 6), connected(page)]);
     await page.unrouteAll();
+    dropBroadcast = false;
 
     // A delayed POST response must not overwrite a newer pushed value.
     let releaseResponse;
@@ -163,12 +173,14 @@ test('two independent browsers receive push, concurrent increments, reload and r
     assert.equal(await button(page).evaluate(element => document.activeElement === element), true,
       'A pending write must retain keyboard focus');
     await page.keyboard.press('Enter');
-    assert.equal(requests.length, pendingRequestCount, 'Keyboard input during a pending write must not submit again');
+    assert.equal(requests.length, pendingRequestCount, 'The next intent waits in the POST queue');
+    await valueIs(page, 8);
     await valueIs(other, 7);
     await button(other).click();
-    await Promise.all([valueIs(page, 8), valueIs(other, 8)]);
+    await Promise.all([valueIs(page, 9), valueIs(other, 8)]);
     releaseResponse();
-    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-disabled') === 'false');
+    await Promise.all([valueIs(page, 9), valueIs(other, 9)]);
+    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-busy') === 'false');
     await page.unrouteAll();
     const requestCount = requests.length;
     await new Promise(resolve => setTimeout(resolve, 1500));
@@ -176,15 +188,246 @@ test('two independent browsers receive push, concurrent increments, reload and r
     assert.equal(attempts, 1, 'An uncertain mutation must not be replayed');
     assert.ok(requests.every(request => request.method === 'POST' && request.url.endsWith('/api/counter/increment')),
       'The frontend must use WebSocket snapshots, never GET counter requests');
-    assert.equal(requests.length, 8, 'Exactly one POST per user click');
-    assert.equal(await page.locator('#counter').textContent(), '8');
+    assert.equal(requests.length, 9, 'Exactly one POST per user click, including input while saving');
+    assert.equal(await page.locator('#counter').textContent(), '9');
     const db = await f.worker.getD1Database('DB');
-    assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: 8 });
+    assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: 9 });
     assert.deepEqual(errors, []);
   } finally {
     await f.close();
   }
 });
+
+test('eight rapid presses render synchronously and reconcile remote and matching broadcasts without double-counting', { timeout: 20_000 }, async () => {
+  const f = await fixture();
+  let release;
+  try {
+    const page = await f.browser.newPage();
+    const other = await f.browser.newPage();
+    const intents = [];
+    const held = new Promise(resolve => { release = resolve; });
+    await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
+      intents.push(route.request().postData());
+      if (intents.length === 1) await held;
+      await route.continue();
+    });
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+    await other.goto(`${f.origin}/sandbox/projects/persistent-counter/`);
+    await Promise.all([connected(page), connected(other)]);
+    const immediateValues = await page.evaluate(() => {
+      const values = [];
+      for (let i = 0; i < 8; i++) {
+        document.querySelector('#increment').click();
+        values.push(document.querySelector('#counter').textContent);
+      }
+      window.displayedValues = [];
+      new MutationObserver(() => window.displayedValues.push(document.querySelector('#counter').textContent))
+        .observe(document.querySelector('#counter'), { childList: true });
+      return values;
+    });
+    assert.deepEqual(immediateValues, ['1', '2', '3', '4', '5', '6', '7', '8']);
+    assert.equal(await button(page).isEnabled(), true);
+    assert.equal(await button(page).getAttribute('aria-disabled'), 'false');
+    assert.equal(await button(page).getAttribute('aria-busy'), 'true');
+    assert.equal(await page.locator('#debug-value').textContent(), '0');
+    assert.equal(await page.locator('#debug-pending').textContent(), '8');
+    assert.equal(await page.locator('#debug-queued').textContent(), '7');
+    await valueIs(other, 0);
+    await button(other).click();
+    await Promise.all([valueIs(page, 9), valueIs(other, 1)]);
+    release();
+    await Promise.all([valueIs(page, 9), valueIs(other, 9)]);
+    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-busy') === 'false');
+    assert.equal(intents.length, 8);
+    assert.equal(new Set(intents).size, 8, 'Each press has its own increment intent');
+    assert.equal(await page.locator('#debug-value').textContent(), '9');
+    assert.equal(await page.locator('#debug-pending').textContent(), '0');
+    assert.equal(await page.locator('#debug-queued').textContent(), '0');
+    assert.ok((await page.evaluate(() => window.displayedValues)).every(value => value === '9'),
+      'Acknowledging local optimism must neither double-count nor flicker down');
+    const db = await f.worker.getD1Database('DB');
+    assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: 9 });
+  } finally {
+    release?.();
+    await f.close();
+  }
+});
+
+test('HTTP acceptance before its broadcast retains optimism until the ordered stream catches up', { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    const page = await f.browser.newPage();
+    let socketRoute;
+    const broadcasts = [];
+    await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+    await page.routeWebSocket(`${f.apiUrl.replace('http:', 'ws:')}/api/counter/ws`, ws => {
+      socketRoute = ws;
+      const server = ws.connectToServer();
+      server.onMessage(message => {
+        if (JSON.parse(message).value === 0) ws.send(message);
+        else broadcasts.push(message);
+      });
+    });
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+    await connected(page);
+    const acknowledgement = page.waitForResponse(response => response.url() === `${f.apiUrl}/api/counter/increment`);
+    await button(page).click();
+    await (await acknowledgement).finished();
+    await page.waitForFunction(() => document.querySelector('#debug-write').textContent === 'Idle');
+    assert.equal(await page.locator('#debug-value').textContent(), '0');
+    assert.equal(await page.locator('#debug-pending').textContent(), '1');
+    await valueIs(page, 1);
+    assert.equal(broadcasts.length, 1);
+    socketRoute.send(broadcasts[0]);
+    await page.waitForFunction(() => document.querySelector('#debug-pending').textContent === '0');
+    await valueIs(page, 1);
+    assert.equal(await page.locator('#debug-value').textContent(), '1');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const committed of [false, true]) {
+  test(`an uncertain ${committed ? 'committed' : 'uncommitted'} press is never retried and seven unsent presses survive reconnection`, { timeout: 20_000 }, async () => {
+    const f = await fixture();
+    let release;
+    try {
+      const page = await f.browser.newPage();
+      const other = await f.browser.newPage();
+      const intents = [];
+      const held = new Promise(resolve => { release = resolve; });
+      let socketRoute;
+      await page.routeWebSocket(`${f.apiUrl.replace('http:', 'ws:')}/api/counter/ws`, ws => {
+        socketRoute = ws;
+        const server = ws.connectToServer();
+        server.onMessage(message => {
+          const { intentId } = JSON.parse(message);
+          if (!intentId || intentId !== intents[0]) ws.send(message);
+        });
+      });
+      await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
+        intents.push(route.request().postData());
+        if (intents.length === 1) {
+          await held;
+          if (committed) assert.equal((await route.fetch()).status(), 200);
+          await route.abort();
+        } else await route.continue();
+      });
+      await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+      await other.goto(`${f.origin}/sandbox/projects/persistent-counter/`);
+      await Promise.all([connected(page), connected(other)]);
+      await page.evaluate(() => {
+        for (let i = 0; i < 8; i++) document.querySelector('#increment').click();
+      });
+      await valueIs(page, 8);
+      release();
+      await page.waitForFunction(() => !document.querySelector('#notice').hidden);
+      await socketRoute.close({ code: 1012, reason: 'Finish intercepted close handshake' });
+      const expected = committed ? 8 : 7;
+      await Promise.all([valueIs(page, expected), valueIs(other, expected), connected(page)]);
+      await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-busy') === 'false');
+      assert.equal(intents.length, 8);
+      assert.equal(new Set(intents).size, 8, 'Reconnecting must never resend a sent intent');
+      assert.equal(await page.locator('#debug-pending').textContent(), '0');
+      assert.equal(await page.locator('#debug-queued').textContent(), '0');
+      assert.match(await page.locator('#status').textContent(), /no mutation retry/);
+      const db = await f.worker.getD1Database('DB');
+      assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: expected });
+    } finally {
+      release?.();
+      await f.close();
+    }
+  });
+}
+
+test('a committed broadcast confirms a press even when its HTTP response is lost', { timeout: 15_000 }, async () => {
+  const f = await fixture();
+  try {
+    const page = await f.browser.newPage();
+    let attempts = 0;
+    let subscriptions = 0;
+    page.on('websocket', () => subscriptions++);
+    await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
+      attempts++;
+      const response = await route.fetch();
+      assert.equal(response.status(), 200);
+      const { value } = await response.json();
+      await page.waitForFunction(expected => Number(document.querySelector('#debug-value').textContent) >= expected, value);
+      await route.abort();
+    });
+    await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+    await connected(page);
+    await page.evaluate(() => {
+      for (let i = 0; i < 8; i++) document.querySelector('#increment').click();
+    });
+    // Hold each HTTP response until its matching broadcast has reconciled the
+    // current intent (remaining queued optimism is still present).
+    await valueIs(page, 8);
+    await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-busy') === 'false');
+    assert.equal(attempts, 8);
+    assert.equal(subscriptions, 1);
+    assert.equal(await page.locator('#notice').isVisible(), false);
+    const db = await f.worker.getD1Database('DB');
+    assert.deepEqual(await db.prepare('SELECT value FROM counter WHERE id = 1').first(), { value: 8 });
+  } finally {
+    await f.close();
+  }
+});
+
+for (const lateSuccess of [false, true]) {
+  test(`a late HTTP ${lateSuccess ? 'success' : 'failure'} after reconnect cannot replay a press or close the new subscription`, { timeout: 15_000 }, async () => {
+    const f = await fixture();
+    let release;
+    try {
+      const page = await f.browser.newPage();
+      const other = await f.browser.newPage();
+      const held = new Promise(resolve => { release = resolve; });
+      const intents = [];
+      let socketRoute;
+      let subscriptions = 0;
+      await page.routeWebSocket(`${f.apiUrl.replace('http:', 'ws:')}/api/counter/ws`, ws => {
+        socketRoute = ws;
+        subscriptions++;
+        ws.connectToServer();
+      });
+      await page.route(`${f.apiUrl}/api/counter/increment`, async route => {
+        intents.push(route.request().postData());
+        if (intents.length === 1) {
+          await held;
+          if (!lateSuccess) { await route.abort(); return; }
+        }
+        await route.continue();
+      });
+      await page.goto(`${f.origin}/sandbox/projects/persistent-counter/?debug=1`);
+      await other.goto(`${f.origin}/sandbox/projects/persistent-counter/`);
+      await Promise.all([connected(page), connected(other)]);
+      await page.evaluate(() => {
+        for (let i = 0; i < 8; i++) document.querySelector('#increment').click();
+      });
+      await valueIs(page, 8);
+      await socketRoute.close({ code: 1012, reason: 'Disconnect during an in-flight POST' });
+      await page.waitForFunction(() => document.querySelector('#debug-retries').textContent === '1');
+      await connected(page);
+      await valueIs(page, 7);
+      assert.equal(await page.locator('#debug-queued').textContent(), '7');
+      assert.equal(await page.locator('#notice').isVisible(), true);
+      release();
+      const expected = lateSuccess ? 8 : 7;
+      await Promise.all([valueIs(page, expected), valueIs(other, expected)]);
+      await page.waitForFunction(() => document.querySelector('#increment').getAttribute('aria-busy') === 'false');
+      assert.equal(intents.length, 8);
+      assert.equal(new Set(intents).size, 8);
+      assert.equal(subscriptions, 2, 'An old response must not reconnect the healthy subscription');
+      await connected(page);
+    } finally {
+      release?.();
+      await f.close();
+    }
+  });
+}
 
 test('keyboard and touch work on responsive layouts, large counts fit, and reduced motion skips feedback animations', { timeout: 20_000 }, async () => {
   const f = await fixture();

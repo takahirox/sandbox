@@ -4,18 +4,21 @@ The [demo](https://takahirox.github.io/sandbox/projects/persistent-counter/)
 is plain HTML/JavaScript served by the existing GitHub Pages build. Every open
 page subscribes to `GET /api/counter/ws` using a WebSocket. A single named
 Durable Object (`shared-counter` in the `COUNTER` binding) coordinates all
-subscriptions, reads, and increments. Pressing **PUSH** sends one
-`POST /api/counter/increment`; after D1 commits, the object broadcasts `{ value }`
-to every connected browser. No reload or polling is needed to see another
-visitor's increment. `GET /api/counter` remains available for one-off API reads;
+subscriptions, reads, and increments. Pressing **PUSH** immediately adds one to
+the local display and queues one `POST /api/counter/increment`. Each POST carries
+a unique UUID in its plain-text body; after D1 commits, the object broadcasts
+`{ value, intentId }` to every connected browser. Snapshots and increments from
+legacy API clients with empty POST bodies still use `{ value }`. No reload or
+polling is needed to see another visitor's increment. `GET /api/counter` remains available for one-off API reads;
 the frontend never uses it.
 
 ## Shared game interface
 
 The default page fills the screen with one shared, formatted number, a large
 **PUSH** button, a small **LIVE** indicator, and “counted together.” A press has
-immediate tactile feedback; each changed authoritative value briefly lifts the
-number and sends a restrained ring around the button, including remote updates.
+immediate tactile and numeric feedback; each changed displayed value briefly
+lifts the number and sends a restrained ring around the button, including remote
+updates. The button stays enabled during writes, including keyboard input.
 The initial snapshot and unchanged snapshots do not animate. Reduced-motion
 preferences suppress these effects, including cancelling active effects if the
 preference changes. The native button supports keyboard and touch input with a
@@ -24,8 +27,10 @@ visible keyboard focus ring. Large values scale down to fit mobile screens.
 Append `?debug=1` to the existing counter URL to show a collapsible diagnostic
 overlay. It reports WebSocket transport and synchronization state, cumulative
 reconnect attempts, scheduled retry delay, API origin, the last authoritative
-value and receipt time, persistence confirmation, last socket close, and the
-last error. This information stays out of the normal layout. A minimal
+value and receipt time, pending optimistic presses, unsent queued presses,
+write-request state, persistence confirmation, last socket close, and the last
+error. Optimistic renders do not overwrite the authoritative diagnostic value
+or its receipt time. This information stays out of the normal layout. A minimal
 **Reconnecting…**, **Offline · reconnecting…**, or **Unavailable** indicator
 replaces **LIVE** when appropriate. An uncertain push gets a short notice;
 technical error details are retained in debug mode.
@@ -61,14 +66,42 @@ Every reconnection waits for a fresh authoritative snapshot. The last value
 remains visible with the reconnecting indicator while reconnecting. Reconnection
 timers only establish WebSockets; they never fetch the counter periodically.
 
-WebSockets are push-only. Each user click produces exactly one HTTP mutation,
-with no automatic retries or replay after reconnection. A lost POST response
-may mean the write committed: the UI shows “Couldn’t confirm that push,” gives
-details in debug mode, and reconnects to check
-authoritative state. The value is rendered only from the ordered WebSocket
-stream, so a delayed HTTP response cannot overwrite a newer broadcast. This
-intentionally does not guarantee delivery of an interrupted click; it avoids
-duplicate increments rather than silently resubmitting uncertain writes.
+WebSockets remain push-only. The browser tracks a map of pending optimistic
+intents and a FIFO queue of unsent intents. Displayed state is the latest
+ordered authoritative value plus the number of pending intents (bounded by the
+largest safe integer). Each accepted press adds its own UUID to both structures
+and renders synchronously before network work. One POST runs at a time; further
+presses remain enabled and queue immediately. A pending write retains keyboard
+focus. Neither remote broadcasts nor network latency discard queued presses.
+
+A committed broadcast carrying a local `intentId` acknowledges that intent and
+removes its optimistic contribution in the same render that applies the new
+authoritative value. Remote increments change the authoritative portion while
+preserving remaining local optimism. HTTP responses acknowledge acceptance too:
+if the stream has already reached the response's value, its optimistic intent
+is removed; otherwise it remains pending until the ordered stream catches up.
+A delayed HTTP response never overwrites a newer streamed value. Thus either
+HTTP/broadcast ordering avoids double-counting. Identifiers correlate acceptance;
+they are **not** server-side idempotency keys and must never be resubmitted.
+
+A failed or timed-out POST is never retried. If its matching committed broadcast
+already arrived, acceptance is confirmed despite the HTTP failure. Otherwise,
+the browser shows “Couldn’t confirm that push,” retains technical details only
+in debug mode, and reconnects for a fresh authoritative snapshot. After a
+subscription interruption, that snapshot replaces optimism for already-sent
+intents, with a notice for any unconfirmed intent; unsent intents are retained
+and drain once synchronization and the current POST finish. Already-sent
+intents are never placed back in the queue, including after reconnect or a
+back/forward cache restore. Late responses from a superseded connection cannot
+close a newer healthy subscription. A sent request may still commit after a
+snapshot; its later broadcast applies as authoritative state without replay.
+Queue state lives in the current page and does not survive a full page reload.
+
+An interrupted sent press cannot be guaranteed without persistent backend
+deduplication: it may have committed even if both its acknowledgement and
+broadcast were lost. This design makes uncertainty visible and reconciles from
+D1 instead of silently resubmitting and risking duplicate increments. There are
+no periodic HTTP reads or mutation retry timers.
 
 ## Deployment
 
@@ -149,8 +182,10 @@ npm run test:browser
 
 `npm test` uses the Workers runtime and real local D1 to check the migration,
 concurrent atomic increments, ordered WebSocket broadcasts to multiple clients,
-initial/reconnected snapshots, closed listeners, read-only socket messages,
-persistence across Worker/object reinitialization, routing, and origin checks.
+initial/reconnected snapshots, intent-correlated acknowledgements to every
+listener, invalid intent rejection before writes, closed listeners, read-only
+socket messages, persistence across Worker/object reinitialization, routing,
+and origin checks.
 It also checks provisioning with mocked Cloudflare API responses, including
 first creation, reuse, pagination, and failures. The dry run validates the
 Wrangler configuration and bundle. Applying local migrations twice validates
@@ -159,10 +194,15 @@ The browser checks serve the built site under `/sandbox/` and use two independen
 browser contexts connected simultaneously to a real local Worker. They verify
 push in both directions without reload, concurrent clicks, reload persistence,
 reconnection with a delayed authoritative snapshot, disabled writes before
-synchronization, a committed increment with a lost response, a delayed POST
-response after a newer broadcast, no repeated mutations or periodic HTTP reads,
-D1 agreement, backend recovery, and unconfigured preview behavior. They also
-check local/remote animation feedback, keyboard focus and Enter/Space input,
+synchronization, a committed increment with both acknowledgements lost, a delayed
+POST response after a newer broadcast, synchronous feedback on eight rapid
+presses, distinct queued intents, interleaved remote updates without
+double-counting,
+HTTP acceptance before its broadcast, lost HTTP responses confirmed through
+broadcasts, preservation of unsent presses after committed and uncommitted
+uncertain writes, late success/failure responses after reconnect, no repeated
+mutations or periodic HTTP reads, D1 agreement, backend recovery, and
+unconfigured preview behavior. They also check local/remote animation feedback, keyboard focus and Enter/Space input,
 mobile touch and landscape layout, formatting through the largest safe integer,
 reduced motion (including remote updates and preference changes), a minimal
 normal layout, and debug diagnostics for reconnects and errors. No check
@@ -195,7 +235,10 @@ These checks require the main-branch deployment and remain pending until it runs
    other updates immediately without reload. Reload and confirm persistence.
    Disconnect one browser, increment from the other, reconnect, and confirm
    the first resynchronizes before reporting LIVE.
-3. Confirm the document comes from GitHub Pages and the WebSocket and POST
+3. Press eight times rapidly and confirm eight immediate local increments and
+   eventual agreement between both clients and D1. Confirm the button remains
+   responsive during network delay and reconnects never replay sent presses.
+   Confirm the document comes from GitHub Pages and the WebSocket and POST
    requests go to the discovered
    `sandbox-persistent-counter.<subdomain>.workers.dev` endpoint. Confirm an
    idle page has no periodic HTTP counter requests in the network panel.
