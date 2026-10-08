@@ -52,6 +52,30 @@
     const cat = document.getElementById('cat');
     const mood = document.getElementById('mood');
 
+    // Keep playback and stopping here so a local audio file can replace speech later.
+    function playHappyCatAudio(happy) {
+      try {
+        const synthesis = window.speechSynthesis;
+        if (!synthesis) return;
+
+        synthesis.cancel();
+        if (!happy || typeof window.SpeechSynthesisUtterance !== 'function') return;
+
+        const utterance = new window.SpeechSynthesisUtterance('がんばったにゃー');
+        utterance.lang = 'ja-JP';
+        utterance.pitch = 1.25;
+        utterance.rate = 1;
+        // Voices may load after the page; check the current list on every activation.
+        const voices = synthesis.getVoices();
+        const voice = voices.find((voice) => voice.lang.toLowerCase() === 'ja-jp')
+          || voices.find((voice) => /^ja(?:-|$)/i.test(voice.lang));
+        if (voice) utterance.voice = voice;
+        synthesis.speak(utterance);
+      } catch {
+        // Audio is optional when browser speech is unavailable or fails.
+      }
+    }
+
     button.addEventListener('click', () => {
       const happy = button.getAttribute('aria-pressed') !== 'true';
       button.setAttribute('aria-pressed', String(happy));
@@ -60,6 +84,7 @@
         ? 'The same orange cat smiling with happily closed eyes and rosy cheeks.'
         : 'An orange cat with open eyes and a calm expression.';
       mood.textContent = happy ? 'Purr… one happy cat! Click or tap again to switch back.' : 'A quiet little cat.';
+      playHappyCatAudio(happy);
     });
   </script>
 </body>
