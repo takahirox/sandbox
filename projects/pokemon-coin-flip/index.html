@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="カードゲーム用のシンプルなコイントス。タップして表・裏を決めよう。">
+  <title>コイントス · カードゲームのおとも</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./coin.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">カードゲームのおとも</p>
+    <h1>コイントス</h1>
+    <p id="instruction" class="instruction">タップしてコインを投げよう</p>
+
+    <button id="flip" type="button" aria-label="コインを投げる" aria-describedby="instruction" aria-disabled="false">
+      <span class="coin-space" aria-hidden="true">
+        <span id="coin" class="coin" data-side="heads">
+          <span class="face heads">
+            <svg viewBox="0 0 120 120" focusable="false">
+              <circle cx="60" cy="60" r="20" fill="currentColor"/>
+              <g stroke="currentColor" stroke-width="5" stroke-linecap="round">
+                <path d="M60 18v9 M60 93v9 M18 60h9 M93 60h9 M30 30l7 7 M83 83l7 7 M30 90l7-7 M83 37l7-7"/>
+              </g>
+            </svg>
+            <span class="face-label">表</span>
+          </span>
+          <span class="face tails">
+            <svg viewBox="0 0 120 120" focusable="false">
+              <path d="M77 24a36 36 0 1 0 19 58A33 33 0 0 1 77 24Z" fill="currentColor"/>
+              <path d="m92 25 3 8 8 3-8 3-3 8-3-8-8-3 8-3Z" fill="currentColor"/>
+            </svg>
+            <span class="face-label">裏</span>
+          </span>
+        </span>
+      </span>
+      <span class="action-label">コインを投げる <span aria-hidden="true">↻</span></span>
+    </button>
+
+    <p id="result" class="result" role="status" aria-live="polite" aria-atomic="true">準備できました</p>
+    <p class="hint">何度でもタップ · キーボードは Enter / Space</p>
+    <noscript><p>コイントスには JavaScript を有効にしてください。</p></noscript>
+    <footer><a href="../../">サンドボックスに戻る</a></footer>
+  </main>
+</body>
+</html>

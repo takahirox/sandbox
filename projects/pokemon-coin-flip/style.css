@@ -1,0 +1,88 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  color: #243e3b;
+  background: #f5f7f2;
+  line-height: 1.6;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  background: radial-gradient(ellipse at 50% 38%, #fffdf5, transparent 65%);
+}
+
+main { width: min(100%, 32rem); text-align: center; }
+.eyebrow { margin: 0 0 .5rem; font-size: .8rem; letter-spacing: .16em; color: #536961; }
+h1 { margin: 0; font-size: clamp(1.8rem, 7vw, 2.5rem); letter-spacing: .08em; }
+.instruction { margin: .75rem 0 0; color: #536961; }
+
+button {
+  display: block;
+  width: min(100%, 22rem);
+  margin: 1rem auto 0;
+  padding: 1.25rem 1rem;
+  border: 0;
+  border-radius: 1.5rem;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible { outline: 3px solid #246c62; outline-offset: 3px; }
+button[aria-disabled="true"] { cursor: wait; }
+.coin-space { display: block; perspective: 900px; padding: 1rem 0 1.5rem; }
+.coin {
+  position: relative;
+  display: block;
+  width: min(60vw, 15rem);
+  aspect-ratio: 1;
+  margin: auto;
+  transform-style: preserve-3d;
+  transform: rotateY(0deg);
+}
+
+.coin[data-side="tails"] { transform: rotateY(180deg); }
+.face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: .4rem solid;
+  border-radius: 50%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: inset 0 0 0 5px #ffffff66, inset 0 0 0 9px #00000012, 0 12px 24px #243e3b20;
+}
+
+.heads { color: #745017; border-color: #bd8e3b; background: linear-gradient(135deg, #ffecb3, #e5b75c); }
+.tails { color: #244d69; border-color: #648ba3; background: linear-gradient(135deg, #dfedf4, #96b9d0); transform: rotateY(180deg); }
+.face svg { display: block; width: 53%; height: 53%; }
+.face-label { font-size: clamp(1.5rem, 7vw, 2rem); line-height: 1.2; font-weight: 800; }
+.action-label { display: inline-block; padding: .6rem 1.4rem; border-radius: 2rem; background: #243e3b; color: #fff; font-weight: 650; }
+@media (hover: hover) { button:hover .action-label { background: #356058; } }
+.result { min-height: 3rem; margin: .75rem 0 .25rem; font-size: 1.7rem; font-weight: 750; }
+.hint { margin: 0; font-size: .8rem; color: #536961; }
+footer { margin-top: 2.5rem; font-size: .8rem; }
+a { color: #536961; text-underline-offset: .25em; }
+
+.coin.is-flipping { animation: toss 680ms cubic-bezier(.3, .05, .25, 1); }
+@keyframes toss {
+  0% { transform: translateY(0) rotateY(var(--start-angle)); }
+  40% { transform: translateY(-28px) rotateY(calc(var(--start-angle) + 540deg)); }
+  100% { transform: translateY(0) rotateY(var(--end-angle)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coin.is-flipping { animation: none; }
+}
