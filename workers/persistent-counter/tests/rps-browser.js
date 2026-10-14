@@ -126,6 +126,32 @@ test('two browsers plus spectator synchronize private choices, ties, victory, co
   } finally { await f.close(); }
 });
 
+test('switching rooms clears the previous hands and outcome for spectators and players', { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  try {
+    const a = await f.browser.newPage(), b = await f.browser.newPage();
+    for (const p of [a, b]) {
+      p.setDefaultTimeout(5000); await p.goto(`${f.origin}/sandbox/projects/rock-paper-scissors/`); await live(p);
+    }
+    await play(a); await play(b); await textIs(a, 'phase', 'Choose your hand');
+    await hand(a, 'Rock').click(); await hand(b, 'Scissors').click();
+    await textIs(a, 'result', 'You win');
+    assert.deepEqual(await a.locator('#result small').allTextContents(), ['You · rock', 'Opponent · scissors']);
+    await a.getByRole('button', { name: 'Room list' }).click();
+    await a.waitForFunction(() => !document.querySelector('#lobby').hidden);
+    assert.equal(await a.locator('#result').textContent(), '');
+    await row(a, 2).click(); await a.getByRole('button', { name: 'Watch', exact: true }).click();
+    await textIs(a, 'room-title', 'Room 02'); await textIs(a, 'phase', 'Waiting for players');
+    assert.equal(await a.locator('#result').textContent(), '');
+    assert.deepEqual(await a.locator('#score strong').allTextContents(), ['0', '0']);
+    assert.equal(await a.locator('#hands').isVisible(), false);
+    await a.getByRole('button', { name: 'Room list' }).click();
+    await a.waitForFunction(() => !document.querySelector('#lobby').hidden);
+    await play(a, 3); await textIs(a, 'phase', 'Waiting for an opponent');
+    assert.equal(await a.locator('#result').textContent(), '');
+  } finally { await f.close(); }
+});
+
 test('network reconnect restores seat and secret move; timeout frees seat with pushed lobby updates', { timeout: 30_000 }, async () => {
   const f = await fixture();
   try {

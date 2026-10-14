@@ -89,7 +89,11 @@ function render() {
     if (room) $('leave').focus();
     else if (previousRoom) rows[previousRoom - 1].row.focus();
   }
-  if (!room) { resultKey = null; return; }
+  if (!room) {
+    resultKey = null;
+    $('result').replaceChildren();
+    return;
+  }
   const m = room.match, player = you.role === 'player';
   const order = player ? [you.seat, 1 - you.seat] : [0, 1];
   const name = i => player ? i === you.seat ? 'You' : 'Opponent' : `Player ${i + 1}`;
