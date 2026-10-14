@@ -1,0 +1,44 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #17233b; background: #f5f7fb; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 900px; margin: 0 auto; padding: 32px 20px; }
+header { margin-bottom: 36px; }
+.back { color: #52617b; text-decoration: none; font-size: .9rem; }
+.eyebrow { color: #5662aa; font-size: .85rem; letter-spacing: .12em; margin-top: 32px; }
+h1 { font-size: clamp(2rem, 6vw, 3.4rem); letter-spacing: -.05em; margin: 8px 0; }
+.intro, footer, #role, #spectators { color: #56627a; line-height: 1.6; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; margin-top: 28px; }
+#connection { font-size: .85rem; color: #52617b; }
+#connection.live { color: #15734d; }
+.rooms { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.room-card { background: white; border: 1px solid #dce2ef; border-radius: 14px; padding: 16px 12px; }
+.room-card.selected { border-color: #5164d6; box-shadow: 0 0 0 1px #5164d6; }
+.room-card h3 { margin: 0; }
+.room-state { font-size: .82rem; min-height: 2.4em; color: #56627a; }
+button { border: 0; background: #354bc1; color: white; border-radius: 9px; padding: 12px 16px; font: inherit; font-weight: 600; cursor: pointer; min-height: 44px; }
+button.quiet { background: #eaf0fa; color: #314376; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, a:focus-visible { outline: 3px solid #d07700; outline-offset: 4px; }
+.room-card button { width: 100%; padding: 9px 4px; margin-top: 8px; font-size: .85rem; }
+#game { margin-top: 24px; background: white; padding: 24px; border: 1px solid #dce2ef; border-radius: 18px; }
+.room-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.score { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; text-align: center; margin: 28px 0; }
+.score div { background: #f5f7fb; border-radius: 12px; padding: 16px; }
+.score strong { display: block; font-size: 3rem; font-variant-numeric: tabular-nums; }
+.score small { display: block; color: #56627a; margin-top: 6px; }
+#phase { font-size: 1.1rem; font-weight: 600; }
+.hands { display: flex; gap: 12px; }
+.hands button { flex: 1; font-size: 2rem; padding: 20px 8px; background: #eaf0fa; color: #314376; }
+.hands span { display: block; font-size: .95rem; margin-top: 8px; }
+#pending, #consent { color: #56627a; font-size: .9rem; line-height: 1.6; }
+#results { padding-left: 24px; line-height: 1.8; }
+#notice { color: #9a430d; line-height: 1.5; }
+footer { font-size: .82rem; margin-top: 32px; }
+[hidden] { display: none !important; }
+@media (max-width: 650px) {
+  .rooms { grid-template-columns: repeat(2, 1fr); }
+  .room-state { min-height: 1.2em; }
+  #game { padding: 18px; }
+  main { padding: 24px 16px; }
+}

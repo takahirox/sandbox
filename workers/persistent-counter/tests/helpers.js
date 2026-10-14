@@ -7,10 +7,14 @@ export const config = JSON.parse(await readFile(new URL('../wrangler.json', impo
 export function createWorker(options = {}) {
   return new Miniflare({
     modules: true,
+    modulesRules: [{ type: 'ESModule', include: ['**/*.js'] }],
     scriptPath: fileURLToPath(new URL('../src/index.js', import.meta.url)),
     compatibilityDate: config.compatibility_date,
     d1Databases: { DB: 'counter-test' },
-    durableObjects: { COUNTER: { className: 'Counter', useSQLite: true } },
+    durableObjects: {
+      COUNTER: { className: 'Counter', useSQLite: true },
+      RPS: { className: 'RockPaperScissors', useSQLite: true }
+    },
     bindings: config.vars,
     ...options
   });
@@ -29,7 +33,10 @@ export async function migrate(worker) {
 
 // Test-only controls exercise the production class in workerd with deterministic
 // time and persisted boundary state. None of these routes ship in the Worker.
-const counterSource = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+const counterSource = (await readFile(new URL('../src/index.js', import.meta.url), 'utf8'))
+  .replace("export { RockPaperScissors } from './rock-paper-scissors.js';",
+    (await readFile(new URL('../src/rock-paper-scissors.js', import.meta.url), 'utf8'))
+      .replace("import { DurableObject } from 'cloudflare:workers';", ''));
 export function createControlledWorker(options = {}) {
   return createWorker({
     scriptPath: undefined,

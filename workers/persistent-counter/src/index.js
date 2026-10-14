@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+export { RockPaperScissors } from './rock-paper-scissors.js';
 
 const DAILY_LIMIT = 20_000;
 const FLUSH_MS = 5_000;
@@ -286,7 +287,7 @@ export default {
     const path = new URL(request.url).pathname;
     const method = path === '/api/counter' ? 'GET'
       : path === '/api/counter/increment' ? 'POST'
-      : path === '/api/counter/ws' ? 'GET' : null;
+      : path === '/api/counter/ws' || path === '/api/rps/ws' ? 'GET' : null;
     if (!method) return json({ error: 'Not found' }, 404);
 
     if (request.method === 'OPTIONS') {
@@ -302,21 +303,23 @@ export default {
       headers.set('Allow', `${method}, OPTIONS`);
       return json({ error: 'Method not allowed' }, 405);
     }
-    if ((method === 'POST' || path === '/api/counter/ws') && origin !== env.ALLOWED_ORIGIN) {
+    const websocket = path === '/api/counter/ws' || path === '/api/rps/ws';
+    if ((method === 'POST' || websocket) && origin !== env.ALLOWED_ORIGIN) {
       return json({ error: 'Origin required' }, 403);
     }
-    if (path === '/api/counter/ws' && request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+    if (websocket && request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return json({ error: 'WebSocket upgrade required' }, 426);
     }
 
     try {
-      const response = await env.COUNTER.getByName('shared-counter').fetch(request);
+      const response = await (path === '/api/rps/ws'
+        ? env.RPS.getByName('five-rooms') : env.COUNTER.getByName('shared-counter')).fetch(request);
       if (response.status === 101) return response;
       const outgoing = new Response(response.body, response);
       for (const [key, value] of headers) outgoing.headers.set(key, value);
       return outgoing;
     } catch {
-      return json({ error: 'Counter unavailable' }, 503);
+      return json({ error: 'Service unavailable' }, 503);
     }
   }
 };

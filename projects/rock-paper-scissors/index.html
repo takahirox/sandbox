@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Online rock paper scissors · Sandbox</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./game.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <a class="back" href="../../">← Sandbox</a>
+      <p class="eyebrow">オンラインじゃんけん</p>
+      <h1>Rock. Paper. Scissors.</h1>
+      <p class="intro">Two players. First to 3 wins. Everyone else can watch.</p>
+      <p id="connection" role="status">Connecting…</p>
+    </header>
+    <section aria-labelledby="lobby-title">
+      <h2 id="lobby-title">Choose a room</h2>
+      <div id="rooms" class="rooms"></div>
+    </section>
+    <section id="game" aria-labelledby="room-title" hidden>
+      <div class="room-header"><h2 id="room-title"></h2><button id="leave" class="quiet">Leave room</button></div>
+      <p id="role"></p>
+      <div id="score" class="score" aria-label="Match score"></div>
+      <p id="phase" role="status"></p>
+      <div id="hands" class="hands" aria-label="Choose your hand">
+        <button data-hand="rock" aria-label="Rock">✊ <span>Rock</span></button>
+        <button data-hand="paper" aria-label="Paper">✋ <span>Paper</span></button>
+        <button data-hand="scissors" aria-label="Scissors">✌️ <span>Scissors</span></button>
+      </div>
+      <p id="pending"></p>
+      <button id="rematch" hidden>Play again</button>
+      <p id="consent"></p>
+      <h3>Round results</h3>
+      <ol id="results" reversed aria-live="polite" aria-label="Round results"></ol>
+      <p id="spectators"></p>
+    </section>
+    <p id="notice" role="status"></p>
+    <footer>No accounts. Choices stay private until both players choose.<br>Disconnected seats are held for 60 seconds.</footer>
+  </main>
+</body>
+</html>
