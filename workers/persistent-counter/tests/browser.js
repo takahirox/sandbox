@@ -16,6 +16,8 @@ async function fixture({ migrated = true, configured = true, controlled = false 
     }
     const files = {
       '/sandbox/': 'index.html',
+      '/sandbox/gallery.css': 'gallery.css',
+      '/sandbox/gallery.js': 'gallery.js',
       '/sandbox/projects/persistent-counter/': 'projects/persistent-counter/index.html',
       '/sandbox/projects/persistent-counter/counter.js': 'projects/persistent-counter/counter.js',
       '/sandbox/projects/persistent-counter/style.css': 'projects/persistent-counter/style.css'
@@ -106,7 +108,7 @@ test('two independent browsers receive realtime clicks, reload and reconnect sna
       if (holdSnapshot) reconnectServer.onMessage(message => { heldSnapshot = message; });
     });
     await page.goto(`${f.origin}/sandbox/`);
-    await page.getByRole('link', { name: 'persistent-counter', exact: true }).click();
+    await page.locator('a[href="./projects/persistent-counter/"]').click();
     await other.goto(page.url());
     await Promise.all([valueIs(page, 0), valueIs(other, 0), connected(page), connected(other)]);
     assert.deepEqual(await page.evaluate(() => window.feedback), [], 'Initial snapshot should not animate');
