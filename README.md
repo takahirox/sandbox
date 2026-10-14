@@ -16,7 +16,7 @@ automatically; there is no project registry to maintain.
 Every immediate directory under `projects/` with an `index.html` file is listed
 on the home page and published at
 `https://takahirox.github.io/sandbox/projects/<project-name>/`. The directory
-name supplies the link title; no metadata, framework, package manifest, or
+name supplies a readable card title; no metadata, framework, package manifest, or
 per-project deployment configuration is required. Renaming the directory changes
 the URL. Directories without an entry point are not published.
 
@@ -34,18 +34,48 @@ same layout before the site build; automatic per-project builds are not included
 
 ## Build and preview locally
 
-Python 3.9 or newer is the only local prerequisite; there are no dependencies to
-install. From the repository root:
+Use Python 3.9 or newer and Node.js 22 or newer. Screenshot capture reuses the
+existing pinned Playwright dependency. From the repository root:
 
 ```sh
+npm ci --prefix workers/persistent-counter
+# On Linux/CI, add --with-deps to install Chromium's system dependencies too.
+npm exec --prefix workers/persistent-counter -- playwright install chromium
 python3 -m unittest discover -s tests -v
+node --test tests/pokemon-coin-flip.test.cjs tests/gallery.test.mjs
 python3 scripts/build_site.py
 python3 -m http.server 8000 --directory _site
 ```
 
 Open <http://localhost:8000/> and follow the project links. The build recreates
 `_site/` from all current projects, preserving their assets and generating the
-home page. Generated output is ignored by Git. Stop the server with Ctrl-C.
+home page and real 1280×720 JPEG covers under `_site/covers/`. Every discovered
+project is captured automatically, including newly added directories. Covers
+use a fixed viewport, locale, timezone, date, random seed, reduced motion, and a
+short settling period; animations are disabled for capture. No project registry
+or uploaded images are needed. Generated output is ignored by Git and never
+written into project source folders. Stop the server with Ctrl-C.
+
+Capture runs in fresh browser contexts against a temporary, read-only loopback
+server at `/sandbox/`. Only GETs within the current local project are allowed;
+external traffic, other methods, WebSockets, and service workers are blocked.
+`api-config.json` is replaced **in the capture browser only** with an empty API
+URL. Persistent Counter and online rock-paper-scissors therefore show their
+actual unavailable/offline UI, with no simulated live counts or players. No
+production credentials or backend runtime are needed, and deployed project
+files retain their original API configuration. Remote fonts, images, scripts,
+and other required external assets cause a visible unavailable cover rather
+than a misleading partial screenshot; keep preview assets local.
+
+Each project has a 12-second capture limit. Failed captures leave a clickable
+card labeled “Screenshot unavailable,” log a bounded reason, and record the
+project's status in `_site/capture-report.json`. The build continues for other
+projects; missing Playwright/Chromium or broken tooling fails the build with
+setup guidance. Missing covers in an already published gallery also get a
+visible fallback. The homepage loads only covers and a small image-error
+handler, never the project apps. Use
+`python3 scripts/build_site.py --skip-screenshots` for a Python-only preview
+with explicit cover placeholders.
 
 ## GitHub Pages deployment
 
@@ -54,11 +84,13 @@ requests, and automatically publishes `_site/` on every push to `main` (includin
 merges). It can also be run manually from the Actions tab on `main`. Each build
 includes all discovered projects, so adding one preserves the existing projects.
 Pull requests only validate the build; deployment runs on `main`.
-The workflow also tests the Persistent Counter and rock-paper-scissors backends
-and browser integrations.
+The workflow also tests the Persistent Counter and rock-paper-scissors backends,
+browser integrations, and screenshot safety and responsive gallery behavior.
 On `main`, it provisions D1, applies migrations, and deploys the Worker and
 Durable Object configuration before building the Pages artifact with its public
-API URL. See the
+API URL. The final build captures local screenshots on both pull requests and
+deployments, after any production API configuration has been generated, without
+contacting that API. See the
 [counter deployment and local checks](docs/persistent-counter.md) for Node.js
 prerequisites, token permissions, and required post-merge verification.
 

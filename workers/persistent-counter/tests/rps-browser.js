@@ -14,7 +14,9 @@ async function fixture(configured = true) {
       response.setHeader('Content-Type', 'application/json');
       response.end(JSON.stringify({ apiUrl: configured ? apiUrl : '' })); return;
     }
-    const files = { '/sandbox/': 'index.html', [prefix]: 'projects/rock-paper-scissors/index.html',
+    const files = { '/sandbox/': 'index.html',
+      '/sandbox/gallery.css': 'gallery.css', '/sandbox/gallery.js': 'gallery.js',
+      [prefix]: 'projects/rock-paper-scissors/index.html',
       [`${prefix}game.js`]: 'projects/rock-paper-scissors/game.js',
       [`${prefix}style.css`]: 'projects/rock-paper-scissors/style.css' };
     if (!files[path]) { response.writeHead(404).end(); return; }
@@ -121,8 +123,8 @@ test('two browsers plus spectator synchronize private choices, ties, victory, co
     assert.equal(await a.locator('#lobby').isVisible(), true);
     assert.equal(await row(a).evaluate(el => el === document.activeElement), true);
     await a.goto(`${f.origin}/sandbox/`);
-    assert.equal(await a.getByRole('link', { name: 'rock-paper-scissors', exact: true }).count(), 1);
-    assert.equal(await a.getByRole('link', { name: 'persistent-counter', exact: true }).count(), 1);
+    assert.equal(await a.locator('a[href="./projects/rock-paper-scissors/"]').count(), 1);
+    assert.equal(await a.locator('a[href="./projects/persistent-counter/"]').count(), 1);
   } finally { await f.close(); }
 });
 
