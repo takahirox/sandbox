@@ -9,36 +9,50 @@
 </head>
 <body>
   <main>
-    <header>
+    <section id="lobby" aria-labelledby="lobby-title">
       <a class="back" href="../../">← Sandbox</a>
-      <p class="eyebrow">オンラインじゃんけん</p>
-      <h1>Rock. Paper. Scissors.</h1>
-      <p class="intro">Two players. First to 3 wins. Everyone else can watch.</p>
-      <p id="connection" role="status">Connecting…</p>
-    </header>
-    <section aria-labelledby="lobby-title">
-      <h2 id="lobby-title">Choose a room</h2>
-      <div id="rooms" class="rooms"></div>
+      <header class="lobby-heading">
+        <p class="eyebrow" lang="ja">じゃんけん</p>
+        <h1 id="lobby-title">Rock. Paper. Scissors.</h1>
+        <p>Choose a room.</p>
+      </header>
+      <div id="rooms" class="rooms" aria-label="Rooms"></div>
+      <p id="lobby-update" class="sr-only" role="status" aria-atomic="true"></p>
     </section>
     <section id="game" aria-labelledby="room-title" hidden>
-      <div class="room-header"><h2 id="room-title"></h2><button id="leave" class="quiet">Leave room</button></div>
-      <p id="role"></p>
-      <div id="score" class="score" aria-label="Match score"></div>
-      <p id="phase" role="status"></p>
-      <div id="hands" class="hands" aria-label="Choose your hand">
-        <button data-hand="rock" aria-label="Rock">✊ <span>Rock</span></button>
-        <button data-hand="paper" aria-label="Paper">✋ <span>Paper</span></button>
-        <button data-hand="scissors" aria-label="Scissors">✌️ <span>Scissors</span></button>
+      <div class="room-header">
+        <button id="leave" class="back">← Room list</button>
+        <h2 id="room-title"></h2>
       </div>
-      <p id="pending"></p>
+      <p id="role" class="sr-only"></p>
+      <p id="spectator-label" class="eyebrow" hidden>Watching</p>
+      <div id="score" class="score" aria-label="Match score" aria-live="polite" aria-atomic="true"></div>
+      <div class="match-status">
+        <p id="phase" role="status" aria-atomic="true"></p>
+        <p id="round">First to 3</p>
+      </div>
+      <p id="submission" class="sr-only" role="status" aria-atomic="true"></p>
+      <div id="result" class="result" role="status" aria-atomic="true"></div>
+      <div id="hands" class="hands" role="group" aria-label="Choose your hand">
+        <button data-hand="rock" aria-label="Rock"><span class="hand-symbol" aria-hidden="true">✊</span><span>Rock</span></button>
+        <button data-hand="scissors" aria-label="Scissors"><span class="hand-symbol" aria-hidden="true">✌️</span><span>Scissors</span></button>
+        <button data-hand="paper" aria-label="Paper"><span class="hand-symbol" aria-hidden="true">✋</span><span>Paper</span></button>
+      </div>
       <button id="rematch" hidden>Play again</button>
-      <p id="consent"></p>
-      <h3>Round results</h3>
-      <ol id="results" reversed aria-live="polite" aria-label="Round results"></ol>
-      <p id="spectators"></p>
+      <p id="consent" role="status" aria-atomic="true"></p>
     </section>
-    <p id="notice" role="status"></p>
-    <footer>No accounts. Choices stay private until both players choose.<br>Disconnected seats are held for 60 seconds.</footer>
+    <p id="connection" role="status">Connecting…</p>
+    <p id="notice" role="status" aria-atomic="true"></p>
+    <p id="availability" role="status"></p>
+    <dialog id="room-choice" aria-labelledby="choice-title" aria-describedby="choice-state">
+      <h2 id="choice-title"></h2>
+      <p id="choice-state" role="status"></p>
+      <div class="choice-actions">
+        <button id="play">Play</button>
+        <button id="watch" class="quiet">Watch</button>
+      </div>
+      <form method="dialog"><button class="back">Cancel</button></form>
+    </dialog>
   </main>
 </body>
 </html>

@@ -2,15 +2,26 @@
 
 The [game](https://takahirox.github.io/sandbox/projects/rock-paper-scissors/)
 is plain HTML, CSS, and JavaScript on GitHub Pages. It lists exactly five public
-rooms. Join an open seat or choose Watch; joining a full room automatically makes
-you a spectator. No name, account, or manual room creation is required.
+rooms as live, full-width rows. Select an open room, then choose Play or Watch
+in the keyboard-accessible dialog. Selecting a full room goes straight to
+spectating. The choice updates if the room fills while the dialog is open;
+if a seat fills during entry, the server safely admits you as a spectator. No
+name, account, or manual room creation is required.
 
 Two occupied seats start a first-to-three match. Each player's choice locks once
 submitted. Only the fact that a choice is locked is public until both choose.
 The server then reveals both hands, awards a point to the winner (none for a
-tie), and opens the next round. The last ten results remain visible, so ties
-cannot grow storage indefinitely. A completed match retains its seats and score;
-both connected players must request Play again before a fresh match starts.
+tie), and opens the next round. The lobby hides during a match; large scores,
+three hand choices, and a brief phase message take focus. Only the latest
+resolved round is shown, with both hands and its outcome. The server still
+retains at most ten results, so ties cannot grow storage indefinitely. A
+completed match retains its seats and score; both connected players must request
+Play again before a fresh match starts.
+Spectators see the same scores and result without hand or rematch controls.
+Room list leaves the room and returns focus to its row. Healthy connection
+status and submission announcements remain available to assistive technology;
+reconnection, errors, and unavailable play are visible when needed. Touch targets
+fit small screens, and press/result animations respect reduced-motion settings.
 
 ## Deployment and architecture
 
@@ -132,9 +143,10 @@ minute with no incoming traffic and verifies a pushed seat release. Other
 test-only controls supply deterministic time; no control routes ship.
 Browser tests use independent contexts plus a spectator against a local Worker
 and the built site under `/sandbox/`. They verify synchronized play, private
-frames, reload/reconnect, timeout, rematch, idle sockets, responsive layout,
-unconfigured previews, unavailable storage, automatic index discovery, and no
-backend HTTP requests. Existing counter and static-project suites run alongside.
+frames, reload/reconnect, timeout, rematch, idle sockets, keyboard and touch room
+selection, live role choices, focus return, mobile controls, reduced motion,
+capped play, seat takeover, unconfigured previews, unavailable storage, automatic
+index discovery, and no backend HTTP requests. Existing counter and static-project suites run alongside.
 
 For a preview, run `npm run dev` in the Worker directory, then from the root:
 
