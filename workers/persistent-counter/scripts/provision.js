@@ -60,6 +60,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     // Only the public endpoint is added to the Pages artifact; never the D1 binding.
     await writeFile(new URL('../../../projects/persistent-counter/api-config.json', import.meta.url),
       JSON.stringify({ apiUrl: result.apiUrl }) + '\n');
+    await writeFile(new URL('../../../projects/rock-paper-scissors/api-config.json', import.meta.url),
+      JSON.stringify({ apiUrl: result.apiUrl }) + '\n');
     console.log('D1 binding and public API configuration prepared.');
   } catch (error) {
     console.error(error.message);

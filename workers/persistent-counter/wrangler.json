@@ -6,9 +6,15 @@
   "workers_dev": true,
   "preview_urls": false,
   "durable_objects": {
-    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }]
+    "bindings": [
+      { "name": "COUNTER", "class_name": "Counter" },
+      { "name": "RPS", "class_name": "RockPaperScissors" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Counter"] },
+    { "tag": "v2", "new_sqlite_classes": ["RockPaperScissors"] }
+  ],
   "vars": {
     "ALLOWED_ORIGIN": "https://takahirox.github.io"
   },

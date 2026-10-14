@@ -28,7 +28,7 @@ jobs:
       - name: Install Worker tools
         working-directory: workers/persistent-counter
         run: npm ci
-      - name: Test Worker, WebSocket broadcasts, D1 persistence, and provisioning
+      - name: Test counter, rock-paper-scissors, persistence, and provisioning
         working-directory: workers/persistent-counter
         run: npm test
       - name: Validate Worker configuration and bundle
@@ -48,7 +48,7 @@ jobs:
       - name: Install browser for integration checks
         working-directory: workers/persistent-counter
         run: npx playwright install --with-deps chromium
-      - name: Test real-time browsers against local Worker, Durable Object, and D1
+      - name: Test counter and rock-paper-scissors browsers against local Cloudflare runtime
         working-directory: workers/persistent-counter
         run: npm run test:browser
       - name: Provision D1 and discover Worker URL

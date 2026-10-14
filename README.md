@@ -24,6 +24,9 @@ See [Happy cat](projects/happy-cat/index.html) for a standalone static example.
 The [Persistent Counter](docs/persistent-counter.md) adds a small Cloudflare
 Worker, Durable Object, WebSocket, and D1 backend while keeping its frontend in
 this static project layout.
+The [online rock-paper-scissors game](docs/rock-paper-scissors.md) uses the same
+Worker deployment with a separate Durable Object for five public rooms,
+anonymous players, and live spectators.
 All files within a discovered project are public, so keep source-only or private
 files outside it. Use ordinary files and directories; symbolic links are rejected
 by the build. Projects that need build tools can generate static files into this
@@ -51,7 +54,8 @@ requests, and automatically publishes `_site/` on every push to `main` (includin
 merges). It can also be run manually from the Actions tab on `main`. Each build
 includes all discovered projects, so adding one preserves the existing projects.
 Pull requests only validate the build; deployment runs on `main`.
-The workflow also tests the Persistent Counter backend and browser integration.
+The workflow also tests the Persistent Counter and rock-paper-scissors backends
+and browser integrations.
 On `main`, it provisions D1, applies migrations, and deploys the Worker and
 Durable Object configuration before building the Pages artifact with its public
 API URL. See the
