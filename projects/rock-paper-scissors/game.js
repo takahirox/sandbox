@@ -8,18 +8,42 @@ let target = saved ? { room: saved.room, mode: 'play' } : null;
 let socket, snapshot, live = false, retry = 0, timer, heartbeat, pongTimer;
 let pending = null, joining = false, leaving = false, stopped = false, suspended = false, endpoint;
 const labels = { rock: '✊ Rock', paper: '✋ Paper', scissors: '✌️ Scissors' };
-const cards = Array.from({ length: 5 }, (_, i) => {
-  const card = document.createElement('article'); card.className = 'room-card';
-  const title = document.createElement('h3'); title.textContent = `Room ${i + 1}`;
-  const state = document.createElement('p'); state.className = 'room-state'; state.textContent = 'Connecting…';
-  const play = document.createElement('button'); play.textContent = 'Join'; play.disabled = true;
-  play.setAttribute('aria-label', `Join room ${i + 1}`);
-  const watch = document.createElement('button'); watch.textContent = 'Watch'; watch.className = 'quiet'; watch.disabled = true;
-  watch.setAttribute('aria-label', `Watch room ${i + 1}`);
-  play.onclick = () => join(i + 1, 'play'); watch.onclick = () => join(i + 1, 'spectate');
-  card.append(title, state, play, watch); $('rooms').append(card);
-  return { card, state, play, watch };
+let selectedRoom = null, visibleRoom = null, resultKey = null;
+const setText = (id, text) => {
+  if ($(id).textContent !== String(text)) $(id).textContent = text;
+};
+const roomName = room => `Room ${String(room).padStart(2, '0')}`;
+const roomState = room => room?.players === 2 ? 'In progress · watch' : room?.status;
+const rows = Array.from({ length: 5 }, (_, i) => {
+  const row = document.createElement('button'); row.className = 'room-row'; row.disabled = true;
+  const number = document.createElement('span'); number.className = 'room-number'; number.textContent = String(i + 1).padStart(2, '0');
+  const state = document.createElement('span'); state.className = 'room-state'; state.textContent = 'Connecting…';
+  const count = document.createElement('span'); count.className = 'room-count'; count.textContent = '– / 2';
+  const arrow = document.createElement('span'); arrow.className = 'room-arrow'; arrow.textContent = '›'; arrow.setAttribute('aria-hidden', 'true');
+  row.onclick = () => {
+    if (!live || joining || snapshot?.room) return;
+    if (snapshot.rooms[i].players === 2) { join(i + 1, 'spectate'); return; }
+    selectedRoom = i + 1; renderChoice(); $('room-choice').showModal();
+  };
+  row.append(number, state, count, arrow); $('rooms').append(row);
+  return { row, state, count };
 });
+function renderChoice() {
+  if (!selectedRoom) return;
+  const room = snapshot?.rooms[selectedRoom - 1];
+  setText('choice-title', roomName(selectedRoom));
+  const playHadFocus = document.activeElement === $('play');
+  setText('choice-state', !live ? stopped ? 'Connection closed. Cancel and reload to reconnect.' : 'Reconnecting…' : room.players === 2 ? 'Room full · watch the match.'
+    : !snapshot.playAvailable ? 'Play unavailable · watching is available.'
+    : room.players === 0 ? 'Take a seat or watch.' : 'An opponent is waiting. Play or watch.');
+  $('play').hidden = room?.players === 2 || !snapshot?.playAvailable;
+  $('play').disabled = $('watch').disabled = !live || joining;
+  if ($('play').hidden && playHadFocus) $('watch').focus();
+}
+$('room-choice').addEventListener('close', () => { selectedRoom = null; });
+for (const [id, mode] of [['play', 'play'], ['watch', 'spectate']]) $(id).onclick = () => {
+  const room = selectedRoom; $('room-choice').close(); join(room, mode);
+};
 
 function store(value) {
   saved = value;
@@ -34,68 +58,113 @@ function send(message) {
   socket.send(JSON.stringify(message)); return true;
 }
 function join(room, mode) {
-  target = { room, mode }; joining = true; $('notice').textContent = '';
+  if (!live || joining) return;
+  target = { room, mode }; joining = true; setText('notice', '');
   send({ type: 'join', room, mode,
     ...(mode === 'play' && saved?.room === room ? { credential: saved.credential } : {}) });
   render();
 }
 function render() {
   const room = snapshot?.room, you = snapshot?.you;
-  cards.forEach((c, i) => {
-    c.state.textContent = snapshot?.rooms[i]?.status ?? (stopped ? 'Unavailable' : 'Connecting…');
-    c.play.textContent = snapshot?.rooms[i]?.players === 2 ? 'Watch' : 'Join';
-    c.play.disabled = c.watch.disabled = !live || !!room || joining;
-    c.card.classList.toggle('selected', room?.id === i + 1);
+  rows.forEach((c, i) => {
+    const summary = snapshot?.rooms[i];
+    const state = roomState(summary) ?? (stopped ? 'Unavailable' : 'Connecting…');
+    const count = summary ? `${summary.players} / 2` : '– / 2';
+    if (c.state.textContent !== state) c.state.textContent = state;
+    if (c.count.textContent !== count) c.count.textContent = count;
+    c.row.setAttribute('aria-label', `${roomName(i + 1)}, ${state}, ${count} players`);
+    c.row.disabled = !live || !!room || joining;
   });
+  if (!room && snapshot) setText('lobby-update', snapshot.rooms.map(r => `${roomName(r.id)}: ${roomState(r)}, ${r.players} of 2 players`).join('. '));
+  renderChoice();
+  $('connection').className = live ? 'sr-only' : '';
+  setText('availability', snapshot?.playAvailable === false
+    ? 'Play limit reached. Try tomorrow (UTC), or watch a match.' : '');
   $('game').hidden = !room;
-  if (!room) return;
+  $('lobby').hidden = !!room;
+  const previousRoom = visibleRoom;
+  visibleRoom = room?.id ?? null;
+  if (visibleRoom !== previousRoom) {
+    if ($('room-choice').open) $('room-choice').close();
+    if (room) $('leave').focus();
+    else if (previousRoom) rows[previousRoom - 1].row.focus();
+  }
+  if (!room) {
+    resultKey = null;
+    $('result').replaceChildren();
+    return;
+  }
   const m = room.match, player = you.role === 'player';
-  $('room-title').textContent = `Room ${room.id}`;
-  $('role').textContent = player ? `You are Player ${you.seat + 1}` : 'You are watching';
-  $('leave').disabled = !live;
-  $('score').replaceChildren(...m.score.map((score, i) => {
-    const div = document.createElement('div'), name = document.createElement('span');
-    name.textContent = `Player ${i + 1}${player && you.seat === i ? ' · You' : ''}`;
-    const strong = document.createElement('strong'); strong.textContent = score;
-    const status = document.createElement('small');
-    status.textContent = !room.players[i] ? 'Open seat' : room.players[i].connected ? 'Connected'
-      : 'Disconnected · seat held for 60s';
-    div.append(name, strong, status); return div;
-  }));
-  const connected = room.players.every(p => p?.connected);
-  $('phase').textContent = m.phase === 'complete' ? `Player ${m.winner + 1} wins the match!`
-    : m.phase === 'waiting' ? 'Waiting for an opponent…'
-    : !connected ? 'Match paused · waiting for a reconnect…' : `Round ${m.round} · choose your hand`;
-  $('hands').hidden = !player;
-  document.querySelectorAll('[data-hand]').forEach(b => {
-    b.disabled = !live || !snapshot.playAvailable || !player || !connected || m.phase !== 'playing'
-      || m.submitted[you.seat] || pending === `${m.id}:${m.round}`;
+  const order = player ? [you.seat, 1 - you.seat] : [0, 1];
+  const name = i => player ? i === you.seat ? 'You' : 'Opponent' : `Player ${i + 1}`;
+  setText('room-title', roomName(room.id));
+  setText('role', player ? `You are Player ${you.seat + 1}` : 'You are watching');
+  $('spectator-label').hidden = player;
+  $('leave').disabled = !live || joining;
+  // Keep the score nodes stable, including during spectator/lobby pushes.
+  if ($('score').dataset.order !== order.join()) {
+    $('score').dataset.order = order.join();
+    $('score').replaceChildren(...order.map(() => {
+      const div = document.createElement('div'); div.append(document.createElement('span'), document.createElement('strong')); return div;
+    }));
+  }
+  order.forEach((seat, index) => {
+    const div = $('score').children[index];
+    if (div.children[0].textContent !== name(seat)) div.children[0].textContent = name(seat);
+    if (div.children[1].textContent !== String(m.score[seat])) div.children[1].textContent = m.score[seat];
   });
-  $('pending').textContent = m.phase === 'playing'
-    ? m.submitted.map((chosen, i) => `Player ${i + 1}: ${chosen ? 'choice locked' : 'still choosing'}`).join(' · ') : '';
+  const connected = room.players.every(p => p?.connected);
+  const locked = player && (m.submitted[you.seat] || pending === `${m.id}:${m.round}`);
+  setText('phase', m.phase === 'complete' ? player ? m.winner === you.seat ? 'You win the match!' : 'Opponent wins the match!'
+    : `Player ${m.winner + 1} wins the match!`
+    : m.phase === 'waiting' ? room.players.some(Boolean) ? 'Waiting for an opponent…' : 'Waiting for players…'
+    : !connected ? 'Match paused · waiting for reconnect…'
+    : locked ? 'Waiting for opponent’s hand…' : player ? 'Choose your hand' : 'Players are choosing…');
+  setText('submission', m.phase === 'playing' ? m.submitted.map((chosen, i) => `${name(i)}: ${chosen || (player && i === you.seat && locked) ? 'choice locked' : 'still choosing'}`).join('. ') : '');
+  setText('round', m.phase === 'playing' ? `Round ${m.round} · First to 3` : 'First to 3');
+  $('hands').hidden = !player || m.phase === 'complete';
+  document.querySelectorAll('[data-hand]').forEach(b => {
+    b.disabled = !live || !snapshot.playAvailable || !player || !connected || m.phase !== 'playing' || locked || joining;
+  });
   $('rematch').hidden = !player || m.phase !== 'complete';
-  $('rematch').disabled = !live || !connected || !snapshot.playAvailable || m.rematch[you.seat] || pending === `${m.id}:rematch`;
-  $('consent').textContent = m.phase === 'complete'
-    ? m.rematch.some(Boolean) ? `Waiting for ${m.rematch[0] ? 'Player 2' : 'Player 1'} to agree to a rematch.`
-      : 'Both players must agree to play again.' : '';
-  $('results').replaceChildren(...[...m.results].reverse().map(r => {
-    const li = document.createElement('li'); li.value = r.round;
-    li.textContent = `${labels[r.hands[0]]} / ${labels[r.hands[1]]} — ${r.winner === null ? 'Tie' : `Player ${r.winner + 1} wins`}`;
-    return li;
-  }));
-  $('spectators').textContent = `${room.spectators} watching`;
-  if (!snapshot.playAvailable) $('notice').textContent = 'Daily play limit reached. Play resumes tomorrow (UTC). Watching remains available.';
+  const consented = player && (m.rematch[you.seat] || pending === `${m.id}:rematch`);
+  $('rematch').disabled = !live || !connected || !snapshot.playAvailable || consented || joining;
+  setText('consent', m.phase !== 'complete' ? '' : !connected ? 'Rematch paused · waiting for reconnect…'
+    : consented ? 'Rematch requested · waiting for opponent.'
+    : m.rematch.some(Boolean) ? player ? 'Opponent wants to play again.' : 'Waiting for both players to agree.'
+    : player ? 'Both players must agree.' : 'Waiting for a rematch.');
+  // Only public, resolved hands are rendered. Never show a pending local choice.
+  const result = m.results.at(-1), nextKey = result ? `${m.id}:${result.round}` : null;
+  if (resultKey !== nextKey) {
+    resultKey = nextKey;
+    $('result').replaceChildren();
+    if (result) {
+      order.forEach(seat => {
+        const div = document.createElement('div'), symbol = document.createElement('span'), caption = document.createElement('small');
+        symbol.className = 'hand-symbol'; symbol.textContent = labels[result.hands[seat]].split(' ')[0]; symbol.setAttribute('aria-hidden', 'true');
+        caption.textContent = `${name(seat)} · ${result.hands[seat]}`;
+        div.append(symbol, caption); $('result').append(div);
+      });
+      const outcome = document.createElement('p');
+      outcome.textContent = `Round ${result.round} · ${result.winner === null ? 'Tie' : player ? result.winner === you.seat ? 'You win' : 'You lose' : `Player ${result.winner + 1} wins`}`;
+      $('result').append(outcome);
+      $('result').classList.remove('reveal'); void $('result').offsetWidth; $('result').classList.add('reveal');
+    }
+  }
 }
 $('leave').onclick = () => {
+  if (!live || joining) return;
   target = null; pending = null; joining = true; leaving = true;
   store(null); send({ type: 'leave' }); render();
 };
 document.querySelectorAll('[data-hand]').forEach(button => button.onclick = () => {
+  if (button.disabled || snapshot?.you.role !== 'player') return;
   const m = snapshot.room.match;
   pending = `${m.id}:${m.round}`;
   send({ type: 'move', match: m.id, round: m.round, hand: button.dataset.hand }); render();
 });
 $('rematch').onclick = () => {
+  if ($('rematch').disabled || snapshot?.you.role !== 'player') return;
   const m = snapshot.room.match; pending = `${m.id}:rematch`;
   send({ type: 'rematch', match: m.id }); render();
 };
@@ -121,7 +190,7 @@ function connect(url) {
       $('notice').textContent = message.reason; pending = null; joining = false;
       if (message.reason.startsWith('Seat expired')) {
         store(null); if (target) join(target.room, 'spectate');
-        $('notice').textContent = 'Your previous seat expired. You are now watching; leave and join to claim an open seat.';
+        $('notice').textContent = 'Your previous seat expired. Watching now; return to the room list to play.';
       }
       render(); return;
     }
@@ -131,7 +200,7 @@ function connect(url) {
     if (pending && (!m || you.role !== 'player' || !pending.startsWith(`${m.id}:`)
         || (pending.endsWith(':rematch') ? m.rematch[you.seat]
           : pending !== `${m.id}:${m.round}` || m.submitted[you.seat] || m.phase !== 'playing'))) pending = null;
-    $('connection').textContent = 'Live'; $('connection').className = 'live';
+    setText('connection', 'Live');
     if (!received) {
       received = true; clearTimeout(initialTimeout);
       if (target) join(target.room, target.mode);
@@ -146,7 +215,7 @@ function connect(url) {
     $('connection').className = '';
     if (event.code === 4001 || event.code === 1008) {
       stopped = true;
-      $('connection').textContent = event.code === 4001 ? 'Seat opened in another tab' : 'Connection closed. Reload to reconnect.';
+      $('connection').textContent = event.code === 4001 ? 'Seat opened in another tab. Continue there, or reload to reclaim it.' : 'Connection closed. Reload to reconnect.';
     } else if (!suspended) {
       $('connection').textContent = navigator.onLine ? 'Reconnecting…' : 'Offline · reconnecting…';
       const delay = Math.min(30_000, 500 * 2 ** Math.min(retry++, 6)) + Math.random() * 250;
