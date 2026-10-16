@@ -58,7 +58,7 @@ test('normal build discovers real covers, isolates network access, and renders a
   assert.ok(!stderr.includes('private-token-do-not-log'));
   const output = resolve(root, '_site');
   const report = JSON.parse(await readFile(resolve(output, 'capture-report.json'), 'utf8'));
-  const valid = ['happy-cat', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
+  const valid = ['happy-cat', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'walk-to-hospital', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
   for (const name of valid) {
     assert.equal(report[name].status, 'ok', `${name}: ${JSON.stringify(report[name])}`);
     const image = await readFile(resolve(output, 'covers', coverName(name)));
