@@ -21,6 +21,8 @@ per-project deployment configuration is required. Renaming the directory changes
 the URL. Directories without an entry point are not published.
 
 See [Happy cat](projects/happy-cat/index.html) for a standalone static example.
+The [walk to hospital](projects/walk-to-hospital/index.html) toy uses large arrow
+buttons (tap or hold) and keyboard arrows to walk, arrive, and play again.
 The [Persistent Counter](docs/persistent-counter.md) adds a small Cloudflare
 Worker, Durable Object, WebSocket, and D1 backend while keeping its frontend in
 this static project layout.
@@ -42,7 +44,7 @@ npm ci --prefix workers/persistent-counter
 # On Linux/CI, add --with-deps to install Chromium's system dependencies too.
 npm exec --prefix workers/persistent-counter -- playwright install chromium
 python3 -m unittest discover -s tests -v
-node --test tests/pokemon-coin-flip.test.cjs tests/gallery.test.mjs
+node --test tests/pokemon-coin-flip.test.cjs tests/gallery.test.mjs tests/walk-to-hospital.test.mjs
 python3 scripts/build_site.py
 python3 -m http.server 8000 --directory _site
 ```

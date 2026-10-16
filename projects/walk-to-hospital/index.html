@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#fff9ed">
+  <title>びょういんへ おさんぽ</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./game.js" defer></script>
+</head>
+<body>
+  <main aria-label="びょういんへ おさんぽ">
+    <svg id="scene" viewBox="0 0 800 400" role="img" aria-labelledby="scene-title scene-description">
+      <title id="scene-title">びょういんへ おさんぽ</title>
+      <desc id="scene-description">左におうち、右にびょういん。おうちのそばに子どもがいます。</desc>
+      <defs>
+        <linearGradient id="sky" x2="0" y2="1">
+          <stop stop-color="#d8f3fa"/><stop offset="1" stop-color="#f2fbf5"/>
+        </linearGradient>
+      </defs>
+      <rect width="800" height="400" rx="28" fill="url(#sky)"/>
+      <circle cx="408" cy="70" r="30" fill="#ffcf68"/>
+      <g fill="#fff" opacity=".9">
+        <path d="M72 81a18 18 0 0 1 28-15 25 25 0 0 1 47 6 17 17 0 0 1 0 34H81a13 13 0 0 1-9-25Z"/>
+        <path d="M532 57a17 17 0 0 1 27-13 23 23 0 0 1 43 8 15 15 0 0 1 0 30h-63a13 13 0 0 1-7-25Z"/>
+      </g>
+      <path d="M0 279Q172 231 388 277T800 260V400H0Z" fill="#b8dfa2"/>
+      <path d="M0 318Q218 275 424 309T800 298V400H0Z" fill="#a3d58e"/>
+      <path d="M114 320H689" stroke="#f6dfae" stroke-width="69" stroke-linecap="round"/>
+      <path d="M205 344H715" stroke="#e6c994" stroke-width="3" stroke-linecap="round" stroke-dasharray="3 24"/>
+      <!-- Large, familiar shapes keep the destination readable on small screens. -->
+      <g stroke-linejoin="round">
+        <rect x="42" y="202" width="136" height="105" rx="5" fill="#fff3d8"/>
+        <path d="m28 205 82-72 82 72Z" fill="#ef9079" stroke="#dc7967" stroke-width="8"/>
+        <rect x="91" y="248" width="39" height="59" rx="19" fill="#b58263"/>
+        <circle cx="120" cy="280" r="3" fill="#ffe4ad"/>
+        <rect x="55" y="222" width="28" height="30" rx="5" fill="#a7dfe5"/>
+        <path d="M69 222v30m-14-15h28" stroke="#fff" stroke-width="4"/>
+        <rect x="139" y="222" width="26" height="30" rx="5" fill="#a7dfe5"/>
+        <path d="M152 222v30m-13-15h26" stroke="#fff" stroke-width="4"/>
+        <rect x="608" y="172" width="156" height="135" rx="10" fill="#fffdf5"/>
+        <path d="M607 174h158" stroke="#81b9b2" stroke-width="12" stroke-linecap="round"/>
+        <rect x="655" y="126" width="62" height="62" rx="14" fill="#fffdf5"/>
+        <path d="M686 139v35m-17-18h34" stroke="#ee8b83" stroke-width="12"/>
+        <rect x="660" y="249" width="52" height="58" rx="23" fill="#93ced0"/>
+        <path d="M686 252v55" stroke="#fff" stroke-width="3"/>
+        <g fill="#bbe4e6">
+          <rect x="625" y="199" width="31" height="32" rx="6"/>
+          <rect x="671" y="199" width="31" height="32" rx="6"/>
+          <rect x="717" y="199" width="31" height="32" rx="6"/>
+        </g>
+      </g>
+      <g id="character" transform="translate(208 333)">
+        <ellipse cy="3" rx="25" ry="6" fill="#7c9566" opacity=".23"/>
+        <g id="facing">
+          <g class="person">
+            <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <g class="leg leg-back"><path d="M-11-34v23l-8 8" stroke="#526f8a" stroke-width="13"/><path d="M-19-3h11" stroke="#4e535c" stroke-width="10"/></g>
+              <g class="leg leg-front"><path d="M11-34v23l8 8" stroke="#526f8a" stroke-width="13"/><path d="M19-3h11" stroke="#4e535c" stroke-width="10"/></g>
+              <path d="m-19-69-8 25m45-25 10 25" stroke="#edb38a" stroke-width="11"/>
+            </g>
+            <path d="M-21-77Q0-87 21-77l3 42h-48Z" fill="#efaf4c"/>
+            <circle cy="-101" r="26" fill="#f4c7a4"/>
+            <path d="M-25-103q-7-31 23-30 30-2 28 28l-10-12q-21 11-40 4Z" fill="#735044"/>
+            <g fill="#594538"><circle cx="-7" cy="-100" r="2.5"/><circle cx="12" cy="-100" r="2.5"/></g>
+            <path d="M-3-90q7 7 13-1" fill="none" stroke="#a76455" stroke-width="2.5" stroke-linecap="round"/>
+            <circle cx="-15" cy="-92" r="4" fill="#edac94"/>
+          </g>
+        </g>
+      </g>
+      <g id="celebration" hidden fill="#e9a43d" aria-hidden="true">
+        <path class="spark" d="m619 91 5 12 13 1-10 9 3 13-11-7-11 7 3-13-10-9 13-1Z"/>
+        <path class="spark" d="m751 120 4 10 11 1-8 7 2 11-9-6-9 6 2-11-8-7 11-1Z"/>
+        <path class="heart" d="M686 100s-27-16-27-31c0-16 19-20 27-7 8-13 27-9 27 7 0 15-27 31-27 31Z" fill="#ee9185"/>
+      </g>
+    </svg>
+    <p id="arrival" role="status" aria-live="polite"></p>
+    <div class="controls">
+      <div id="movement" aria-label="あるく">
+        <button id="left" type="button" aria-label="ひだりへ あるく">
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M28 10 14 24l14 14M15 24h23"/></svg>
+        </button>
+        <button id="right" type="button" aria-label="みぎへ あるく">
+          <svg viewBox="0 0 48 48" aria-hidden="true"><path d="m20 10 14 14-14 14M33 24H10"/></svg>
+        </button>
+      </div>
+      <button id="replay" type="button" aria-label="もういちど おうちから" hidden>
+        <svg viewBox="0 0 48 48" aria-hidden="true"><path d="M12 17a15 15 0 1 1-2 13M12 6v12h12"/></svg>
+        <span>もういちど</span>
+      </button>
+    </div>
+  </main>
+</body>
+</html>

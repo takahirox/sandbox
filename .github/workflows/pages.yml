@@ -51,8 +51,8 @@ jobs:
       - name: Test counter and rock-paper-scissors browsers against local Cloudflare runtime
         working-directory: workers/persistent-counter
         run: npm run test:browser
-      - name: Test automatic screenshot capture and gallery
-        run: node --test tests/gallery.test.mjs
+      - name: Test screenshot gallery and walk-to-hospital interactions
+        run: node --test tests/gallery.test.mjs tests/walk-to-hospital.test.mjs
       - name: Provision D1 and discover Worker URL
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         working-directory: workers/persistent-counter
