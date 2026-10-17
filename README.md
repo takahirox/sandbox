@@ -29,6 +29,8 @@ this static project layout.
 The [online rock-paper-scissors game](docs/rock-paper-scissors.md) uses the same
 Worker deployment with a separate Durable Object for five public rooms,
 anonymous players, and live spectators.
+[Shared Bingo](docs/bingo.md) adds one account-free global session with private
+cards, a caller role, and synchronized calls in the same Worker.
 All files within a discovered project are public, so keep source-only or private
 files outside it. Use ordinary files and directories; symbolic links are rejected
 by the build. Projects that need build tools can generate static files into this
@@ -62,7 +64,7 @@ Capture runs in fresh browser contexts against a temporary, read-only loopback
 server at `/sandbox/`. Only GETs within the current local project are allowed;
 external traffic, other methods, WebSockets, and service workers are blocked.
 `api-config.json` is replaced **in the capture browser only** with an empty API
-URL. Persistent Counter and online rock-paper-scissors therefore show their
+URL. Persistent Counter, rock-paper-scissors, and Bingo therefore show their
 actual unavailable/offline UI, with no simulated live counts or players. No
 production credentials or backend runtime are needed, and deployed project
 files retain their original API configuration. Remote fonts, images, scripts,
@@ -86,7 +88,7 @@ requests, and automatically publishes `_site/` on every push to `main` (includin
 merges). It can also be run manually from the Actions tab on `main`. Each build
 includes all discovered projects, so adding one preserves the existing projects.
 Pull requests only validate the build; deployment runs on `main`.
-The workflow also tests the Persistent Counter and rock-paper-scissors backends,
+The workflow also tests the Persistent Counter, rock-paper-scissors, and Bingo backends,
 browser integrations, and screenshot safety and responsive gallery behavior.
 On `main`, it provisions D1, applies migrations, and deploys the Worker and
 Durable Object configuration before building the Pages artifact with its public

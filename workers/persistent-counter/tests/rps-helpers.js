@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createWorker } from './helpers.js';
 
 const source = (await readFile(new URL('../src/index.js', import.meta.url), 'utf8'))
+  .replace("export { Bingo } from './bingo.js';", '')
   .replace("export { RockPaperScissors } from './rock-paper-scissors.js';",
     (await readFile(new URL('../src/rock-paper-scissors.js', import.meta.url), 'utf8'))
       .replace("import { DurableObject } from 'cloudflare:workers';", ''));

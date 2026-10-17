@@ -13,7 +13,8 @@ export function createWorker(options = {}) {
     d1Databases: { DB: 'counter-test' },
     durableObjects: {
       COUNTER: { className: 'Counter', useSQLite: true },
-      RPS: { className: 'RockPaperScissors', useSQLite: true }
+      RPS: { className: 'RockPaperScissors', useSQLite: true },
+      BINGO: { className: 'Bingo', useSQLite: true }
     },
     bindings: config.vars,
     ...options
@@ -34,6 +35,7 @@ export async function migrate(worker) {
 // Test-only controls exercise the production class in workerd with deterministic
 // time and persisted boundary state. None of these routes ship in the Worker.
 const counterSource = (await readFile(new URL('../src/index.js', import.meta.url), 'utf8'))
+  .replace("export { Bingo } from './bingo.js';", '')
   .replace("export { RockPaperScissors } from './rock-paper-scissors.js';",
     (await readFile(new URL('../src/rock-paper-scissors.js', import.meta.url), 'utf8'))
       .replace("import { DurableObject } from 'cloudflare:workers';", ''));

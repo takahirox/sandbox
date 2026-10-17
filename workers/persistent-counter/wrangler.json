@@ -8,12 +8,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "COUNTER", "class_name": "Counter" },
-      { "name": "RPS", "class_name": "RockPaperScissors" }
+      { "name": "RPS", "class_name": "RockPaperScissors" },
+      { "name": "BINGO", "class_name": "Bingo" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Counter"] },
-    { "tag": "v2", "new_sqlite_classes": ["RockPaperScissors"] }
+    { "tag": "v2", "new_sqlite_classes": ["RockPaperScissors"] },
+    { "tag": "v3", "new_sqlite_classes": ["Bingo"] }
   ],
   "vars": {
     "ALLOWED_ORIGIN": "https://takahirox.github.io"
