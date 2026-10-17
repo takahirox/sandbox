@@ -22,6 +22,9 @@ export class Bingo extends DurableObject {
         p.socket = null; changed = true;
         if (this.data.caller?.player === p.id) this.data.caller.deadline ??= this.now() + BINGO_GRACE;
       }
+      if (this.data.players.length && !this.data.players.some(p => p.socket) && !this.data.emptyDeadline) {
+        this.data.emptyDeadline = this.now() + BINGO_GRACE; changed = true;
+      }
       if (changed) await this.save();
     });
   }
@@ -97,6 +100,7 @@ export class Bingo extends DurableObject {
     if (p) {
       p.socket = null;
       if (this.data.caller?.player === p.id) this.data.caller.deadline ??= this.now() + BINGO_GRACE;
+      if (!this.data.players.some(p => p.socket)) this.data.emptyDeadline = this.now() + BINGO_GRACE;
       await this.save(); this.broadcast();
     }
     try { ws.close([1005, 1006, 1015].includes(code) ? 1000 : code, reason); } catch { /* Already closed. */ }
@@ -126,13 +130,20 @@ export class Bingo extends DurableObject {
               || !/^[a-f0-9]{64}$/.test(m.credential)))) return invalid();
           let p = this.data.players.find(p => p.credential === m.credential);
           if (!p) {
-            if (this.data.players.length >= BINGO_CAPACITY) return this.error(ws, 'This game has 128 cards. Try again after a caller resets it.');
+            const full = this.data.players.length >= BINGO_CAPACITY;
+            // Only a fresh game frees cards. Protect connected players and the
+            // rejoin grace, even when nobody claimed the caller role.
+            const abandoned = !this.data.players.some(p => p.socket) && !this.data.caller
+              && this.data.emptyDeadline && this.data.emptyDeadline <= now;
+            if (full && !abandoned) return this.error(ws, 'This game has 128 cards. Try again after a caller resets it, or 30 seconds after everyone leaves.');
             if (this.data.used >= BINGO_BUDGET) return this.error(ws, 'Daily play limit reached. Try tomorrow (UTC).');
+            if (full) this.resetGame();
             p = { id: crypto.randomUUID(), credential: bingoCredential(), card: this.newCard(), marks: [12], bingo: null, socket: null };
             this.data.players.push(p); this.data.used++;
           }
           const old = this.sockets().find(s => s.deserializeAttachment().id === p.socket);
           p.socket = a.id;
+          this.data.emptyDeadline = null;
           if (this.data.caller?.player === p.id) this.data.caller.deadline = null;
           a.joined = true; ws.serializeAttachment(a);
           await this.save();
@@ -179,12 +190,7 @@ export class Bingo extends DurableObject {
             this.data.called.push(drawNumber(this.data.called));
             if (this.data.called.length === 75) this.data.phase = 'complete';
           } else if (m.type === 'reset') {
-            this.data.game = crypto.randomUUID(); this.data.phase = 'waiting'; this.data.called = [];
-            // Only a fresh game frees disconnected cards; active-game cards never expire.
-            this.data.players = this.data.players.filter(p => p.socket);
-            for (const player of this.data.players) {
-              player.card = this.newCard(player.card); player.marks = [12]; player.bingo = null;
-            }
+            this.resetGame();
           }
         }
         this.data.used++;
@@ -195,6 +201,14 @@ export class Bingo extends DurableObject {
         ws.close(1011, 'Reconnect to synchronize'); throw new Error('Bingo action failed');
       }
     });
+  }
+  resetGame() {
+    this.data.game = crypto.randomUUID(); this.data.phase = 'waiting'; this.data.called = [];
+    this.data.emptyDeadline = null;
+    this.data.players = this.data.players.filter(p => p.socket);
+    for (const player of this.data.players) {
+      player.card = this.newCard(player.card); player.marks = [12]; player.bingo = null;
+    }
   }
   newCard(previous) {
     let card;

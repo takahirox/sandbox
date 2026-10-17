@@ -18,8 +18,12 @@ available. Anyone can claim an unoccupied caller role. Only that participant
 can start the game, draw, reset, or release the role. New game opens an explicit
 confirmation dialog, then clears calls, marks, and results, replaces every
 connected player's card, and waits for the caller to press Start game.
-Disconnected cards are removed only at that reset; other cards persist for the
-whole game. A returning browser whose card was removed receives a fresh card.
+Disconnected cards persist for the whole game and are removed at a reset.
+If all 128 cards are occupied and everyone disconnects for at least 30 seconds,
+the next newcomer starts a fresh game once any caller reservation has expired.
+Rejoining with an existing credential before that recovery keeps the same game
+and card and cancels recovery while connected. A returning browser whose card
+was removed receives a fresh card.
 
 A server-generated random 256-bit participant credential restores the card,
 marks, and any caller role on reconnect/reload. It is sent privately over the
@@ -84,10 +88,13 @@ allocation under hostile traffic. Other sandbox projects share that allocation.
 | Client message size | 512 characters; binary messages rejected |
 
 At the card cap, existing participants can still reconnect and the caller can
-reset to free disconnected cards; new participants receive an actionable limit
-message. At the daily cap, existing identities can reconnect, and caller release
-and timeout still work. The persisted midnight alarm pushes restored play
-availability. No repeat marks consume the daily allowance. Strict schemas
+reset to free disconnected cards; newcomers can also recover an abandoned game
+after the 30-second grace above. The abandonment deadline persists across runtime
+restarts, and recovery preserves the daily usage count. Otherwise new participants
+receive an actionable limit message. At the daily cap, existing identities can
+reconnect, and caller release and timeout still work. The persisted midnight
+alarm pushes restored play availability. No repeat marks consume the daily
+allowance. Strict schemas
 reject extra fields, malformed credentials, unknown/forged win messages, and
 invalid indexes. Origin/method/upgrade checks run at both routing boundaries.
 Only a SHA-256 hash of the trusted `CF-Connecting-IP` is used for rate buckets;

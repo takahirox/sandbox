@@ -283,3 +283,68 @@ test('128-card/socket bounds reject excess joins but allow authenticated reconne
     assert.ok(JSON.stringify(data).length < 128 * 1024, 'Bounded authoritative value fits storage limits');
   } finally { await worker.dispose(); }
 });
+
+for (const hasCaller of [true, false]) {
+  test(`a full abandoned game recovers for newcomers after rejoin grace (caller: ${hasCaller})`, { timeout: 30_000 }, async () => {
+    const path = await mkdtemp(join(tmpdir(), 'bingo-abandoned-'));
+    let worker = createBingoWorker({ durableObjectsPersist: path });
+    try {
+      const now = Date.now(); await bingoControl(worker, { now });
+      const a = hasCaller ? await start(worker) : await subscribeBingo(worker);
+      if (hasCaller) await draw(a);
+      const saved = a.state, credential = a.credential, clients = [];
+      for (let i = 1; i < 128; i++) clients.push(await subscribeBingo(worker, undefined, `198.51.100.${i}`));
+      for (const c of clients) c.ws.close();
+      await until(() => a.state.connected === 1);
+
+      // A connected participant protects every card, regardless of elapsed time.
+      await bingoControl(worker, { now: now + 31_000 });
+      const observer = await subscribeBingo(worker, undefined, '203.0.113.1');
+      assert.ok(observer.events.some(e => e.reason?.includes('128 cards')));
+      assert.equal(a.state.game, saved.game);
+      a.ws.close(); await until(() => observer.state?.connected === 0);
+
+      await bingoControl(worker, { now: now + 60_999 });
+      const early = await subscribeBingo(worker, undefined, '203.0.113.2');
+      assert.ok(early.events.some(e => e.reason?.includes('128 cards')));
+      early.ws.close();
+      const restored = await subscribeBingo(worker, credential, '203.0.113.3');
+      assert.equal(restored.credential, credential);
+      assert.equal(restored.state.game, saved.game);
+      assert.deepEqual(restored.state.you.card, saved.you.card);
+      assert.deepEqual(restored.state.you.marks, saved.you.marks);
+      assert.deepEqual(restored.state.called, saved.called);
+      assert.equal(restored.state.you.caller, hasCaller);
+      restored.ws.close(); await until(() => observer.state.connected === 0);
+
+      // The new grace deadline survives runtime recreation without extension.
+      const before = await bingoControl(worker);
+      await worker.dispose();
+      worker = createBingoWorker({ durableObjectsPersist: path });
+      await bingoControl(worker, { now: now + 90_998 });
+      const stillEarly = await subscribeBingo(worker, undefined, '203.0.113.4');
+      assert.ok(stillEarly.events.some(e => e.reason?.includes('128 cards')));
+      stillEarly.ws.close();
+      await bingoControl(worker, { now: now + 91_000 });
+      const fresh = await subscribeBingo(worker, undefined, '203.0.113.5');
+      assert.ok(fresh.state.you);
+      assert.notEqual(fresh.state.game, saved.game);
+      assert.equal(fresh.state.phase, 'waiting');
+      assert.deepEqual(fresh.state.called, []);
+      assert.deepEqual(fresh.state.you.marks, [12]);
+      assert.deepEqual(fresh.state.wins, []);
+      assert.equal(fresh.state.caller, null);
+      const after = await bingoControl(worker);
+      assert.equal(after.players.length, 1);
+      assert.equal(after.used, before.used + 1, 'Recovery retains the daily budget');
+      await action(fresh, 'claim'); await action(fresh, 'start'); await draw(fresh);
+
+      // An old credential cannot restore the previous game or its caller role.
+      const old = await subscribeBingo(worker, credential, '203.0.113.6');
+      assert.notEqual(old.credential, credential);
+      assert.equal(old.state.game, fresh.state.game);
+      assert.equal(old.state.you.caller, false);
+      assert.equal((await action(old, 'draw', { expected: 1 })).type, 'error');
+    } finally { await worker.dispose(); await rm(path, { recursive: true, force: true }); }
+  });
+}
