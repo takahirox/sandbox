@@ -115,11 +115,17 @@ test('15 presses/sec remain usable, brief bursts are responsive, and excessive c
       assert.equal((await increment(worker, client)).status, 200);
     }
     await control(worker, { now: future + 10_000 });
-    const responses = await Promise.all(Array.from({ length: 100 }, () => increment(worker, client)));
+    // Consume each body immediately: Miniflare wraps Undici's response stream,
+    // which can be cancelled when the original response is garbage-collected.
+    const responses = await Promise.all(Array.from({ length: 100 }, async () => {
+      const response = await increment(worker, client);
+      return { status: response.status, retryAfter: response.headers.get('Retry-After'),
+        result: await response.json() };
+    }));
     assert.equal(responses.filter(r => r.status === 200).length, 30);
     const rejected = responses.find(r => r.status === 429);
-    assert.equal(rejected.headers.get('Retry-After'), '1');
-    const result = await rejected.json();
+    assert.equal(rejected.retryAfter, '1');
+    const result = rejected.result;
     assert.equal(result.reason, 'client_rate_limit');
     assert.equal(result.outcome, 'rejected');
     assert.equal(result.retryAfterMs, 67);
