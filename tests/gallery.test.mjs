@@ -44,7 +44,7 @@ test('normal build discovers real covers, isolates network access, and renders a
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   </script>`);
   const config = JSON.stringify({ apiUrl: backend + '/private-token-do-not-log' });
-  for (const name of ['persistent-counter', 'rock-paper-scissors', 'network-probe']) {
+  for (const name of ['bingo', 'persistent-counter', 'rock-paper-scissors', 'network-probe']) {
     await writeFile(resolve(root, 'projects', name, 'api-config.json'), config);
   }
   await writeFile(resolve(root, 'projects/network-probe/sw.js'), `fetch('${backend}/worker-mutation', { method: 'POST' });`);
@@ -58,7 +58,7 @@ test('normal build discovers real covers, isolates network access, and renders a
   assert.ok(!stderr.includes('private-token-do-not-log'));
   const output = resolve(root, '_site');
   const report = JSON.parse(await readFile(resolve(output, 'capture-report.json'), 'utf8'));
-  const valid = ['happy-cat', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'walk-to-hospital', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
+  const valid = ['bingo', 'happy-cat', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'walk-to-hospital', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
   for (const name of valid) {
     assert.equal(report[name].status, 'ok', `${name}: ${JSON.stringify(report[name])}`);
     const image = await readFile(resolve(output, 'covers', coverName(name)));
@@ -73,7 +73,7 @@ test('normal build discovers real covers, isolates network access, and renders a
   }
   assert.deepEqual(hits, [], 'No request or WebSocket reaches the backend');
   const originalCat = await readFile(resolve(output, 'covers', coverName('happy-cat')));
-  for (const name of ['persistent-counter', 'rock-paper-scissors']) {
+  for (const name of ['bingo', 'persistent-counter', 'rock-paper-scissors']) {
     assert.equal(await readFile(resolve(output, 'projects', name, 'api-config.json'), 'utf8'), config, 'Published API config is preserved');
   }
 
