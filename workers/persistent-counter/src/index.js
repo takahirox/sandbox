@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 export { RockPaperScissors } from './rock-paper-scissors.js';
 export { Bingo } from './bingo.js';
+export { PongSignaling } from './pong.js';
 
 const DAILY_LIMIT = 20_000;
 const FLUSH_MS = 5_000;
@@ -288,7 +289,7 @@ export default {
     const path = new URL(request.url).pathname;
     const method = path === '/api/counter' ? 'GET'
       : path === '/api/counter/increment' ? 'POST'
-      : path === '/api/counter/ws' || path === '/api/rps/ws' || path === '/api/bingo/ws' ? 'GET' : null;
+      : path === '/api/counter/ws' || path === '/api/rps/ws' || path === '/api/bingo/ws' || path === '/api/pong/ws' ? 'GET' : null;
     if (!method) return json({ error: 'Not found' }, 404);
 
     if (request.method === 'OPTIONS') {
@@ -304,7 +305,7 @@ export default {
       headers.set('Allow', `${method}, OPTIONS`);
       return json({ error: 'Method not allowed' }, 405);
     }
-    const websocket = path === '/api/counter/ws' || path === '/api/rps/ws' || path === '/api/bingo/ws';
+    const websocket = path === '/api/counter/ws' || path === '/api/rps/ws' || path === '/api/bingo/ws' || path === '/api/pong/ws';
     if ((method === 'POST' || websocket) && origin !== env.ALLOWED_ORIGIN) {
       return json({ error: 'Origin required' }, 403);
     }
@@ -315,7 +316,8 @@ export default {
     try {
       const response = await (path === '/api/rps/ws'
         ? env.RPS.getByName('five-rooms') : path === '/api/bingo/ws'
-          ? env.BINGO.getByName('global-bingo') : env.COUNTER.getByName('shared-counter')).fetch(request);
+          ? env.BINGO.getByName('global-bingo') : path === '/api/pong/ws'
+            ? env.PONG.getByName('pong-lobby') : env.COUNTER.getByName('shared-counter')).fetch(request);
       if (response.status === 101) return response;
       const outgoing = new Response(response.body, response);
       for (const [key, value] of headers) outgoing.headers.set(key, value);

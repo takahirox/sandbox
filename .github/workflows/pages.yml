@@ -28,7 +28,7 @@ jobs:
       - name: Install Worker tools
         working-directory: workers/persistent-counter
         run: npm ci
-      - name: Test counter, rock-paper-scissors, bingo, persistence, and provisioning
+      - name: Test counter, rock-paper-scissors, bingo, Pong signaling/rules, persistence, and provisioning
         working-directory: workers/persistent-counter
         run: npm test
       - name: Validate Worker configuration and bundle
@@ -48,7 +48,7 @@ jobs:
       - name: Install browser for integration checks
         working-directory: workers/persistent-counter
         run: npx playwright install --with-deps chromium
-      - name: Test counter, rock-paper-scissors, and bingo browsers against local Cloudflare runtime
+      - name: Test counter, rock-paper-scissors, bingo, and P2P Pong browsers against local Cloudflare runtime
         working-directory: workers/persistent-counter
         run: npm run test:browser
       - name: Test screenshot gallery and walk-to-hospital interactions
