@@ -15,6 +15,28 @@ let state = newGame(), targets = [HEIGHT / 2, HEIGHT / 2], display = structuredC
 let direction = 0, localY = HEIGHT / 2, sequence = 0, lastInput = -1, lastFrame = 0, lastSend = 0, accumulator = 0;
 const status = text => { $('status').textContent = text; };
 function controls(enabled) { $('up').disabled = $('down').disabled = !enabled; }
+function phase(value, focus = false) {
+  const active = document.activeElement;
+  document.querySelector('main').dataset.phase = value;
+  $('create').hidden = !['ready', 'offline', 'finished', 'failure'].includes(value);
+  $('create').textContent = value === 'finished' ? 'Play again' : value === 'failure' ? 'Create new match' : 'Create match';
+  $('join').hidden = value !== 'invited';
+  $('invitation').hidden = value !== 'waiting';
+  $('leave').hidden = !['connecting', 'waiting', 'playing'].includes(value);
+  $('play-controls').hidden = value !== 'playing';
+  $('privacy').hidden = ['loading', 'connecting', 'playing'].includes(value);
+  controls(value === 'playing');
+  if (value !== 'waiting') {
+    $('invite').value = '';
+    $('invite-details').open = false;
+  }
+  // A state change must not leave keyboard focus in a hidden action/control.
+  if (focus || active?.closest('[hidden]')) {
+    const next = value === 'playing' ? canvas : value === 'waiting' ? $('copy')
+      : value === 'connecting' ? $('leave') : value === 'invited' ? $('join') : $('create');
+    next.focus({ preventScroll: true });
+  }
+}
 function score() {
   for (const [i, id] of ['left-score', 'right-score'].entries()) {
     // Avoid repeated live-region announcements on every motion snapshot.
@@ -24,25 +46,30 @@ function score() {
 function endMatch() {
   if (finished) return;
   running = false; finished = true; controls(false); direction = 0;
-  score(); status(`Match finished · ${state.winner === 0 ? 'Left' : 'Right'} wins ${state.scores.join(' – ')}.`);
-  $('create').hidden = false; $('create').textContent = 'Create a new match';
+  score(); status(`${state.winner === 0 ? 'Left' : 'Right'} wins · ${state.scores.join(' – ')}`);
+  phase('finished', true);
   // Keep reliable channel open until the opponent receives the end event.
 }
 function start(asHost) {
   peer?.close(); host = asHost; running = false; finished = false;
   state = newGame(); display = structuredClone(state); targets = [HEIGHT / 2, HEIGHT / 2];
   localY = HEIGHT / 2; direction = 0; sequence = 0; lastInput = -1; accumulator = 0; score(); controls(false);
-  $('create').hidden = $('join').hidden = true; $('leave').hidden = false; $('invitation').hidden = true; $('invite').value = '';
-  $('copy').textContent = 'Copy link';
-  $('side').textContent = host ? 'You play left' : 'You play right'; status('Connecting to signaling…');
+  $('copy').textContent = 'Copy invitation link';
+  $('privacy').open = false;
+  $('left-label').textContent = host ? 'You · left' : 'Opponent · left';
+  $('right-label').textContent = host ? 'Opponent · right' : 'You · right';
+  status('Connecting…'); phase('connecting');
   const current = new PongPeer(apiUrl, host, invitation, {
     onInvite: ({ session, invite }) => {
       const url = new URL(location.href); url.hash = new URLSearchParams({ session, invite });
-      $('invite').value = url.href; $('invitation').hidden = false;
+      $('invite').value = url.href; phase('waiting', true);
     },
-    onStatus: status,
+    onStatus: message => {
+      status(message);
+      if (message === 'Connecting…') phase('connecting');
+    },
     onConnected: () => {
-      running = true; controls(true); $('invitation').hidden = true; $('invite').value = '';
+      running = true; phase('playing');
       lastFrame = performance.now(); lastSend = 0; canvas.focus({ preventScroll: true });
       if (host) current.send('events', { type: 'start', state });
     },
@@ -58,8 +85,7 @@ function start(asHost) {
     onFailure: message => {
       running = false; controls(false); direction = 0;
       if (!finished) status(message);
-      $('invitation').hidden = true; $('invite').value = ''; $('leave').hidden = true;
-      $('create').hidden = false; $('create').textContent = 'Create a new match';
+      phase(finished ? 'finished' : 'failure', true);
     },
     onDiagnostics: data => {
       if (debug) $('diagnostics').textContent = `ICE: ${data.ice}\nConnection: ${data.connection}\nDirect DataChannels: ${data.direct ? 'open' : 'pending'}\nRound-trip time: ${data.rtt === null ? 'pending' : data.rtt + ' ms'}\nSTUN only · no relay`;
@@ -68,15 +94,21 @@ function start(asHost) {
   peer = current;
 }
 $('create').onclick = () => start(true);
-$('join').onclick = () => { $('join').hidden = true; start(false); };
+$('join').onclick = () => start(false);
 $('leave').onclick = () => {
   peer?.close(); running = false; controls(false); direction = 0;
-  $('leave').hidden = $('invitation').hidden = true; $('invite').value = '';
-  $('create').hidden = false; $('create').textContent = 'Create a new match'; status('Disconnected. Create a new match to play again.');
+  status('Disconnected. Start a new match to play.'); phase('failure', true);
 };
 $('copy').onclick = async () => {
-  try { await navigator.clipboard.writeText($('invite').value); $('copy').textContent = 'Copied'; }
-  catch { $('invite').focus(); $('invite').select(); }
+  const link = $('invite').value;
+  try {
+    await navigator.clipboard.writeText(link);
+    if ($('invite').value === link) { $('copy').textContent = 'Copy again'; status('Link copied · waiting for player…'); }
+  } catch {
+    if ($('invite').value === link) {
+      $('invite-details').open = true; $('invite').focus(); $('invite').select(); status('Copy the selected link to invite a player.');
+    }
+  }
 };
 const keyDirection = key => ['ArrowUp', 'w', 'W'].includes(key) ? -1 : ['ArrowDown', 's', 'S'].includes(key) ? 1 : 0;
 canvas.addEventListener('keydown', e => { const d = keyDirection(e.key); if (d && running) { e.preventDefault(); direction = d; } });
@@ -125,10 +157,10 @@ function draw(now) {
     }
   }
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
-  ctx.strokeStyle = '#3d536c'; ctx.setLineDash([7, 10]); ctx.beginPath(); ctx.moveTo(WIDTH / 2, 12); ctx.lineTo(WIDTH / 2, HEIGHT - 12); ctx.stroke(); ctx.setLineDash([]);
-  ctx.fillStyle = '#83dfdd'; ctx.fillRect(20, display.paddles[0] - PADDLE / 2, 12, PADDLE);
-  ctx.fillStyle = '#ffd38b'; ctx.fillRect(WIDTH - 32, display.paddles[1] - PADDLE / 2, 12, PADDLE);
-  ctx.fillStyle = '#e4edf6'; ctx.beginPath(); ctx.arc(display.ball[0], display.ball[1], RADIUS, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#6c8272'; ctx.setLineDash([7, 10]); ctx.beginPath(); ctx.moveTo(WIDTH / 2, 12); ctx.lineTo(WIDTH / 2, HEIGHT - 12); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#f4f1e9'; ctx.fillRect(20, display.paddles[0] - PADDLE / 2, 12, PADDLE);
+  ctx.fillStyle = '#f2a080'; ctx.fillRect(WIDTH - 32, display.paddles[1] - PADDLE / 2, 12, PADDLE);
+  ctx.fillStyle = '#f4f1e9'; ctx.beginPath(); ctx.arc(display.ball[0], display.ball[1], RADIUS, 0, Math.PI * 2); ctx.fill();
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
@@ -140,6 +172,6 @@ try {
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) throw new Error('Invalid endpoint');
   if (!window.RTCPeerConnection) throw new Error('WebRTC unavailable');
   apiUrl = url.origin; $('create').disabled = false;
-  if (invited) { $('join').hidden = false; $('create').hidden = true; status('Invitation ready. Join to connect directly to your opponent.'); }
-  else status('Ready. Create a match and share the private link.');
-} catch { status('Offline preview · signaling unavailable. The live demo needs a configured WebRTC-capable browser.'); }
+  if (invited) { phase('invited'); status('Your opponent invited you to play.'); }
+  else { phase('ready'); status('Invite a friend to play.'); }
+} catch { phase('offline'); status('Offline preview · matches unavailable.'); }

@@ -7,6 +7,20 @@ simulation. Focus the court for arrow/W/S controls, drag on touch screens, or us
 the large up/down buttons. Leaving or losing the host ends the match. Retry by
 creating a new match and sharing its fresh link; invitations cannot be reused.
 
+The court and score stay visible throughout. The landing screen offers **Create
+match**; invitation links offer **Join match**. Hosts get **Copy invitation link**
+while waiting, with the raw link and five-minute expiry in a collapsed disclosure
+(automatically opened and selected if clipboard access fails). Setup actions and
+disclosures disappear during play, leaving the score, court, compact controls,
+and a quiet leave action. Results offer **Play again**, which creates a fresh
+invitation. Keyboard focus follows actions as they are replaced, and score/status
+updates are announced without repeating every animation frame.
+
+The **Before you play** disclosure is available before creating or joining and
+explains network-information exposure and connection limitations. Normal status
+messages are brief; technical troubleshooting stays in the opt-in diagnostics.
+The static offline preview uses the same court without creating a live match.
+
 Only share with someone you trust. Direct WebRTC reveals network information
 (potentially public/local addresses) to the other participant. STUN-only
 connections can fail across strict NATs, firewalls, VPNs, and mobile networks.
@@ -132,6 +146,23 @@ diagnostics, and a static preview. Gallery tests exercise production-configured
 preview capture with a network trap and preserve the published API config.
 An additional native-browser test waits for an actual storage alarm to close an
 unused signaling socket without incoming traffic.
+
+Issue #40 adds browser coverage for the contextual landing/invitation/play/result
+actions, hidden setup details during play, clipboard copy and manual fallback,
+cancel/expiry/retry, fresh invitations after a result, keyboard focus and privacy
+disclosure access, touch target sizes, 320/390/1280-pixel layouts, and reduced
+motion. The real first-to-five integration continues to exercise actual physics
+and DataChannels rather than a simulated connection.
+
+UI refinement validation on 2026-10-18 passed all 50 backend/rules tests, 24 browser
+integration tests, 11 Python build tests, five coin-flip tests, and six
+gallery/walking tests. Worker dry-run and both local migration runs passed. The
+normal build captured all seven projects; Pong reported zero blocked requests
+and zero attempted WebSockets. Desktop waiting and 320-pixel live-play screens
+were also inspected using a local signaling runtime. No shared Worker code,
+production config, transport settings, or game rules changed. Physical-device,
+cross-network, and post-merge deployment checks remain pending as described
+below.
 
 Implementation validation on 2026-10-18 used Node.js 24.12.0, the pinned
 Playwright 1.63.0 Chromium, and the local workerd/Miniflare runtime. Two isolated
