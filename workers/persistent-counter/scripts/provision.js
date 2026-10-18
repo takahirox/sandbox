@@ -64,6 +64,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       JSON.stringify({ apiUrl: result.apiUrl }) + '\n');
     await writeFile(new URL('../../../projects/bingo/api-config.json', import.meta.url),
       JSON.stringify({ apiUrl: result.apiUrl }) + '\n');
+    await writeFile(new URL('../../../projects/p2p-pong/api-config.json', import.meta.url),
+      JSON.stringify({ apiUrl: result.apiUrl }) + '\n');
     console.log('D1 binding and public API configuration prepared.');
   } catch (error) {
     console.error(error.message);

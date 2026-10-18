@@ -9,13 +9,15 @@
     "bindings": [
       { "name": "COUNTER", "class_name": "Counter" },
       { "name": "RPS", "class_name": "RockPaperScissors" },
-      { "name": "BINGO", "class_name": "Bingo" }
+      { "name": "BINGO", "class_name": "Bingo" },
+      { "name": "PONG", "class_name": "PongSignaling" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Counter"] },
     { "tag": "v2", "new_sqlite_classes": ["RockPaperScissors"] },
-    { "tag": "v3", "new_sqlite_classes": ["Bingo"] }
+    { "tag": "v3", "new_sqlite_classes": ["Bingo"] },
+    { "tag": "v4", "new_sqlite_classes": ["PongSignaling"] }
   ],
   "vars": {
     "ALLOWED_ORIGIN": "https://takahirox.github.io"

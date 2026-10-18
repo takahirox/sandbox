@@ -9,6 +9,7 @@ const bingo = (await readFile(new URL('../src/bingo.js', import.meta.url), 'utf8
   .replace("import { createCard, drawNumber, hasBingo } from './bingo-rules.js';", rules);
 const source = (await readFile(new URL('../src/index.js', import.meta.url), 'utf8'))
   .replace("export { RockPaperScissors } from './rock-paper-scissors.js';", '')
+  .replace("export { PongSignaling } from './pong.js';", '')
   .replace("export { Bingo } from './bingo.js';", bingo);
 
 export function createBingoWorker(options = {}) {
