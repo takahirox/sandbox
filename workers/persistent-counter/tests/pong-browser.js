@@ -60,11 +60,32 @@ async function open(f, options = {}) {
 async function pair(f, a, b) {
   await a.goto(f.origin + prefix + '?debug=1');
   await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
+  assert.equal(await a.locator('#copy').isVisible(), true);
+  assert.equal(await a.locator('#create').isVisible(), false);
+  assert.equal(await a.locator('#invite').isVisible(), false, 'Link details stay collapsed');
   const invite = await a.locator('#invite').inputValue();
   await b.goto(invite); await b.locator('#join').click();
   await Promise.all([a, b].map(p => textIs(p, 'status', 'Connected')));
+  for (const p of [a, b]) {
+    assert.equal(await p.locator('#privacy').isVisible(), false);
+    assert.equal(await p.locator('#invitation').isVisible(), false);
+    assert.equal(await p.locator('#invite').inputValue(), '', 'Private link is removed during play');
+    assert.equal(await p.locator('#create').isVisible(), false);
+    assert.equal(await p.locator('#join').isVisible(), false);
+    assert.equal(await p.locator('#play-controls').isVisible(), true);
+    assert.equal(await p.locator('#court').evaluate(el => el === document.activeElement), true);
+    assert.equal(await p.locator('#status').textContent(), 'Connected');
+    for (const id of ['up', 'down']) {
+      const control = await p.locator('#' + id).boundingBox();
+      assert.ok(control.width >= 44 && control.height >= 44, 'Touch controls remain large enough');
+    }
+  }
   await a.waitForFunction(() => window.pongSockets[0]?.readyState === WebSocket.CLOSED);
   await b.waitForFunction(() => window.pongSockets[0]?.readyState === WebSocket.CLOSED);
+  await b.setViewportSize({ width: 320, height: 640 });
+  const left = await b.locator('#left-score').boundingBox(), right = await b.locator('#right-score').boundingBox();
+  assert.ok(Math.abs(left.y - right.y) < 1, 'Scores align even when a narrow-screen player label wraps');
+  assert.equal(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   return invite;
 }
 
@@ -107,8 +128,14 @@ test('real direct WebRTC between isolated browser contexts: touch/keyboard, cons
     // Park both paddles above the ball's path using real touch input. The real
     // authoritative physics runs through nine points to a 5:4 victory.
     for (const p of [a, b]) await p.locator('#court').tap({ position: { x: 80, y: 2 } });
-    await textIs(a, 'status', 'Match finished', 40_000); await textIs(b, 'status', 'Match finished');
+    await textIs(a, 'status', 'wins', 40_000); await textIs(b, 'status', 'wins');
     assert.equal(await a.locator('#status').textContent(), await b.locator('#status').textContent());
+    for (const p of [a, b]) {
+      assert.equal(await p.locator('#create').textContent(), 'Play again');
+      assert.equal(await p.locator('#create').evaluate(el => el === document.activeElement), true);
+      assert.equal(await p.locator('#play-controls').isVisible(), false);
+      assert.equal(await p.locator('#leave').isVisible(), false);
+    }
     const scores = await a.locator('.score strong').allTextContents(); assert.ok(scores.includes('5'));
     assert.deepEqual(await b.locator('.score strong').allTextContents(), scores);
     const messages = await a.evaluate(() => window.pongData);
@@ -123,6 +150,11 @@ test('real direct WebRTC between isolated browser contexts: touch/keyboard, cons
     assert.ok(!diagnostics.includes(new URLSearchParams(new URL(invite).hash.slice(1)).get('invite')));
     assert.ok(!/candidate:|v=0|192\.168\.|127\.0\.0\./.test(diagnostics));
     assert.equal(await a.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
+    assert.ok(await a.locator('#invite').inputValue() !== invite, 'Play again creates a fresh invitation');
+    assert.deepEqual(await a.locator('.score strong').allTextContents(), ['0', '0']);
+    assert.equal(await a.locator('#play-controls').isVisible(), false);
+    await a.locator('#leave').click();
     await a.goto(f.origin + '/sandbox/'); assert.equal(await a.locator('a[href="./projects/p2p-pong/"]').count(), 1);
   } finally { await f.close(); }
 });
@@ -132,11 +164,13 @@ test('host disconnect ends match; a third browser cannot reuse an invitation or 
   try {
     const a = await open(f), b = await open(f), third = await open(f);
     const invite = await pair(f, a, b);
-    await third.goto(invite); await third.locator('#join').click(); await textIs(third, 'status', 'Connection failed');
+    await third.goto(invite); await third.locator('#join').click(); await textIs(third, 'status', 'Invitation unavailable');
     assert.ok(await third.locator('#create').isVisible());
     await textIs(b, 'status', 'Connected');
     await a.goto('about:blank'); await textIs(b, 'status', 'Disconnected');
     assert.ok(await b.locator('#up').isDisabled());
+    assert.equal(await b.locator('#play-controls').isVisible(), false);
+    assert.equal(await b.locator('#create').evaluate(el => el === document.activeElement), true);
     await b.locator('#create').click(); await textIs(b, 'status', 'Waiting');
   } finally { await f.close(); }
 });
@@ -161,8 +195,16 @@ test('ICE negotiation timeout provides retry and disposes stale connection; offl
     await a.clock.install();
     await a.goto(f.origin + prefix); await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
     const old = await a.locator('#invite').inputValue();
-    await b.goto(old); await b.locator('#join').click(); await textIs(a, 'status', 'Connecting directly');
-    await a.clock.fastForward(36_000); await textIs(a, 'status', 'Connection failed');
+    await b.goto(old);
+    assert.equal(await b.locator('#join').isVisible(), true);
+    assert.equal(await b.locator('#create').isVisible(), false);
+    assert.equal(await b.locator('#privacy').isVisible(), true);
+    await b.locator('#join').click(); await textIs(a, 'status', 'Connecting…');
+    assert.equal(await a.locator('#invitation').isVisible(), false);
+    assert.equal(await a.locator('#play-controls').isVisible(), false);
+    await a.clock.fastForward(36_000); await textIs(a, 'status', 'Direct connection failed');
+    assert.equal(await a.locator('#privacy').isVisible(), true);
+    assert.equal(await a.locator('#create').textContent(), 'Create new match');
     assert.equal(await a.evaluate(() => window.pongPCs[0].connectionState), 'closed');
     await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
     assert.notEqual(await a.locator('#invite').inputValue(), old);
@@ -173,5 +215,51 @@ test('ICE negotiation timeout provides retry and disposes stale connection; offl
     assert.equal(await p.locator('#create').isDisabled(), true);
     assert.deepEqual(await p.evaluate(() => [window.pongPCs.length, window.pongSockets.length]), [0, 0]);
     assert.equal(await p.locator('#debug').isVisible(), false);
+  } finally { await f.close(); }
+});
+
+test('minimal responsive landing, privacy disclosure, invitation copy/fallback, cancel and expiry', { timeout: 30_000 }, async () => {
+  const f = await fixture();
+  try {
+    const p = await open(f, { permissions: ['clipboard-read', 'clipboard-write'] });
+    await p.goto(f.origin + prefix); await textIs(p, 'status', 'Invite a friend');
+    assert.deepEqual(await p.evaluate(() => [window.pongPCs.length, window.pongSockets.length]), [0, 0]);
+    assert.equal(await p.locator('button:visible').count(), 1);
+    assert.equal(await p.locator('#play-controls').isVisible(), false);
+    assert.equal(await p.locator('#privacy').getAttribute('open'), null);
+    assert.ok(!/STUN|NAT|WebRTC|DataChannel|TURN/.test(await p.locator('body').innerText()));
+    await p.locator('#privacy summary').focus(); await p.keyboard.press('Enter');
+    assert.match(await p.locator('#privacy').innerText(), /IP address/);
+    assert.match(await p.locator('#privacy').innerText(), /no relay \(TURN\) fallback/);
+    await p.keyboard.press('Enter');
+    for (const width of [320, 390, 1280]) {
+      await p.setViewportSize({ width, height: 720 });
+      assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      const court = await p.locator('#court').boundingBox();
+      assert.ok(Math.abs(court.width / court.height - 800 / 450) < .03);
+      const action = await p.locator('#create').boundingBox();
+      assert.ok(action.y + action.height < 720, 'Primary action fits the initial view');
+    }
+    assert.equal(await p.locator('#create').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
+    await p.locator('#create').focus();
+    assert.equal(await p.locator('#create').evaluate(el => getComputedStyle(el).outlineStyle), 'solid');
+    await p.keyboard.press('Enter'); await textIs(p, 'status', 'Waiting');
+    assert.equal(await p.locator('#copy').evaluate(el => el === document.activeElement), true);
+    await p.locator('#copy').click(); await textIs(p, 'status', 'Link copied');
+    assert.ok(await p.evaluate(async () => await navigator.clipboard.readText() === document.getElementById('invite').value));
+    await p.evaluate(() => { navigator.clipboard.writeText = async () => { throw new Error('Denied'); }; });
+    await p.locator('#copy').click();
+    await p.locator('#invite').waitFor({ state: 'visible' });
+    assert.equal(await p.locator('#invite').evaluate(el => el === document.activeElement && el.selectionEnd === el.value.length), true);
+    assert.equal(await p.locator('#debug').isVisible(), false);
+    await p.locator('#leave').click(); await textIs(p, 'status', 'Disconnected');
+    assert.equal(await p.locator('#invite').inputValue(), '');
+    assert.equal(await p.locator('#create').evaluate(el => el === document.activeElement), true);
+    await p.clock.install();
+    await p.locator('#create').click(); await textIs(p, 'status', 'Waiting');
+    await p.clock.fastForward(301_000); await textIs(p, 'status', 'Invitation expired');
+    assert.equal(await p.locator('#copy').isVisible(), false);
+    assert.equal(await p.locator('#create').isVisible(), true);
+    assert.equal(await p.locator('#invite').inputValue(), '');
   } finally { await f.close(); }
 });

@@ -9,19 +9,48 @@
   <script type="module" src="./game.mjs"></script>
 </head>
 <body>
-<main>
-  <header><a href="../../">Sandbox</a><span>1 vs 1 · STUN only</span></header>
-  <h1>P2P Pong</h1>
-  <p class="intro">A private match. A direct connection. First to five.</p>
-  <p id="status" role="status" aria-live="polite">Loading…</p>
-  <div class="actions"><button id="create" disabled>Create match</button><button id="join" hidden>Join match</button><button id="leave" hidden>Leave match</button></div>
-  <div id="invitation" hidden><label for="invite">Private invitation · expires in 5 minutes</label><div class="share"><input id="invite" readonly spellcheck="false"><button id="copy">Copy link</button></div></div>
-  <div class="score" aria-live="polite" aria-label="Score"><span>Left <strong id="left-score">0</strong></span><span id="side">Two players</span><span><strong id="right-score">0</strong> Right</span></div>
-  <canvas id="court" width="800" height="450" tabindex="0" role="img" aria-label="Pong court" aria-describedby="controls">Pong requires a browser with canvas support. The score is displayed above.</canvas>
-  <p id="controls">Focus the court and use ↑ / ↓ or W / S. On touch screens, drag on the court or hold the buttons.</p>
-  <div class="touch"><button id="up" aria-label="Move paddle up" disabled>↑ Up</button><button id="down" aria-label="Move paddle down" disabled>↓ Down</button></div>
-  <p class="privacy">Direct WebRTC shares network information with your opponent. Only share links with someone you trust. Some NATs, firewalls and mobile networks block STUN-only connections. No TURN relay is used.</p>
-  <details id="debug" hidden><summary>Connection diagnostics</summary><pre id="diagnostics"></pre></details>
+<main data-phase="loading">
+  <header>
+    <a class="back" href="../../">← Sandbox</a>
+    <h1>Pong<span aria-hidden="true">.</span></h1>
+    <button id="leave" class="quiet" hidden>Leave match</button>
+  </header>
+  <section class="arena" aria-label="Pong match">
+    <div class="score" role="status" aria-atomic="true" aria-label="Score">
+      <div class="player"><span id="left-label">Left</span><strong id="left-score">0</strong></div>
+      <span id="side">First to 5</span>
+      <div class="player"><span id="right-label">Right</span><strong id="right-score">0</strong></div>
+    </div>
+    <canvas id="court" width="800" height="450" tabindex="0" role="img" aria-label="Pong court" aria-describedby="controls">Pong requires a browser with canvas support. The score is displayed above.</canvas>
+    <div id="play-controls" hidden>
+      <p id="controls">↑ ↓ / W S to move · drag to play</p>
+      <div class="touch"><button id="up" class="quiet" aria-label="Move paddle up" disabled>↑</button><button id="down" class="quiet" aria-label="Move paddle down" disabled>↓</button></div>
+    </div>
+  </section>
+  <section class="match-actions" aria-label="Match actions">
+    <p id="status" role="status" aria-atomic="true">Loading…</p>
+    <button id="create" disabled>Create match</button>
+    <button id="join" hidden>Join match</button>
+    <div id="invitation" hidden>
+      <button id="copy">Copy invitation link</button>
+      <details id="invite-details">
+        <summary>Invitation link</summary>
+        <label for="invite">Private · expires in 5 minutes</label>
+        <input id="invite" readonly spellcheck="false" autocomplete="off">
+      </details>
+    </div>
+    <details id="privacy">
+      <summary>Before you play</summary>
+      <p>Play with someone you trust. A direct connection can reveal your network information, including your IP address, to the other player. Keep invitation links private.</p>
+      <p>Some networks block direct connections. There is no relay (TURN) fallback; if you cannot connect, try another network.</p>
+    </details>
+  </section>
+  <details id="debug" hidden>
+    <summary>Connection diagnostics</summary>
+    <pre id="diagnostics">No connection started.</pre>
+    <p>STUN-only WebRTC uses motion and events DataChannels. Strict NATs, firewalls, VPNs, and mobile networks may block it. Try another network; no TURN relay is available.</p>
+  </details>
+  <noscript>Enable JavaScript to play Pong.</noscript>
 </main>
 </body>
 </html>
