@@ -66,7 +66,7 @@ function start(asHost) {
     },
     onStatus: message => {
       status(message);
-      if (message === 'Connecting…') phase('connecting');
+      if (['Connecting…', 'Retrying connection…'].includes(message)) phase('connecting');
     },
     onConnected: () => {
       running = true; phase('playing');
@@ -88,7 +88,21 @@ function start(asHost) {
       phase(finished ? 'finished' : 'failure', true);
     },
     onDiagnostics: data => {
-      if (debug) $('diagnostics').textContent = `ICE: ${data.ice}\nConnection: ${data.connection}\nDirect DataChannels: ${data.direct ? 'open' : 'pending'}\nRound-trip time: ${data.rtt === null ? 'pending' : data.rtt + ' ms'}\nSTUN only · no relay`;
+      if (debug) {
+        const count = values => Object.entries(values).map(([type, n]) => `${type} ${n}`).join(' · ');
+        $('diagnostics').textContent = [
+          `Stage: ${data.stage}`, `Retry: ${data.retries} / 1`, `Last failure: ${data.failure}`,
+          `ICE gathering: ${data.gathering}`, `ICE: ${data.ice}`, `Connection: ${data.connection}`,
+          `Local: ${count(data.local)}`, `Remote: ${count(data.remote)}`,
+          `Gathering errors: ${data.gatherErrors}`, `Candidate errors: ${data.candidateErrors}`,
+          `End of candidates: local ${data.localEnd ? 'yes' : 'no'} / remote ${data.remoteEnd ? 'yes' : 'no'}`,
+          `Selected pair types: ${data.pair}`, `DataChannels: ${count(data.channels)}`,
+          `Direct DataChannels: ${data.direct ? 'open' : 'pending'}`,
+          `Round-trip time: ${data.rtt === null ? 'pending' : data.rtt + ' ms'}`,
+          `Stages (ms): ${Object.entries(data.timings).map(([stage, ms]) => `${stage} ${ms}`).join(' · ')}`,
+          'STUN only · no relay'
+        ].join('\n');
+      }
     }
   });
   peer = current;

@@ -72,7 +72,7 @@ test('abandoned unauthenticated sockets, invitations and negotiations expire via
     await until(() => a.host.events.some(e => e.type === 'expired'));
     assert.equal((await pongControl(worker)).sessions, 0);
     const b = await createMatch(worker), guest = await joinMatch(worker, b.invite);
-    await pongControl(worker, { now: future + 370_003, alarm: true });
+    await pongControl(worker, { now: future + 400_003, alarm: true });
     await until(() => guest.events.some(e => e.type === 'expired'));
     const c = await createMatch(worker), g = await joinMatch(worker, c.invite);
     c.host.ws.close(1000); await until(() => g.events.some(e => e.type === 'peer-left'));
@@ -86,7 +86,8 @@ test('handshake and message rate/size limits; durable daily cap survives runtime
   try {
     await pongControl(worker, { now: future });
     const { host, invite } = await createMatch(worker), guest = await joinMatch(worker, invite);
-    host.send({ type: 'offer', sdp }); guest.send({ type: 'answer', sdp });
+    host.send({ type: 'offer', sdp }); await until(() => guest.events.some(e => e.type === 'offer'));
+    guest.send({ type: 'answer', sdp });
     await until(() => host.events.some(e => e.type === 'answer'));
     for (let i = 0; i < 161; i++) host.send({ type: 'candidate', candidate: '', sdpMid: null, sdpMLineIndex: null });
     await until(() => host.ws.readyState >= 2);
@@ -171,4 +172,55 @@ test('unreliable stale state cannot revert score/victory or overtake a reliable 
   assert.equal(acceptState(current, { ...current, tick: 101, revision: 2 }, true), true);
   assert.equal(acceptState(current, { ...current, tick: 101, revision: 0 }, true), false);
   assert.equal(acceptState(current, { ...current, ball: [NaN, 0, 0, 0] }, true), false);
+});
+
+test('one coordinated restart keeps the same seats, resets readiness, ignores stale generation and releases after new SDP', async () => {
+  const worker = createPongWorker();
+  try {
+    const { host, invite } = await createMatch(worker), guest = await joinMatch(worker, invite);
+    host.send({ type: 'offer', sdp }); await until(() => guest.events.some(e => e.type === 'offer'));
+    guest.send({ type: 'answer', sdp }); await until(() => host.events.some(e => e.type === 'answer'));
+    host.send({ type: 'ready' });
+    const deadline = (await pongControl(worker)).alarm;
+    // Simultaneous retry requests coalesce rather than generating offer glare.
+    host.send({ type: 'retry' }); guest.send({ type: 'retry' });
+    await until(() => host.events.some(e => e.type === 'restart') && guest.events.some(e => e.type === 'restart'));
+    host.send({ type: 'ready' }); // Stale readiness cannot release the new generation.
+    host.send({ type: 'candidate', candidate: 'old', sdpMid: '0', sdpMLineIndex: 0 });
+    host.send({ type: 'offer', generation: 1, sdp });
+    await until(() => guest.events.some(e => e.type === 'offer' && e.generation === 1));
+    assert.equal(guest.events.filter(e => e.type === 'restart').length, 1);
+    assert.equal(guest.events.filter(e => e.type === 'candidate').length, 0);
+    guest.send({ type: 'answer', generation: 1, sdp });
+    await until(() => host.events.some(e => e.type === 'answer' && e.generation === 1));
+    guest.send({ type: 'ready', generation: 1 });
+    assert.equal((await pongControl(worker)).sessions, 1);
+    assert.equal((await pongControl(worker)).alarm, deadline, 'Retry cannot extend the absolute expiry');
+    host.send({ type: 'candidate', generation: 1, candidate: '', sdpMid: null, sdpMLineIndex: null });
+    await until(() => guest.events.some(e => e.type === 'candidate' && e.candidate === ''));
+    host.send({ type: 'ready', generation: 1 });
+    await until(() => guest.events.some(e => e.type === 'released'));
+    assert.equal((await pongControl(worker)).sessions, 0); assert.equal((await pongControl(worker)).alarm, null);
+  } finally { await worker.dispose(); }
+});
+
+test('future generations, excess restarts, relay candidates and invalid ICE credentials fail closed', async () => {
+  const worker = createPongWorker();
+  try {
+    const cases = [
+      { type: 'offer', generation: 1, sdp },
+      { type: 'candidate', candidate: 'candidate:1 1 UDP 1 192.0.2.1 1234 typ relay', sdpMid: '0', sdpMLineIndex: 0 },
+      { type: 'candidate', candidate: '', sdpMid: null, sdpMLineIndex: null, usernameFragment: 'not valid' },
+      { type: 'offer', sdp: sdp + 'a=candidate:1 1 UDP 1 192.0.2.1 1234 typ relay\r\n' },
+      { type: 'retry', generation: 1 }
+    ];
+    for (const message of cases) {
+      const { host, invite } = await createMatch(worker), guest = await joinMatch(worker, invite);
+      if (message.type === 'retry') {
+        host.send({ type: 'retry' }); await until(() => guest.events.some(e => e.type === 'restart'));
+      }
+      host.send(message); await until(() => guest.events.some(e => e.type === 'peer-left'));
+      assert.equal((await pongControl(worker)).sessions, 0);
+    }
+  } finally { await worker.dispose(); }
 });
