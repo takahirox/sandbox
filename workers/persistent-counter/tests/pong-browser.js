@@ -113,6 +113,8 @@ test('real direct WebRTC between isolated browser contexts: touch/keyboard, cons
       });
       assert.ok(routes.length >= 2); assert.ok(routes.every(type => type && type !== 'relay'));
       console.info('Same-host WebRTC candidate types:', [...new Set(routes)].join(', '));
+      const diagnostics = await p.locator('#diagnostics').textContent();
+      console.info('Same-host handshake milliseconds:', /(?:^| · )connected (\d+)/.exec(diagnostics)?.[1] ?? 'pending');
     }
     await a.locator('#court').focus(); await a.keyboard.down('ArrowDown'); await a.waitForTimeout(200); await a.keyboard.up('ArrowDown');
     await a.waitForFunction(() => window.pongData.some(m => m.type === 'input' && m.y > 260));
@@ -202,10 +204,15 @@ test('ICE negotiation timeout provides retry and disposes stale connection; offl
     await b.locator('#join').click(); await textIs(a, 'status', 'Connecting…');
     assert.equal(await a.locator('#invitation').isVisible(), false);
     assert.equal(await a.locator('#play-controls').isVisible(), false);
-    await a.clock.fastForward(36_000); await textIs(a, 'status', 'Direct connection failed');
+    await a.clock.fastForward(41_000); await textIs(a, 'status', 'Retrying');
+    await a.clock.fastForward(42_000); await textIs(a, 'status', 'Direct connection failed');
     assert.equal(await a.locator('#privacy').isVisible(), true);
     assert.equal(await a.locator('#create').textContent(), 'Create new match');
     assert.equal(await a.evaluate(() => window.pongPCs[0].connectionState), 'closed');
+    await b.waitForFunction(() => window.pongPCs[0]?.connectionState === 'closed');
+    for (const p of [a, b]) await p.waitForFunction(() => window.pongSockets[0]?.readyState === WebSocket.CLOSED);
+    assert.equal((await pongControl(f.worker)).sessions, 0);
+    assert.equal((await pongControl(f.worker)).alarm, null);
     await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
     assert.notEqual(await a.locator('#invite').inputValue(), old);
   } finally { await f.close(); }
@@ -261,5 +268,110 @@ test('minimal responsive landing, privacy disclosure, invitation copy/fallback, 
     assert.equal(await p.locator('#copy').isVisible(), false);
     assert.equal(await p.locator('#create').isVisible(), true);
     assert.equal(await p.locator('#invite').inputValue(), '');
+  } finally { await f.close(); }
+});
+
+test('lost initial ICE recovers with one real ICE restart on the same authorized sockets', { timeout: 25_000 }, async () => {
+  const f = await fixture();
+  try {
+    const a = await open(f), b = await open(f);
+    for (const p of [a, b]) await p.addInitScript(() => {
+      const send = WebSocket.prototype.send, createOffer = RTCPeerConnection.prototype.createOffer;
+      window.restartOffers = []; window.initialCredentials = null; window.freshCredentials = false;
+      RTCPeerConnection.prototype.createOffer = async function(options) {
+        const result = await createOffer.call(this, options);
+        window.restartOffers.push(!!options?.iceRestart);
+        const credentials = /^a=ice-ufrag:(\S+)/m.exec(result.sdp)?.[1];
+        if (!options?.iceRestart) window.initialCredentials = credentials;
+        else window.freshCredentials = !!credentials && credentials !== window.initialCredentials;
+        return result;
+      };
+      WebSocket.prototype.send = function(raw) {
+        const m = JSON.parse(raw);
+        if (m.generation === 0 && m.type === 'candidate') return; // Simulated lost signaling.
+        if (m.generation === 0 && ['offer', 'answer'].includes(m.type)) {
+          m.sdp = m.sdp.replace(/^a=(candidate:.*|end-of-candidates)\r?\n/gm, '');
+          raw = JSON.stringify(m);
+        }
+        return send.call(this, raw);
+      };
+    });
+    await a.clock.install();
+    await a.goto(f.origin + prefix + '?debug=1'); await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
+    await b.goto(await a.locator('#invite').inputValue()); await b.locator('#join').click();
+    await a.waitForFunction(() => window.pongPCs[0]?.remoteDescription?.type === 'answer');
+    await a.clock.fastForward(41_000); await textIs(a, 'status', 'Retrying'); await a.clock.resume();
+    await Promise.all([a, b].map(p => textIs(p, 'status', 'Connected')));
+    assert.deepEqual(await a.evaluate(() => window.restartOffers), [false, true]);
+    assert.equal(await a.evaluate(() => window.freshCredentials), true, 'ICE restart changes credentials');
+    for (const p of [a, b]) {
+      await p.waitForFunction(() => window.pongSockets[0]?.readyState === WebSocket.CLOSED);
+      assert.deepEqual(await p.evaluate(() => [window.pongPCs.length, window.pongSockets.length]), [1, 1]);
+      await textIs(p, 'diagnostics', 'Retry: 1 / 1');
+      await textIs(p, 'diagnostics', 'Selected pair types: host / host');
+    }
+    assert.equal((await pongControl(f.worker)).sessions, 0);
+    assert.equal((await pongControl(f.worker)).alarm, null);
+    await a.waitForFunction(() => window.pongData.some(m => m.type === 'state'));
+  } finally { await f.close(); }
+});
+
+test('delayed/reordered ICE and completion markers remain private and establish a direct route', { timeout: 25_000 }, async () => {
+  const f = await fixture();
+  try {
+    const a = await open(f), b = await open(f), errors = [];
+    for (const p of [a, b]) {
+      p.on('pageerror', () => errors.push('pageerror'));
+      await p.addInitScript(() => {
+        const send = WebSocket.prototype.send;
+        WebSocket.prototype.send = function(raw) {
+          const m = JSON.parse(raw);
+          // Deliver candidates (and completion) before the corresponding SDP,
+          // then resend a stale ICE credential. No private values are logged.
+          if (['offer', 'answer'].includes(m.type)) {
+            setTimeout(() => send.call(this, raw), 250); return;
+          }
+          if (m.type === 'candidate' && m.candidate) {
+            const stale = { ...m, usernameFragment: 'obsolete' };
+            send.call(this, JSON.stringify(stale));
+            setTimeout(() => send.call(this, raw), 100); return;
+          }
+          return send.call(this, raw);
+        };
+      });
+    }
+    await pair(f, a, b);
+    assert.deepEqual(errors, []);
+    for (const p of [a, b]) {
+      const diagnostics = await p.locator('#diagnostics').textContent();
+      assert.match(diagnostics, /Retry: 0 \/ 1/);
+      assert.match(diagnostics, /Candidate errors: 0/);
+      assert.ok(!/candidate:|v=0|obsolete|(?:\d{1,3}\.){3}\d{1,3}|[a-f0-9]{0,4}:[a-f0-9]{0,4}:/i.test(diagnostics));
+    }
+  } finally { await f.close(); }
+});
+
+test('a transient answer setup error retries with rollback and no replacement peer or socket', { timeout: 25_000 }, async () => {
+  const f = await fixture();
+  try {
+    const a = await open(f), b = await open(f);
+    await b.addInitScript(() => {
+      const answer = RTCPeerConnection.prototype.createAnswer;
+      let attempts = 0;
+      RTCPeerConnection.prototype.createAnswer = function(...args) {
+        if (++attempts === 1) return Promise.reject(new Error('Simulated setup failure'));
+        return answer.apply(this, args);
+      };
+    });
+    try { await pair(f, a, b); } catch (error) {
+      for (const p of [a, b]) console.info('Retry setup diagnostics:', await p.locator('#diagnostics').textContent(),
+        await p.evaluate(() => window.pongSignals));
+      throw error;
+    }
+    for (const p of [a, b]) {
+      await textIs(p, 'diagnostics', 'Retry: 1 / 1');
+      assert.deepEqual(await p.evaluate(() => [window.pongPCs.length, window.pongSockets.length]), [1, 1]);
+    }
+    assert.equal((await pongControl(f.worker)).sessions, 0);
   } finally { await f.close(); }
 });

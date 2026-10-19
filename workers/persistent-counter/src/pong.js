@@ -85,7 +85,7 @@ export class PongSignaling extends DurableObject {
       if (!a.session) {
         if (m.type === 'create' && keys(m, ['type']) && Object.keys(this.data.sessions).length < 24) {
           const id = token(16), invite = token(32), expires = this.now() + 300_000;
-          this.data.sessions[id] = { invite, expires, joined: false, offer: false, answer: false };
+          this.data.sessions[id] = { invite, expires, joined: false, offer: false, answer: false, generation: 0 };
           Object.assign(a, { session: id, seat: 'host', expires });
           ws.serializeAttachment(a);
           this.send(ws, { type: 'created', session: id, invite, expires });
@@ -97,7 +97,7 @@ export class PongSignaling extends DurableObject {
             const p = peer.deserializeAttachment(); return p.session === m.session && p.seat === 'host';
           });
           if (!s || s.joined || s.invite !== m.invite || !host) { reject(); return; }
-          s.joined = true; s.invite = null; s.expires = this.now() + 60_000;
+          s.joined = true; s.invite = null; s.expires = this.now() + 90_000;
           Object.assign(a, { session: m.session, seat: 'guest', expires: s.expires });
           ws.serializeAttachment(a);
           const h = host.deserializeAttachment(); h.expires = s.expires; host.serializeAttachment(h);
@@ -108,18 +108,33 @@ export class PongSignaling extends DurableObject {
       const s = this.data.sessions[a.session];
       const peer = this.sockets().find(p => p !== ws && p.deserializeAttachment().session === a.session);
       if (!s || !peer || !s.joined) { reject(); return; }
-      if ((m.type === 'offer' || m.type === 'answer') && keys(m, ['type', 'sdp'])
-          && typeof m.sdp === 'string' && /^v=0\r?\n/.test(m.sdp) && m.sdp.includes('m=application ') && m.sdp.length <= 16_000) {
+      // Generations are scoped to these two authenticated seats. A single
+      // restart never renews the absolute session expiry or consumes a new invite.
+      const signalTypes = ['offer', 'answer', 'candidate', 'ready', 'retry'];
+      if (!signalTypes.includes(m.type) || !Number.isInteger(m.generation) || m.generation < 0 || m.generation > 1) { reject(); return; }
+      if (m.generation < s.generation) return; // In-flight previous-generation messages.
+      if (m.generation !== s.generation) { reject(); return; }
+      if (m.type === 'retry' && keys(m, ['type', 'generation']) && s.generation === 0) {
+        s.generation = 1; s.offer = false; s.answer = false;
+        for (const socket of [ws, peer]) {
+          const attachment = socket.deserializeAttachment(); attachment.ready = false;
+          socket.serializeAttachment(attachment);
+          this.send(socket, { type: 'restart', generation: 1 });
+        }
+        await this.save();
+      } else if ((m.type === 'offer' || m.type === 'answer') && keys(m, ['type', 'sdp', 'generation'])
+          && typeof m.sdp === 'string' && /^v=0\r?\n/.test(m.sdp) && m.sdp.includes('m=application ') && m.sdp.length <= 16_000 && !/^a=candidate:.*\btyp relay\b/m.test(m.sdp)) {
         if (m.type === 'offer' ? a.seat !== 'host' || s.offer : a.seat !== 'guest' || !s.offer || s.answer) {
           reject(); return;
         }
         s[m.type] = true; this.send(peer, m); await this.save();
-      } else if (m.type === 'candidate' && keys(m, ['type', 'candidate', 'sdpMid', 'sdpMLineIndex'])
-          && typeof m.candidate === 'string' && m.candidate.length <= 2048
+      } else if (m.type === 'candidate' && keys(m, ['type', 'candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment', 'generation'])
+          && typeof m.candidate === 'string' && m.candidate.length <= 2048 && !/\btyp relay\b/.test(m.candidate)
+          && (m.usernameFragment === null || typeof m.usernameFragment === 'string' && /^[a-zA-Z0-9+/]{1,256}$/.test(m.usernameFragment))
           && (m.sdpMid === null || typeof m.sdpMid === 'string' && m.sdpMid.length <= 64)
           && (m.sdpMLineIndex === null || Number.isInteger(m.sdpMLineIndex) && m.sdpMLineIndex >= 0 && m.sdpMLineIndex <= 16)) {
         this.send(peer, m);
-      } else if (m.type === 'ready' && keys(m, ['type']) && s.answer && !a.ready) {
+      } else if (m.type === 'ready' && keys(m, ['type', 'generation']) && s.answer && !a.ready) {
         a.ready = true; ws.serializeAttachment(a);
         if (peer.deserializeAttachment().ready) { this.end(a.session, 'released'); await this.save(); }
       } else { reject(); }

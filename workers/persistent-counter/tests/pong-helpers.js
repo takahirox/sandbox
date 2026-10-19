@@ -39,7 +39,8 @@ export async function connectPong(worker, ip = '192.0.2.1') {
   assertUpgrade(response);
   const ws = response.webSocket, events = [];
   ws.addEventListener('message', e => events.push(JSON.parse(e.data)));
-  const client = { ws, events, send: m => ws.send(JSON.stringify(m)) };
+  const client = { ws, events, send: m => ws.send(JSON.stringify(['offer', 'answer', 'candidate', 'ready', 'retry'].includes(m.type)
+    ? { generation: 0, ...(m.type === 'candidate' ? { usernameFragment: null } : {}), ...m } : m)) };
   ws.accept(); await until(() => events.some(e => e.type === 'hello')); return client;
 }
 function assertUpgrade(response) { if (response.status !== 101) throw new Error(`WebSocket status ${response.status}`); }
