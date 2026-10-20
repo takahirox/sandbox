@@ -99,7 +99,23 @@ function start(asHost) {
           `Selected pair types: ${data.pair}`, `DataChannels: ${count(data.channels)}`,
           `Direct DataChannels: ${data.direct ? 'open' : 'pending'}`,
           `Round-trip time: ${data.rtt === null ? 'pending' : data.rtt + ' ms'}`,
-          `Stages (ms): ${Object.entries(data.timings).map(([stage, ms]) => `${stage} ${ms}`).join(' · ')}`,
+          `Total since Create/Join: ${data.elapsedMs} ms · setup since pairing (wall): ${data.setupMs ?? 'pending'} ms / 82000 ms`,
+          `Stages since Create/Join (ms): ${Object.entries(data.timings).sort((a, b) => a[1] - b[1]).map(([stage, ms]) => `${stage} ${ms}`).join(' · ')}`,
+          ...data.attempts.flatMap(attempt => [
+            `Attempt ${attempt.generation} (${attempt.generation ? 'retry' : 'initial'}): ${attempt.outcome} · ${attempt.elapsedMs} ms · stage ${attempt.stage} · failure ${attempt.failure} at ${attempt.failureStage}`,
+            `  Local: ${count(attempt.local)}`,
+            `  Remote: ${count(attempt.remote)}`,
+            `  Candidate messages: ${count(attempt.exchange)}`,
+            `  Drops: ${count(attempt.drops)}`,
+            `  SDP: local ${attempt.localDescription ? 'sent' : 'pending'} / remote ${attempt.remoteDescription ? 'applied' : 'pending'}`,
+            `  States: gathering ${attempt.gathering} · ICE ${attempt.ice} · connection ${attempt.connection}`,
+            `  Checks started: ${attempt.checksStarted ? 'yes' : 'no'} · ignored prior failures ${attempt.ignoredFailures}`,
+            `  DataChannels: ${count(attempt.channels)} · pair ${attempt.pair}`,
+            `  Errors: gathering ${attempt.gatherErrors} / candidate ${attempt.candidateErrors}`,
+            `  End of candidates: local ${attempt.localEnd ? 'yes' : 'no'} / remote ${attempt.remoteEnd ? 'yes' : 'no'}`,
+            `  Stages since attempt start (ms): ${count(attempt.timings)}`,
+            `  State trace (ms): ${attempt.states.map(state => `${state.ms} ${state.gathering}/${state.ice}/${state.connection}`).join(' · ')}`
+          ]),
           'STUN only · no relay'
         ].join('\n');
       }

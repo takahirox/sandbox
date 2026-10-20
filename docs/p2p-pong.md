@@ -66,6 +66,98 @@ DataChannel readiness, and application round-trip time. Debug text never include
 raw SDP, candidate addresses, invitation capabilities, or credentials. There is
 no application logging of these values.
 
+## ICE retry investigation (#44)
+
+Two application problems were reproduced without the production service:
+
+- A unit fixture gathered and exchanged first-generation candidates, requested a
+  restart, sent the new offer, then dispatched an asynchronous state notification
+  while the old ICE/connection state was still `failed`. The previous guard only
+  lasted until `localSignaled` became true; the notification then exhausted the
+  retry immediately. The regression failed against the original implementation.
+  Both host and guest now require current local/remote SDP and evidence of new
+  ICE checks (`checking`, `connected`, or `completed`) before treating retry ICE
+  failure as terminal. An aggregate connection failure while ICE is checking
+  cannot terminate the new attempt. The 40-second attempt and 82-second absolute
+  setup deadlines still bound a transport that never transitions.
+- `resetAttempt()` erased unique candidate counts and stage evidence. A fixture
+  with known nonzero initial counts reproduced the final zeros after reset.
+  Those zeros cannot establish whether the original two PCs gathered candidates:
+  that historical evidence was lost. Debug mode now retains both attempts,
+  including their pre-close states, counts, errors, SDP progress, candidate
+  message accounting, drop reasons, bounded state traces, failure stage/reason,
+  channels and selected pair types. An attempt restarted by the other peer is
+  labeled `peer-retry`, without inventing a local failure. Locally gathered
+  candidates are counted even while local SDP/trickle is buffered or hung.
+
+The supplied trace's stage values were offsets from Create/Join, including the
+invitation wait. Pairing started at 88,585 ms and failure occurred at 105,086 ms:
+**16,501 ms of setup**, within both bounds. Retry started at 104,074 ms and failed
+1,012 ms later, just 6 ms after offer-sent. The latter is consistent with the
+reproduced guard defect; the trace alone does not prove the exact physical-device
+event sequence. A virtual-clock test reproduces an 88-second invitation wait
+followed by a short setup with total time exceeding 100 seconds. The debug view
+now explicitly separates Create/Join offsets, setup wall time since pairing,
+and stages/durations relative to each attempt. Global stage keys show the latest
+occurrence; each retained attempt has its own stages. Setup time freezes on
+successful release. Browser timers may be delayed by suspension; resumed events
+and async completions check the unchanged wall deadline before sending SDP,
+accepting candidates or starting play. The server's 90-second expiry starts at
+join, never renews on retry, and its existing alarm/authorization tests cover it.
+
+The signaling audit found no additional delivery defect: the Durable Object
+serializes the two authenticated seats, forwards both address families and
+completion markers, tags generations, and releases only after both current
+readiness messages. Remote candidates wait for applied SDP; stale generations
+and mismatched credentials are counted as drops. SDP-embedded candidates count
+as observations too. Individual add errors do not imply every route failed when
+other candidates were accepted. No backend/protocol, authorization, invite,
+quota, STUN endpoint, gameplay or visual-design change was required.
+
+Candidate message counters include completion markers. `localEvents` counts
+browser callbacks (including stale callbacks), `localSent` counts successful
+WebSocket sends, and `remoteReceived`/`remoteAccepted` count received messages and
+successful browser adds. Buffered queues, in-flight adds, drops and add errors
+explain the remaining messages. A successful send is not proof of delivery: compare both
+peers. Unique candidate-type counts also include SDP, so they need not equal
+trickle-message counts. Only aggregate numbers, fixed state/reason names and
+relative times reach diagnostics; no addresses, hostnames, credentials, SDP,
+raw candidates or invitation tokens are retained in snapshots or logged.
+
+### Focused physical-device diagnosis (not performed here)
+
+This environment provides two isolated Chromium contexts on one host, but no
+second physical PC or independent network. The original same-Wi-Fi failure and
+cross-network outcome therefore remain unverified; this fix does not claim to
+make an isolating access point or firewall pass direct UDP.
+
+1. On the updated build, keep both tabs active, add `?debug=1` before creating
+   the invite, and run a fresh match on the two PCs in both host/guest roles.
+   Record browser versions, network categories, and **only the sanitized debug
+   text from both peers** after failure. Do not share invitation URLs, developer
+   tools network payloads, SDP, raw candidates, addresses or hostnames.
+2. Compare initial and retry SDP progress and message counters. No local
+   candidates at timeout after local SDP points to gathering. Missing remote SDP or
+   peer receives despite local sends points to signaling/transport delivery;
+   buffered candidates indicate SDP has not applied. Credential/generation
+   drops or add errors isolate candidate handling. A retry should have meaningful
+   elapsed time/new checks or reach its timeout, never exhaust solely on old
+   failure notifications.
+3. If both sides applied SDP and accepted candidates but ICE checks fail, direct
+   connectivity remains a hypothesis, not proof of a specific network policy.
+   The Cloudflare Trickle ICE results demonstrate gathering only. Compare a
+   trusted wired LAN or non-guest Wi-Fi with the same browser pair; ask the network
+   owner whether guest/client isolation or multicast/mDNS filtering applies.
+   Check browser local-network permissions, VPN policy and host-firewall browser
+   rules without disabling the firewall or sharing addresses. Change one factor
+   at a time, then repeat with a fresh invite.
+4. Repeat over an independently routed network/mobile connection when available,
+   recording success/failure, attempt timings and selected candidate **types**.
+   A successful same-host test cannot validate LAN isolation, mDNS resolution,
+   NAT hairpinning or cross-network UDP. Confirm a complete first-to-five game
+   agrees on both screens and signaling closes after connection. No TURN or
+   Worker gameplay fallback should be introduced for failed direct checks.
+
 ## Initial handshake recovery and diagnosis (#42)
 
 A transient setup error, failed ICE, ten seconds of disconnected state, or an
@@ -225,6 +317,27 @@ diagnostics, and a static preview. Gallery tests exercise production-configured
 preview capture with a network trap and preserve the published API config.
 An additional native-browser test waits for an actual storage alarm to close an
 unused signaling socket without incoming traffic.
+
+Issue #44 validation on 2026-10-20 used Node.js 24.12.0, pinned Playwright
+1.63.0 and Chromium against local Miniflare/workerd. The full backend/rules suite
+passed 70 tests, including the extended Pong coverage at that point. Final Pong
+checks passed all 19 peer-state tests and 10 signaling/rules tests after the last
+diagnostic refinements. The full browser suite passed all 27 integrations;
+all eight Pong integrations passed again after the final refinements. Native
+browser coverage deliberately dropped first-generation SDP/trickle candidates,
+then injected delayed failed notifications after the real retry offer while
+delaying the retry answer. Both contexts recovered over a non-relay `host / host`
+pair using one peer and one socket each, retained initial/retry evidence, and
+exchanged actual gameplay. The complete first-to-five test agreed on both sides
+with signaling closed; same-host handshake observations were 33–459 ms in these
+runs, not a physical-network performance claim.
+
+The 11 Python build tests, five coin-flip tests and six gallery/walking tests
+passed. Worker dry-run, two idempotent local D1 migration runs and the normal
+seven-project screenshot build passed. Pong's capture attempted no WebSockets
+and blocked no requests. No production signaling, deploy, push, PR, merge or
+comment was used. Physical-device/cross-network validation and the main-branch
+Worker/Pages deployment remain pending as described above and below.
 
 Issue #42 validation on 2026-10-20 used Node.js 24.12.0, Playwright 1.63.0
 and Chromium 153.0.8010.12 against local Miniflare/workerd. Two isolated browser

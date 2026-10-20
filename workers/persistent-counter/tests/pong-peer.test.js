@@ -5,8 +5,9 @@ import { PongPeer, ATTEMPT_MS } from '../../../projects/p2p-pong/peer.mjs';
 const sdp = generation => `v=0\r\na=ice-ufrag:ice${generation}\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n`;
 const candidate = (generation = 0, address = '2001:db8::1') => ({ type: 'candidate', generation,
   candidate: `candidate:1 1 UDP 1 ${address} 1234 typ host`, sdpMid: '0', sdpMLineIndex: 0, usernameFragment: `ice${generation}` });
-async function fixture(t, host = true) {
-  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+async function fixture(t, host = true, waitingMs = 0) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const clockOrigin = Date.now(); t.mock.method(performance, 'now', () => Date.now() - clockOrigin);
   class Socket {
     static OPEN = 1;
     readyState = 1; sent = [];
@@ -43,6 +44,7 @@ async function fixture(t, host = true) {
   t.after(() => peer.close());
   const receive = async message => { peer.socket.onmessage({ data: JSON.stringify(message) }); await peer.chain; };
   await receive({ type: 'hello' });
+  if (host && waitingMs) { await receive({ type: 'created' }); t.mock.timers.tick(waitingMs); }
   await receive({ type: host ? 'peer' : 'joined' });
   return { peer, failures, diagnostics, receive, connected: () => connected };
 }
@@ -67,7 +69,7 @@ test('local candidates and end marker wait for SDP; stale ICE credentials are di
   peer.pc.setLocalDescription = async d => {
     await setLocal(d);
     peer.pc.onicecandidate({ candidate: candidate() });
-    peer.pc.onicecandidate({ candidate: null });
+    peer.pc.iceGatheringState = 'complete'; peer.pc.onicecandidate({ candidate: null });
   };
   assert.equal(peer.socket.sent.filter(m => m.type === 'candidate').length, 0);
   await receive({ type: 'offer', generation: 0, sdp: sdp(0) });
@@ -164,14 +166,15 @@ test('play starts only on release; post-connect loss does not attempt unauthoriz
 test('timeout categories distinguish gathering, exchange, connectivity and DataChannel startup', async t => {
   const { peer } = await fixture(t);
   assert.equal(peer.classifyTimeout(), 'ice-gathering');
-  peer.pc.iceGatheringState = 'complete'; assert.equal(peer.classifyTimeout(), 'negotiation-timeout');
+  peer.pc.iceGatheringState = 'complete'; assert.equal(peer.classifyTimeout(), 'ice-gathering');
+  peer.localCounts.host = 1; assert.equal(peer.classifyTimeout(), 'negotiation-timeout');
   peer.remoteGeneration = 0; assert.equal(peer.classifyTimeout(), 'candidate-exchange');
   peer.remoteCounts.host = 1; assert.equal(peer.classifyTimeout(), 'ice-connectivity');
   peer.pc.iceConnectionState = 'connected'; assert.equal(peer.classifyTimeout(), 'datachannel');
 });
 
 test('an in-flight candidate completing after cancellation cannot retain candidate data or send signals', async t => {
-  const { peer, receive } = await fixture(t, false);
+  const { peer, receive, diagnostics } = await fixture(t, false);
   await receive({ type: 'offer', generation: 0, sdp: sdp(0) });
   let finish;
   peer.pc.addIceCandidate = () => new Promise(resolve => { finish = resolve; });
@@ -180,5 +183,155 @@ test('an in-flight candidate completing after cancellation cannot retain candida
   peer.close(); const sent = peer.socket.sent.length;
   finish(); await pending;
   assert.equal(peer.remoteSeen.size, 0); assert.equal(peer.remoteCounts.host, 0);
+  assert.equal(diagnostics.at(-1).attempts[0].exchange.remoteApplying, 1, 'Retain the in-flight add at cancellation');
   assert.equal(peer.socket.sent.length, sent);
+});
+
+for (const host of [true, false]) test(`obsolete failed state after sending retry ${host ? 'offer' : 'answer'} cannot exhaust the new attempt`, async t => {
+  const { peer, receive, failures } = await fixture(t, host);
+  peer.pc.onicecandidate({ candidate: candidate() });
+  await receive({ type: host ? 'answer' : 'offer', generation: 0, sdp: sdp(0) });
+  await receive(candidate());
+  peer.pc.iceConnectionState = 'failed'; peer.pc.connectionState = 'failed';
+  peer.pc.oniceconnectionstatechange();
+  await receive({ type: 'restart', generation: 1 });
+  if (host) { t.mock.timers.tick(1000); await peer.chain; }
+  else await receive({ type: 'offer', generation: 1, sdp: sdp(1) });
+  assert.equal(peer.localSignaled, true);
+  peer.pc.onconnectionstatechange(); // Old transport failure queued after offer-sent.
+  assert.equal(peer.closed, false);
+  await receive({ type: 'answer', generation: 1, sdp: sdp(1) });
+  peer.pc.oniceconnectionstatechange(); // Still no new checking transition.
+  assert.equal(peer.closed, false);
+  peer.pc.onicecandidate({ candidate: candidate(1) });
+  await receive(candidate(1));
+  peer.pc.iceConnectionState = 'checking'; peer.pc.oniceconnectionstatechange();
+  peer.pc.onconnectionstatechange(); // Aggregate connection can still be failed.
+  assert.equal(peer.closed, false);
+  peer.pc.iceConnectionState = 'failed'; peer.pc.oniceconnectionstatechange();
+  assert.equal(failures.length, 1);
+  assert.equal(peer.failure, 'ice-connectivity');
+});
+
+test('initial and retry snapshots survive close with sanitized candidate accounting and pre-close states', async t => {
+  const { peer, receive, diagnostics } = await fixture(t);
+  peer.pc.onicecandidate({ candidate: candidate() });
+  await receive({ type: 'answer', generation: 0, sdp: sdp(0) });
+  await receive(candidate());
+  peer.pc.iceGatheringState = 'complete'; peer.pc.onicegatheringstatechange();
+  peer.transient('ice-connectivity');
+  await receive({ type: 'restart', generation: 1 });
+  t.mock.timers.tick(1000); await peer.chain;
+  await receive(candidate(0));
+  await receive({ ...candidate(1), usernameFragment: 'obsolete' });
+  await receive(candidate(1));
+  await receive({ type: 'answer', generation: 1, sdp: sdp(1) });
+  peer.pc.onicecandidate({ candidate: candidate(0) });
+  peer.pc.onicecandidate({ candidate: candidate(1) });
+  peer.pc.iceGatheringState = 'complete'; peer.pc.onicegatheringstatechange();
+  t.mock.timers.tick(ATTEMPT_MS);
+  const [initial, retry] = diagnostics.at(-1).attempts;
+  assert.deepEqual(diagnostics.at(-1).attempts.map(a => a.generation), [0, 1]);
+  assert.equal(initial.local.host, 1); assert.equal(initial.remote.host, 1);
+  assert.equal(initial.remoteDescription, true); assert.equal(initial.localDescription, true);
+  assert.equal(initial.failure, 'ice-connectivity'); assert.equal(initial.outcome, 'retry-requested');
+  assert.equal(retry.local.host, 1); assert.equal(retry.remote.host, 1);
+  assert.equal(retry.exchange.remoteReceived, 3); assert.equal(retry.exchange.remoteAccepted, 1);
+  assert.equal(retry.exchange.remoteDropped, 2); assert.equal(retry.exchange.localDropped, 1);
+  assert.equal(retry.drops.generation, 1); assert.equal(retry.drops.credentials, 2);
+  assert.equal(retry.gathering, 'complete'); assert.notEqual(retry.connection, 'closed');
+  assert.equal(retry.outcome, 'failed'); assert.equal(retry.failure, 'ice-connectivity');
+  assert.ok('offer-sent' in retry.timings && 'remote-description-applied' in retry.timings);
+  assert.ok(retry.states.length > 0);
+  assert.ok(!/2001:|192\.0|candidate:|v=0|ice0|ice1|obsolete|private-token|private-session/.test(JSON.stringify(diagnostics)));
+  const frozen = JSON.stringify(diagnostics.at(-1).attempts);
+  peer.pc.onicegatheringstatechange(); peer.pc.onconnectionstatechange();
+  assert.equal(JSON.stringify(diagnostics.at(-1).attempts), frozen);
+});
+
+test('stale disconnected state cannot arm a retry failure timer; duplicate restart cannot duplicate offers', async t => {
+  const { peer, receive } = await fixture(t);
+  peer.pc.iceConnectionState = 'disconnected'; peer.pc.oniceconnectionstatechange();
+  peer.transient('ice-connectivity');
+  await receive({ type: 'restart', generation: 1 });
+  await receive({ type: 'restart', generation: 1 });
+  t.mock.timers.tick(1000); await peer.chain;
+  peer.pc.oniceconnectionstatechange();
+  t.mock.timers.tick(10_000); await peer.chain;
+  assert.equal(peer.closed, false); assert.equal(peer.pc.offers.length, 2);
+  peer.pc.iceConnectionState = 'checking';
+  await receive({ type: 'answer', generation: 1, sdp: sdp(1) });
+  peer.pc.iceConnectionState = 'disconnected'; peer.pc.oniceconnectionstatechange();
+  t.mock.timers.tick(10_000);
+  assert.equal(peer.closed, true);
+});
+
+test('resumed release or async completion after wall deadline cannot connect before delayed timer dispatch', async t => {
+  const { peer, receive, connected } = await fixture(t);
+  await receive({ type: 'answer', generation: 0, sdp: sdp(0) });
+  peer.transportReady = true;
+  // Change wall time without executing timers, as with a suspended/background tab.
+  t.mock.timers.setTime(Date.now() + 83_000);
+  await receive({ type: 'released' });
+  assert.equal(connected(), 0); assert.equal(peer.closed, true);
+  const sent = peer.socket.sent.length;
+  t.mock.timers.tick(300_000);
+  assert.equal(peer.socket.sent.length, sent);
+});
+
+test('a candidate add rejection does not misclassify ICE failure when other candidates were accepted', async t => {
+  const { peer, receive } = await fixture(t);
+  peer.pc.onicecandidate({ candidate: candidate() });
+  await receive({ type: 'answer', generation: 0, sdp: sdp(0) });
+  await receive({ ...candidate(), candidate: 'invalid' });
+  await receive(candidate());
+  assert.equal(peer.candidateErrors, 1);
+  assert.equal(peer.classifyTimeout(), 'ice-connectivity');
+});
+
+test('invitation waiting is excluded from setup and per-attempt budgets/timings', async t => {
+  const { peer, receive, diagnostics } = await fixture(t, true, 88_000);
+  assert.equal(diagnostics.at(-1).setupMs, 0);
+  assert.equal(diagnostics.at(-1).timings.negotiating, 88_000);
+  t.mock.timers.tick(15_000);
+  peer.transient('ice-connectivity');
+  await receive({ type: 'restart', generation: 1 });
+  t.mock.timers.tick(1000); await peer.chain;
+  assert.equal(diagnostics.at(-1).setupMs, 16_000);
+  assert.equal(diagnostics.at(-1).elapsedMs, 104_000);
+  const [initial, retry] = diagnostics.at(-1).attempts;
+  assert.equal(initial.elapsedMs, 15_000); assert.equal(retry.elapsedMs, 1000);
+  assert.equal(retry.timings['offer-sent'], 1000);
+  t.mock.timers.tick(39_000);
+  assert.equal(peer.closed, true);
+  assert.equal(diagnostics.at(-1).setupMs, 55_000);
+});
+
+test('gathered candidates remain counted when local SDP never finishes and trickle cannot be sent', async t => {
+  const { peer, receive, diagnostics } = await fixture(t, false);
+  peer.pc.setLocalDescription = () => {
+    peer.pc.onicecandidate({ candidate: candidate() });
+    return new Promise(() => {});
+  };
+  void receive({ type: 'offer', generation: 0, sdp: sdp(0) });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(83_000);
+  const attempt = diagnostics.at(-1).attempts[0];
+  assert.equal(attempt.local.host, 1);
+  assert.equal(attempt.exchange.localEvents, 1); assert.equal(attempt.exchange.localSent, 0);
+  assert.equal(attempt.exchange.localBuffered, 1);
+  assert.equal(attempt.localDescription, false); assert.equal(attempt.failure, 'negotiation-timeout');
+});
+
+test('async SDP completion checks an elapsed wall deadline before accepting SDP or sending an answer', async t => {
+  const { peer, receive, failures } = await fixture(t, false);
+  let finish;
+  peer.pc.setRemoteDescription = () => new Promise(resolve => { finish = resolve; });
+  const pending = receive({ type: 'offer', generation: 0, sdp: sdp(0) });
+  await Promise.resolve(); await Promise.resolve();
+  t.mock.timers.setTime(Date.now() + 83_000);
+  const sent = peer.socket.sent.length;
+  finish(); await pending;
+  assert.equal(peer.closed, true); assert.equal(failures.length, 1);
+  assert.equal(peer.socket.sent.length, sent); assert.equal(peer.remoteGeneration, null);
 });
