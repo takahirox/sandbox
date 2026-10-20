@@ -195,7 +195,7 @@ test('ICE negotiation timeout provides retry and disposes stale connection; offl
     const a = await open(f), b = await open(f);
     await b.addInitScript(() => { RTCPeerConnection.prototype.setRemoteDescription = () => new Promise(() => {}); });
     await a.clock.install();
-    await a.goto(f.origin + prefix); await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
+    await a.goto(f.origin + prefix + '?debug=1'); await a.locator('#create').click(); await textIs(a, 'status', 'Waiting');
     const old = await a.locator('#invite').inputValue();
     await b.goto(old);
     assert.equal(await b.locator('#join').isVisible(), true);
@@ -206,6 +206,8 @@ test('ICE negotiation timeout provides retry and disposes stale connection; offl
     assert.equal(await a.locator('#play-controls').isVisible(), false);
     await a.clock.fastForward(41_000); await textIs(a, 'status', 'Retrying');
     await a.clock.fastForward(42_000); await textIs(a, 'status', 'Direct connection failed');
+    await textIs(a, 'diagnostics', 'Attempt 0 (initial): retry-requested');
+    await textIs(a, 'diagnostics', 'Attempt 1 (retry): failed');
     assert.equal(await a.locator('#privacy').isVisible(), true);
     assert.equal(await a.locator('#create').textContent(), 'Create new match');
     assert.equal(await a.evaluate(() => window.pongPCs[0].connectionState), 'closed');
@@ -277,7 +279,7 @@ test('lost initial ICE recovers with one real ICE restart on the same authorized
     const a = await open(f), b = await open(f);
     for (const p of [a, b]) await p.addInitScript(() => {
       const send = WebSocket.prototype.send, createOffer = RTCPeerConnection.prototype.createOffer;
-      window.restartOffers = []; window.initialCredentials = null; window.freshCredentials = false;
+      window.restartOffers = []; window.initialCredentials = null; window.freshCredentials = false; window.obsoleteFailures = 0;
       RTCPeerConnection.prototype.createOffer = async function(options) {
         const result = await createOffer.call(this, options);
         window.restartOffers.push(!!options?.iceRestart);
@@ -288,6 +290,19 @@ test('lost initial ICE recovers with one real ICE restart on the same authorized
       };
       WebSocket.prototype.send = function(raw) {
         const m = JSON.parse(raw);
+        if (m.generation === 1 && m.type === 'offer') {
+          setTimeout(() => {
+            const pc = window.pongPCs[0];
+            for (const key of ['iceConnectionState', 'connectionState']) Object.defineProperty(pc, key, { configurable: true, value: 'failed' });
+            pc.dispatchEvent(new Event('iceconnectionstatechange'));
+            pc.dispatchEvent(new Event('connectionstatechange'));
+            for (const key of ['iceConnectionState', 'connectionState']) delete pc[key];
+            window.obsoleteFailures++;
+          }, 0);
+        }
+        // Ensure obsolete failure notifications run after offer-sent and before
+        // the real retry answer, while keeping the native ICE engine untouched.
+        if (m.generation === 1 && m.type === 'answer') { setTimeout(() => send.call(this, raw), 150); return; }
         if (m.generation === 0 && m.type === 'candidate') return; // Simulated lost signaling.
         if (m.generation === 0 && ['offer', 'answer'].includes(m.type)) {
           m.sdp = m.sdp.replace(/^a=(candidate:.*|end-of-candidates)\r?\n/gm, '');
@@ -304,11 +319,20 @@ test('lost initial ICE recovers with one real ICE restart on the same authorized
     await Promise.all([a, b].map(p => textIs(p, 'status', 'Connected')));
     assert.deepEqual(await a.evaluate(() => window.restartOffers), [false, true]);
     assert.equal(await a.evaluate(() => window.freshCredentials), true, 'ICE restart changes credentials');
+    assert.equal(await a.evaluate(() => window.obsoleteFailures), 1);
+    assert.match(await a.locator('#diagnostics').textContent(), /ignored prior failures [1-9]/);
     for (const p of [a, b]) {
       await p.waitForFunction(() => window.pongSockets[0]?.readyState === WebSocket.CLOSED);
       assert.deepEqual(await p.evaluate(() => [window.pongPCs.length, window.pongSockets.length]), [1, 1]);
       await textIs(p, 'diagnostics', 'Retry: 1 / 1');
       await textIs(p, 'diagnostics', 'Selected pair types: host / host');
+      const diagnostics = await p.locator('#diagnostics').textContent();
+      assert.match(diagnostics, /Attempt 0 \(initial\): (retry-requested|peer-retry)/);
+      assert.match(diagnostics, /Attempt 1 \(retry\): connected/);
+      const initial = diagnostics.split('Attempt 0 (initial):')[1].split('Attempt 1 (retry):')[0];
+      assert.match(initial, /Local: host [1-9]/, 'Initial candidates remain visible after retry');
+      assert.match(initial, /Remote: host 0/, 'Simulated first-generation delivery loss is visible');
+      assert.ok(!/candidate:|v=0|(?:\d{1,3}\.){3}\d{1,3}/.test(diagnostics));
     }
     assert.equal((await pongControl(f.worker)).sessions, 0);
     assert.equal((await pongControl(f.worker)).alarm, null);
