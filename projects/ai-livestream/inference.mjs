@@ -1,6 +1,7 @@
 import {
   ASR, LLM, WASM, messagesFor, meaningfulSpeech, inspectComment,
-  sharesTopic, relatesToSpeech, echoesSpeech, MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
+  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech,
+  MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
 } from './config.mjs';
 import { speechInterest } from './audience.mjs';
 
@@ -72,6 +73,17 @@ export async function createInference(pipeline, env, progress, {
     const interest = speechInterest(text, language, rms) * (repeated ? 0.5 : 1);
     onEngagement(interest);
     const previous = context.map(item => item.text).join(' ').slice(-400);
+    // Resolve fragments only through the contiguous, bounded recent context.
+    // An explicit new subject stops the chain, even if an older topic remains
+    // in the prompt. Never revive an expired subject through stored resolutions.
+    const groundingParts = [text];
+    if (isReferenceContinuation(text, language)) {
+      for (let i = context.length - 1; i >= 0; i--) {
+        groundingParts.unshift(context[i].text);
+        if (!isReferenceContinuation(context[i].text, language)) break;
+      }
+    }
+    const grounding = groundingParts.join(' ').slice(-400);
     if (!repeated) {
       context.push({ text, now });
       while (context.length > 3) context.shift();
@@ -84,11 +96,14 @@ export async function createInference(pipeline, env, progress, {
       const held = candidate;
       candidate = null;
       if (held.language === language && clock() - held.started <= 90000 &&
-          sharesTopic(held.text, text, language) &&
-          relatesToSpeech(held.comment, text, language)) {
+          sharesTopic(held.text, grounding, language) &&
+          relatesToSpeech(held.comment, grounding, language)) {
         // Another window can arrive while the validating ASR call is pending.
-        // Keep the original deadline until the newest speech has been assessed.
-        if (isSuperseded()) {
+        // Allow one extra recognition to catch an intervening topic shift, then
+        // publish against the latest recognized context. Waiting for an empty
+        // queue starves continuous speech when ASR exceeds the capture interval.
+        // The original deadline still bounds the age of the candidate.
+        if (isSuperseded() && ++held.validations < 2) {
           candidate = held;
           return finish('awaiting_context', { interest });
         }
@@ -123,11 +138,11 @@ export async function createInference(pipeline, env, progress, {
     if (!inspected.comment) return finish(inspected.reason, { interest });
     const comment = inspected.comment;
     // Natural pronoun-based reactions need not copy the speaker's nouns.
-    if (!sharesTopic(comment, text, language)) onDiagnostic('no_lexical_overlap');
-    if (!relatesToSpeech(comment, text, language)) return finish('topic', { interest });
-    if (echoesSpeech(comment, text, language)) return finish('echo', { interest });
+    if (!sharesTopic(comment, grounding, language)) onDiagnostic('no_lexical_overlap');
+    if (!relatesToSpeech(comment, grounding, language)) return finish('topic', { interest });
+    if (echoesSpeech(comment, grounding, language)) return finish('echo', { interest });
     if (isSuperseded()) {
-      candidate = { comment, text, language, started, voice: speaker };
+      candidate = { comment, text: grounding, language, started, voice: speaker, validations: 0 };
       return finish('awaiting_context', { interest });
     }
     remember(comment);

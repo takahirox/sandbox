@@ -1105,7 +1105,7 @@ test('held replies must still address the latest topic when one of several earli
   assert.ok(reasons.includes('output_discarded'));
 });
 
-test('speech arriving during held-reply validation waits for the newest ASR without extending expiry', async t => {
+test('held replies get one extra ASR validation for intervening topic shifts without extending expiry', async t => {
   for (const outcome of ['relevant', 'changed_topic', 'expired']) {
     await t.test(outcome, async () => {
       let speech = 'I brewed fresh coffee.', reply = 'Which beans did you choose?';
@@ -1142,15 +1142,115 @@ test('speech arriving during held-reply validation waits for the newest ASR with
       assert.equal(reasons.filter(reason => reason === 'awaiting_context').length, 2);
       assert.ok(!reasons.includes('output_accepted'));
 
-      superseded = false;
+      superseded = true;
       time = outcome === 'expired' ? 90001 : 50000;
       if (outcome === 'changed_topic') {
         speech = 'My cat likes chasing string.';
         reply = 'Which toy does your cat prefer?';
       }
-      assert.equal((await infer(audio, 'en')).comment, outcome === 'expired' ? '' : reply);
+      assert.equal((await infer(audio, 'en')).comment, outcome === 'relevant' ? reply : '',
+        'Bounded validation makes progress but never overrides a recognized topic shift or expiry');
       if (outcome !== 'relevant') assert.ok(reasons.includes('stale_topic'));
+      if (outcome === 'changed_topic') {
+        superseded = false;
+        assert.equal((await infer(audio, 'en')).comment, reply, 'Only the new cat response survives validation');
+      }
     });
+  }
+});
+
+test('continuous six-second audio windows do not starve replies when ASR exceeds the capture interval', async t => {
+  for (const asrMs of [2000, 7000]) {
+    await t.test(`${asrMs}ms ASR and 30000ms generation`, async () => {
+      let time = 0, nextCapture = 6000, superseded = false, generations = 0, recognitions = 0;
+      let pending = { text: 'I brewed coffee with a ceramic dripper.' }, speech;
+      const accepted = [], reasons = [];
+      const advance = ms => {
+        const end = time + ms;
+        while (nextCapture <= end) {
+          // Match the UI's single replaceable pending window; audio keeps arriving
+          // during both generation and every validation, rather than draining ASR.
+          pending = { text: `I brewed coffee with roast number ${nextCapture / 6000}.` };
+          superseded = true;
+          nextCapture += 6000;
+        }
+        time = end;
+      };
+      const generate = async () => {
+        const reply = `Would you try coffee roast ${++generations} again?`;
+        advance(30000);
+        return [{ generated_text: reply }];
+      };
+      generate.tokenizer = { apply_chat_template: messages => messages };
+      const infer = await createInference(async task => task === 'automatic-speech-recognition'
+        ? async () => {
+          const text = speech;
+          recognitions++;
+          advance(asrMs);
+          return { text };
+        } : generate,
+      { backends: { onnx: { wasm: {} } } }, () => {}, {
+        clock: () => time, isSuperseded: () => superseded,
+        onDiagnostic: reason => reasons.push(reason),
+      });
+      const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+      while (time < 180000) {
+        if (!pending) advance(nextCapture - time);
+        speech = pending.text;
+        pending = null;
+        superseded = false;
+        const result = await infer(audio, 'en');
+        if (result.comment) accepted.push({ time, comment: result.comment });
+      }
+      assert.ok(recognitions >= 9, 'Recognition keeps processing live audio');
+      assert.ok(accepted.length >= 3, `Expected sustained comments, got ${accepted.length}`);
+      assert.ok(accepted[0].time <= 51000, 'At most two validations after slow generation');
+      assert.ok(accepted.slice(1).every((item, i) => item.time - accepted[i].time <= 51000));
+      assert.equal(new Set(accepted.map(item => item.comment)).size, accepted.length);
+      assert.equal(reasons.filter(reason => reason === 'stale_topic').length, 0);
+    });
+  }
+});
+
+test('fresh and held replies resolve reference-only continuations against bounded recent context', async t => {
+  for (const fixture of [
+    { language: 'en', first: 'I switched to a ceramic coffee dripper.',
+      continuation: 'It was a little slower this time.', reply: 'Do ceramic drippers change the flavor?',
+      shift: 'It reminded me of my cat.' },
+    { language: 'ja', first: '陶器のコーヒードリッパーに替えました。',
+      continuation: '今回は少し遅かった。', reply: '陶器のドリッパーで味は変わった?',
+      shift: '猫が遊んでいます。' },
+  ]) {
+    for (const mode of ['fresh', 'held', 'shift', 'expired', 'intervening_subject']) {
+      await t.test(`${fixture.language}: ${mode}`, async () => {
+        let speech = fixture.first, reply = mode === 'held' ? fixture.reply : 'SKIP';
+        let superseded = mode === 'held', time = 0;
+        const prompts = [], reasons = [];
+        const generate = async () => [{ generated_text: reply }];
+        generate.tokenizer = { apply_chat_template: messages => { prompts.push(messages); return messages; } };
+        const infer = await createInference(async task => task === 'automatic-speech-recognition'
+          ? async () => ({ text: speech }) : generate,
+        { backends: { onnx: { wasm: {} } } }, () => {}, {
+          clock: () => time, isSuperseded: () => superseded,
+          onDiagnostic: reason => reasons.push(reason),
+        });
+        const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+        assert.equal((await infer(audio, fixture.language)).comment, '');
+        if (mode === 'intervening_subject') {
+          time = 6000; speech = fixture.shift;
+          await infer(audio, fixture.language);
+        }
+        time = mode === 'expired' ? 30000 : 18000;
+        superseded = false;
+        speech = mode === 'shift' ? fixture.shift : fixture.continuation;
+        reply = fixture.reply;
+        assert.equal((await infer(audio, fixture.language)).comment,
+          ['fresh', 'held'].includes(mode) ? fixture.reply : '');
+        if (mode === 'fresh') assert.match(prompts.at(-1).at(-1).content, /earlier/);
+        if (mode === 'held') assert.equal(prompts.length, 1, 'Publish held reply without regenerating');
+        if (['shift', 'expired', 'intervening_subject'].includes(mode)) assert.ok(reasons.includes('topic'));
+      });
+    }
   }
 });
 

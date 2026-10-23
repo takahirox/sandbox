@@ -102,6 +102,15 @@ export function sharesTopic(comment, speech, language) {
   return topicTerms(speech, language).some(word => words.has(word));
 }
 
+// Only reference-only continuations inherit an earlier subject. Keep this narrow:
+// a new noun (e.g. "It reminded me of my cat") must anchor its own topic instead.
+export function isReferenceContinuation(speech, language) {
+  const text = speech.normalize('NFKC').trim();
+  if (language === 'en')
+    return /^(?:(?:and|but|so|now)\s+)?(?:it|that|this|they|those|these)\s+(?:is|was|were|are|seems?|seemed|feels?|felt|got|turned out)\s+(?:(?:a little|a bit|much|slightly|really|still|even|more|less|not|so|too|very)\s+)*(?:slower|slow|faster|fast|quicker|quick|longer|shorter|better|worse|easier|harder|different|same)(?:\s+(?:this time|than before|now|today|again|though|to me))*[.!?]*$/iu.test(text);
+  return /^(?:(?:それ|これ|あれ)(?:は|が|って)?[、,\s]*)?(?:今回は|今度は)?(?:少し|ちょっと|かなり|もっと|前より|やはり|やっぱり)*(?:遅かった|速かった|早かった|長かった|短かった|よかった|良かった|難しかった|簡単だった)(?:です|ね|よ)?[。!?]*$/u.test(text);
+}
+
 // Only bounded reference-only questions may omit the transcript's topic words.
 // A pronoun alone cannot ground a new subject or an assertion. This remains a
 // conservative heuristic, not semantic proof.
