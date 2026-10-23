@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-23T04:59:25.336Z",
+  "host": {
+    "cpu": "Apple M4 Max",
+    "memoryGiB": 64,
+    "platform": "darwin",
+    "browser": "headless Chromium",
+    "backend": "Metal"
+  },
+  "windowSeconds": 6,
+  "generationSeed": 42,
+  "modes": [
+    {
+      "name": "revised-0.6B-q4",
+      "q4": true,
+      "type": "error",
+      "message": "RuntimeError: Aborted(). Build with -sASSERTIONS for more info.",
+      "loadMs": 139067.40000009537,
+      "files": {
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "text-generation/config.json": 912,
+        "text-generation/tokenizer_config.json": 10369,
+        "text-generation/generation_config.json": 219,
+        "text-generation/tokenizer.json": 9117040,
+        "text-generation/onnx/model_q4.onnx": 919096585
+      },
+      "assetBytes": 1007903026,
+      "error": "Error: RuntimeError: Aborted(). Build with -sASSERTIONS for more info.",
+      "peakBrowserRssMiB": 3880.90625
+    }
+  ]
+}

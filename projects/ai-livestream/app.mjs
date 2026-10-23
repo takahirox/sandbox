@@ -1,24 +1,27 @@
+import { VirtualAudience } from './audience.mjs';
+import { MIN_AUDIO_INTERVAL, VOICES } from './config.mjs';
+
 const $ = (id) => document.getElementById(id);
 const start = $('start'),
   status = $('status'),
   video = $('camera');
 const debug = new URLSearchParams(location.search).get('debug') === '1';
-const names = [
-  'mugi',
-  'そら',
-  'nono',
-  'haru',
-  '日和',
-  'kai',
-  'leaf',
-  'こはる',
-  'ren',
-  'momo',
-  'yuki',
-  'ao',
-];
+const audience = new VirtualAudience();
+const manual = { like: false, subscribe: false };
+const numbers = new Intl.NumberFormat('en-US');
 let active = null;
-let serial = 0;
+
+function renderAudience() {
+  const state = audience.snapshot();
+  $('viewer-count').hidden = !state.running;
+  $('viewer-count').textContent = `${numbers.format(state.viewers)} watching`;
+  $('like-label').textContent = manual.like ? '♥ Liked' : '♡ Like';
+  $('like-count').textContent = numbers.format(state.likes + Number(manual.like));
+  $('subscribe-label').textContent = manual.subscribe ? 'Subscribed' : 'Subscribe';
+  $('subscriber-count').textContent = numbers.format(state.subscribers + Number(manual.subscribe));
+  $('subscriber-count').hidden = !state.running;
+}
+renderAudience();
 
 function report(message, error = false) {
   status.textContent = message;
@@ -41,6 +44,7 @@ function stop(message = 'Camera & mic off.', error = false) {
   active = null;
   if (session) {
     clearTimer(session);
+    clearInterval(session.audienceTimer);
     session.worker?.terminate();
     session.node?.disconnect();
     if (session.node) {
@@ -59,6 +63,10 @@ function stop(message = 'Camera & mic off.', error = false) {
   start.title = 'Start camera and microphone';
   start.innerHTML = '<span aria-hidden="true">●</span> Go live';
   $('language').disabled = false;
+  audience.stop();
+  renderAudience();
+  $('debug').textContent = '';
+  $('debug').hidden = true;
   // User content lives only for the current session, including in the DOM.
   $('messages')
     .querySelectorAll('.comment')
@@ -66,11 +74,11 @@ function stop(message = 'Camera & mic off.', error = false) {
   report(message, error);
 }
 
-function addComment(text) {
+function addComment(text, voice = 0) {
   if (!text || text.length > 110) return;
   const log = $('messages');
   const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
-  const name = names[(serial++ + Math.floor(Math.random() * 4)) % names.length];
+  const name = VOICES[Number.isInteger(voice) && voice >= 0 ? voice % VOICES.length : 0].name;
   const row = document.createElement('div');
   row.className = 'comment';
   const avatar = document.createElement('span');
@@ -145,10 +153,12 @@ async function begin() {
       });
     video.srcObject = stream;
     $('session-label').hidden = false;
+    audience.start(performance.now());
+    renderAudience();
     await video.play();
     if (active !== session) return;
     $('player').classList.add('has-camera');
-    report('Loading… First download: about 680 MB.');
+    report('Loading… First download: about 1.1 GB.');
     session.context = new AudioContext({ sampleRate: 16000 });
     await session.context.resume();
     if (active !== session) return;
@@ -178,13 +188,25 @@ async function begin() {
           `Loading ${data.stage === 'Chat' ? 'chat' : 'listening'}${percent}…`,
         );
       } else if (data.type === 'ready') {
+        if (session.ready) return;
         clearTimer(session);
         session.ready = true;
+        audience.start(performance.now());
+        renderAudience();
+        session.audienceTimer = setInterval(() => {
+          if (active !== session) return;
+          audience.tick(performance.now());
+          renderAudience();
+        }, 1000);
         report('');
+      } else if (data.type === 'engagement') {
+        // The signal belongs to the submitted audio, not to a late model response.
+        audience.observe(data.interest, session.lastAudio);
       } else if (data.type === 'result') {
         clearTimer(session);
         session.busy = false;
-        addComment(data.comment);
+        if (performance.now() - session.lastAudio <= 24000)
+          addComment(data.comment, data.voice);
       } else if (data.type === 'error') {
         stop(
           data.code === 'load'
@@ -193,10 +215,10 @@ async function begin() {
           true,
         );
       }
-      if (debug) {
+      if (debug && active === session) {
         $('debug').hidden = false;
         $('debug').textContent =
-          `Worker: ${data.type}; busy: ${session.busy}; audio rate: ${session.context.sampleRate} Hz`;
+          `Worker: ${data.type}; busy: ${session.busy}; audio rate: ${session.context.sampleRate} Hz; interest: ${audience.snapshot().interest.toFixed(2)}`;
       }
     };
     session.node.port.onmessage = ({ data: audio }) => {
@@ -205,7 +227,7 @@ async function begin() {
         active !== session ||
         !session.ready ||
         session.busy ||
-        performance.now() - session.lastAudio < 10000
+        performance.now() - session.lastAudio < MIN_AUDIO_INTERVAL
       )
         return;
       session.lastAudio = performance.now();
@@ -247,17 +269,9 @@ async function begin() {
 start.addEventListener('click', () => (active ? stop() : begin()));
 for (const id of ['like', 'subscribe'])
   $(id).addEventListener('click', () => {
-    const button = $(id),
-      pressed = button.getAttribute('aria-pressed') !== 'true';
-    button.setAttribute('aria-pressed', String(pressed));
-    button.textContent =
-      id === 'like'
-        ? pressed
-          ? '♥ Liked'
-          : '♡ Like'
-        : pressed
-          ? 'Subscribed'
-          : 'Subscribe';
+    manual[id] = !manual[id];
+    $(id).setAttribute('aria-pressed', String(manual[id]));
+    renderAudience();
   });
 window.addEventListener('pagehide', () => stop());
 window.addEventListener('beforeunload', () => stop());

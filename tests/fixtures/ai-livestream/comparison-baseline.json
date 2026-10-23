@@ -1,0 +1,114 @@
+{
+  "date": "2026-10-23T04:38:14.167Z",
+  "host": "Apple M4 Max, 64 GiB; headless Chromium, Metal",
+  "windowSeconds": 6,
+  "modes": [
+    {
+      "name": "baseline-0.6B",
+      "baseline": true,
+      "gpu": {
+        "f16": true,
+        "vendor": "apple",
+        "architecture": "metal-3"
+      },
+      "type": "ready",
+      "loadMs": 69944.09999990463,
+      "assetBytes": 658596191,
+      "files": {
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "text-generation/tokenizer_config.json": 10369,
+        "text-generation/config.json": 912,
+        "text-generation/generation_config.json": 219,
+        "text-generation/tokenizer.json": 9117040,
+        "text-generation/onnx/model_q4f16.onnx": 569789750
+      },
+      "fixtures": [
+        {
+          "file": "japanese.wav",
+          "expected": "今日は公園で猫を見ました。猫はとてもかわいいです。",
+          "type": "result",
+          "comment": "今日もお子様の猫が可愛らし! 🐾",
+          "transcript": "今日は5円で猫を見ました。猫はとても可愛いです。",
+          "raw": "今日もお子様の猫が可愛らし！ 🐾",
+          "timings": {
+            "automatic-speech-recognition": 2618.2000002861023,
+            "text-generation": 248.30000019073486
+          },
+          "totalMs": 2877.300000190735
+        },
+        {
+          "file": "english.wav",
+          "expected": "Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "type": "result",
+          "comment": "A friend shared that they loved the taste and aroma of coffee. 🍯",
+          "transcript": " Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "raw": "A friend shared that they loved the taste and aroma of coffee. 🍯",
+          "timings": {
+            "automatic-speech-recognition": 2534,
+            "text-generation": 226
+          },
+          "totalMs": 2761
+        },
+        {
+          "file": "ja-discovery.wav",
+          "expected": "コーヒーの苦味が減りました。温度を下げたのが理由かな。皆さんはどう思いますか？",
+          "type": "result",
+          "comment": "コーヒーの苦みが減ったと感じた人がいたよ。",
+          "transcript": "コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?",
+          "raw": "コーヒーの苦みが減ったと感じた人がいたよ。",
+          "timings": {
+            "automatic-speech-recognition": 2656.6000003814697,
+            "text-generation": 374.80000019073486
+          },
+          "totalMs": 3033.699999809265
+        },
+        {
+          "file": "en-discovery.wav",
+          "expected": "Lowering the water temperature fixed my bitter coffee! Why does that work? What would you try next?",
+          "type": "result",
+          "comment": "A streamer asked, “Why does lowering the water temp fix my bitter coffee?”",
+          "transcript": " Lowering the water temperature fixed my bitter coffee, why does that work? What would you try next?",
+          "raw": "A streamer asked, “Why does lowering the water temp fix my bitter coffee?”",
+          "timings": {
+            "automatic-speech-recognition": 2670.5,
+            "text-generation": 237.59999990463257
+          },
+          "totalMs": 2909.300000190735
+        },
+        {
+          "file": "ja-quiet.wav",
+          "expected": "今日は静かにお茶を飲んでいます。少し休みます。",
+          "type": "result",
+          "comment": "お昼には、静かにお茶を飲むよ。",
+          "transcript": "今日は、静かにお茶を飲んでいます。少し休みます。",
+          "raw": "お昼には、静かにお茶を飲むよ。",
+          "timings": {
+            "automatic-speech-recognition": 2547.699999809265,
+            "text-generation": 209.2999997138977
+          },
+          "totalMs": 2758.5999999046326
+        },
+        {
+          "file": "en-quiet.wav",
+          "expected": "I am having some tea today. I will take a little break.",
+          "type": "result",
+          "comment": "A friend took a break and had tea. The streamer smiled as they relaxed.",
+          "transcript": " I am having some tea today, I will take a little break.",
+          "raw": "A friend took a break and had tea. The streamer smiled as they relaxed.",
+          "timings": {
+            "automatic-speech-recognition": 2737.0999999046326,
+            "text-generation": 300.19999980926514
+          },
+          "totalMs": 3038.5999999046326
+        }
+      ],
+      "peakBrowserRssMiB": 4700.09375
+    }
+  ]
+}

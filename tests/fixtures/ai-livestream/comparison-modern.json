@@ -1,0 +1,136 @@
+{
+  "date": "2026-10-23T05:04:05.896Z",
+  "host": {
+    "cpu": "Apple M4 Max",
+    "memoryGiB": 64,
+    "platform": "darwin",
+    "browser": "headless Chromium",
+    "backend": "Metal"
+  },
+  "windowSeconds": 6,
+  "generationSeed": 42,
+  "modes": [
+    {
+      "name": "revised-0.6B-runtime4.2",
+      "modern": true,
+      "gpu": {
+        "f16": true,
+        "vendor": "apple",
+        "architecture": "metal-3"
+      },
+      "browserVersion": "153.0.8010.12",
+      "type": "ready",
+      "loadMs": 61423,
+      "assetBytes": 1317192382,
+      "files": {
+        "automatic-speech-recognition/undefined": 79677901,
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "text-generation/undefined": 578918290,
+        "text-generation/config.json": 912,
+        "text-generation/generation_config.json": 219,
+        "text-generation/tokenizer_config.json": 10369,
+        "text-generation/tokenizer.json": 9117040,
+        "text-generation/onnx/model_q4f16.onnx": 569789750
+      },
+      "fixtures": [
+        {
+          "file": "japanese.wav",
+          "expected": "今日は公園で猫を見ました。猫はとてもかわいいです。",
+          "type": "result",
+          "comment": "本当にすごい!でも今日の猫も可愛いよ~(見つめ)”",
+          "interest": 0.40766278727683236,
+          "voice": 0,
+          "transcript": "今日は5円で猫を見ました。猫はとても可愛いです。",
+          "raw": "「本当にすごい！でも今日の猫も可愛いよ～（見つめ）”",
+          "timings": {
+            "automatic-speech-recognition": 2616.7999997138977,
+            "text-generation": 824.7999997138977
+          },
+          "totalMs": 3469.4000000953674
+        },
+        {
+          "file": "english.wav",
+          "expected": "Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "type": "result",
+          "comment": "",
+          "interest": 0.4211111111111111,
+          "voice": 1,
+          "transcript": " Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "raw": "Great morning! The steam could be brewing—*skip* this.*",
+          "timings": {
+            "automatic-speech-recognition": 2320.4000000953674,
+            "text-generation": 169.59999990463257
+          },
+          "totalMs": 2492.5
+        },
+        {
+          "file": "ja-discovery.wav",
+          "expected": "コーヒーの苦味が減りました。温度を下げたのが理由かな。皆さんはどう思いますか？",
+          "type": "result",
+          "comment": "コーヒーの味がいい感じになりましたね~」「飲ぶと気持ちが良いですね」と。",
+          "interest": 0.859203528057739,
+          "voice": 2,
+          "transcript": "コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?",
+          "raw": "「コーヒーの味がいい感じになりましたね～」「飲ぶと気持ちが良いですね」と。",
+          "timings": {
+            "automatic-speech-recognition": 2538.5,
+            "text-generation": 214.80000019073486
+          },
+          "totalMs": 2757.699999809265
+        },
+        {
+          "file": "en-discovery.wav",
+          "expected": "Lowering the water temperature fixed my bitter coffee! Why does that work? What would you try next?",
+          "type": "result",
+          "comment": "He asked me about trying something else...",
+          "interest": 0.9044444444444445,
+          "voice": 3,
+          "transcript": " Lowering the water temperature fixed my bitter coffee, why does that work? What would you try next?",
+          "raw": "He asked me about trying something else...",
+          "timings": {
+            "automatic-speech-recognition": 2469.7000002861023,
+            "text-generation": 124.30000019073486
+          },
+          "totalMs": 2596.2000002861023
+        },
+        {
+          "file": "ja-quiet.wav",
+          "expected": "今日は静かにお茶を飲んでいます。少し休みます。",
+          "type": "result",
+          "comment": "それもまた静かお tea ですね!(さりへ)",
+          "interest": 0.20972005296981633,
+          "voice": 0,
+          "transcript": "今日は、静かにお茶を飲んでいます。少し休みます。",
+          "raw": "それもまた静かお tea ですね！（さりへ）",
+          "timings": {
+            "automatic-speech-recognition": 2676.0999999046326,
+            "text-generation": 609.0999999046326
+          },
+          "totalMs": 3288
+        },
+        {
+          "file": "en-quiet.wav",
+          "expected": "I am having some tea today. I will take a little break.",
+          "type": "result",
+          "comment": "*“That’s a nice way of saying I’ll have coffee instead.”*",
+          "interest": 0.2411111111111111,
+          "voice": 1,
+          "transcript": " I am having some tea today, I will take a little break.",
+          "raw": "*“That’s a nice way of saying I’ll have coffee instead.”*",
+          "timings": {
+            "automatic-speech-recognition": 3007.5,
+            "text-generation": 529.2999997138977
+          },
+          "totalMs": 3538.4000000953674
+        }
+      ],
+      "peakBrowserRssMiB": 4137.28125
+    }
+  ]
+}

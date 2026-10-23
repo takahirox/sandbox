@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-23T05:05:42.545Z",
+  "host": {
+    "cpu": "Apple M4 Max",
+    "memoryGiB": 64,
+    "platform": "darwin",
+    "browser": "headless Chromium",
+    "backend": "Metal"
+  },
+  "windowSeconds": 6,
+  "generationSeed": 42,
+  "modes": [
+    {
+      "name": "revised-1.7B-runtime4.2",
+      "modern": true,
+      "stronger": true,
+      "type": "error",
+      "message": "Error: Can't create a session. ERROR_CODE: 6, ERROR_MESSAGE: std::bad_alloc",
+      "loadMs": 132210.89999961853,
+      "files": {
+        "automatic-speech-recognition/undefined": 79677901,
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "text-generation/undefined": 1435197669,
+        "text-generation/config.json": 943,
+        "text-generation/generation_config.json": 219,
+        "text-generation/tokenizer_config.json": 10369,
+        "text-generation/tokenizer.json": 9117040,
+        "text-generation/onnx/model_q4f16.onnx": 1426069098
+      },
+      "assetBytes": 3029751140,
+      "error": "Error: Error: Can't create a session. ERROR_CODE: 6, ERROR_MESSAGE: std::bad_alloc",
+      "peakBrowserRssMiB": 3887.15625
+    }
+  ]
+}

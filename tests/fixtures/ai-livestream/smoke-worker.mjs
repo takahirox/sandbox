@@ -1,8 +1,9 @@
 // Test-only Worker. Never copied into the public project.
 import {
-  RUNTIME,
+  RUNTIME, CHAT_RUNTIME,
   isAssetRequest,
 } from '../../../projects/ai-livestream/config.mjs';
+import { localPipeline } from '../../../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../../../projects/ai-livestream/inference.mjs';
 const fetchAsset = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (input, options) => {
@@ -15,9 +16,10 @@ let infer, transcript;
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'init') {
-      const { pipeline, env } = await import(RUNTIME);
+      const [{ pipeline, env }, { CreateMLCEngine }] = await Promise.all([import(RUNTIME), import(CHAT_RUNTIME)]);
+      const productionPipeline = localPipeline(pipeline, CreateMLCEngine, { seed: 42 });
       const observePipeline = async (...args) => {
-        const model = await pipeline(...args);
+        const model = await productionPipeline(...args);
         if (args[0] !== 'automatic-speech-recognition') {
           return model;
         }

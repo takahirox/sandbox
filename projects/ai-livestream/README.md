@@ -1,6 +1,6 @@
 # AI Livestream
 
-A static, private livestream **simulation** for [sandbox issue #46](https://github.com/takahirox/sandbox/issues/46).
+A static, private livestream **simulation** for [sandbox issue #50](https://github.com/takahirox/sandbox/issues/50).
 Open `index.html` through HTTPS or a localhost HTTP server, choose Japanese or English,
 and press **Go live**. Allow a camera and microphone. After the first model download,
 speak normally; an occasional fictional viewer comment responds to recent speech.
@@ -8,8 +8,9 @@ speak normally; an occasional fictional viewer comment responds to recent speech
 The unobtrusive **About** menu explains the simulation, local reactions, permissions,
 and initial model download. The player shows **Camera & mic on** whenever capture
 is active, including during loading; no real broadcast or audience is claimed.
-Likes and subscriptions are temporary local button states. There is no audience,
-account, upload, stream, analytics, or backend.
+Viewer counts, likes and subscriptions are fictional, temporary reactions to recognized
+speech. Your own Like/Subscribe choices are independent and last until the page is
+reloaded. There is no connected audience, account, upload, stream, analytics, or backend.
 
 ## Compatibility and performance
 
@@ -17,14 +18,14 @@ Use a current desktop Chrome or Edge with WebGPU, `shader-f16`, AudioWorklet,
 and camera/microphone access enabled. Other browsers/devices may work when they
 provide these APIs. The app checks GPU support before asking for media or loading
 models. Unsupported devices get a retryable message, never a remote API fallback.
-Speech uses single-threaded WebAssembly; chat requires WebGPU. A CPU-only language
+Speech uses single-threaded WebAssembly; chat uses WebLLM on WebGPU. A CPU-only language
 model fallback is deliberately omitted because its latency would make this demo
 unusable on many devices. Mobile layout is supported; mobile inference depends
 on the device and available GPU memory.
 
-Expect about **680 MB** on first use, plus temporary inference memory (allow roughly
-1–2 GB of free memory). Actual speed and memory depend on GPU, CPU, browser and
-device. Japanese recognition with Base can miss words, particularly with noise,
+Expect about **1.1 GB** on first use, plus temporary inference memory (allow roughly
+4–6 GB of free memory during loading). Actual speed and memory depend on the
+GPU, CPU, browser and device. Japanese recognition with Base can miss words, particularly with noise,
 quiet speech, or partial sentences. Select the spoken language before starting.
 Downloads stop with End; completed model assets can be reused from browser cache.
 Failed downloads, lost devices, GPU/runtime errors and slow operations end cleanly
@@ -42,31 +43,53 @@ has a 90-second limit. A slow connection can require another attempt.
   audio are dropped; a second energy gate runs before recognition. Acknowledgements
   allow at most one audio message to wait on the UI thread, even if it stalls.
 - One dedicated module Worker runs ASR followed by language generation. There is
-  one job at a time, no pending inference queue, at least ten seconds between
-  submitted windows and generation attempts, at most 96 transcription tokens and
-  64 generated tokens. Audio arriving while busy/loading is discarded. This bounds
+  one job at a time, no pending inference queue, at least six seconds between
+  submitted windows and 18 seconds between comment opportunities, at most 96
+  transcription tokens and 64 generated tokens. Audio arriving while busy/loading
+  is discarded. This bounds
   resources and prioritizes recent speech over backlog. Silence produces no job
   or filler chat. Recognizer errors/hallucinations remain possible.
 - Transcription is supplied as quoted context to Qwen, which generates the actual
-  comment; there is no canned comment roulette. Qwen's reasoning mode is disabled.
-  Prompting asks for safe, short,
-  topical comments. Local filtering rejects common inappropriate words, URLs,
-  multiline/long output, caption boilerplate and recent duplicates. A local word
-  overlap check suppresses comments with no topic word from the speech. This is
-  conservative and can also suppress valid paraphrases. Greedy decoding favors
-  coherence; variation comes from the changing speech context. These small
-  models and guardrails are imperfect; comments are fictional, not genuine opinions
-  or a moderation guarantee. Odd wording and incorrect details remain possible;
-  word overlap is not a fact checker. They cannot see the video.
+  comment; there is no canned comment roulette. Reasoning mode is disabled. A
+  rolling prompt context uses at most 400 characters from three speech windows
+  for 24 seconds;
+  it expires on silence or language changes. Four viewer voices rotate between
+  questions, casual reactions, preferences and noticing changes. Sampling uses
+  temperature 0.7, top-p 0.9, repetition penalty 1.15 and frequency/presence
+  penalties. One unrelated question/reply example establishes the conversational
+  format; it is never substituted for generated output. Three recent replies
+  discourage repetition.
+  Short, safe topical replies survive a word/concept check (common inflections and
+  a small topic-concept list permit related replies). Generic praise, visual claims, URLs,
+  unsafe vocabulary, wrong-language replies, speech echoes, multiline/long replies
+  and duplicates are suppressed. These
+  checks are imperfect, not a moderation or factuality guarantee. Odd wording and
+  ASR mistakes remain possible. The AI never receives camera frames.
+- Audience scoring uses only recognized words, questions, detail, invitations and
+  a small bounded audio RMS contribution. It does not infer emotions or understand
+  video. Each score is posted before chat generation. Skipped/filtered replies
+  still influence reactions. Comment opportunity probability increases with
+  interest; repeated transcripts cannot generate repeated chat. Silence produces
+  no topic or filler comment.
+- The timer-free `VirtualAudience` state machine starts at 300 displayed viewers
+  after capture starts (held steady while loading). One UI timer ticks each
+  second after models are ready; interest fades within 18 seconds of the last recognized speech window. Viewer changes are limited to
+  +12/−6 per second, bounded to 50–2,400. Likes/subscriptions accrue separately
+  from chat, proportional to audience size and interest, at most one of each per
+  tick; subscriptions require sustained interest above 0.55. Simulated totals cap
+  at 10,000 likes/500 subscriptions. A stalled tick integrates at most two seconds,
+  so background delays never cause a catch-up burst. End cancels the timer and
+  resets all simulated counts; manual choices are preserved and contribute exactly
+  zero or one. No counts or choices are persisted.
 - Network traffic consists of static page/runtime/model GETs from the site,
-  jsDelivr, Hugging Face, and Hugging Face's asset delivery hosts. The inference
-  Worker's fetch guard permits only GET asset requests. No inference API, WebSocket,
+  jsDelivr, Hugging Face, its asset delivery hosts and a pinned model library on
+  raw.githubusercontent.com. The inference Worker's fetch guard permits only GET asset requests. No inference API, WebSocket,
   service worker, telemetry or application-server writes are used. Asset providers
   receive ordinary download request metadata such as IP address, **never audio,
   video, transcripts, prompts or comments**. No credentials are required.
 - Only runtime/model assets may persist in ordinary HTTP/Cache Storage caches
-  (Transformers.js uses `transformers-cache`). Clear this site's browser storage
-  to remove model cache. User media, transcripts and chat are never persisted.
+  (Transformers.js uses `transformers-cache`; WebLLM uses model, WASM and config
+  Cache Storage caches). Clear this site's browser storage to remove model cache. User media, transcripts and chat are never persisted.
   The camera is never sampled by code or recorded. Current chat has a 60-row limit;
   Worker deduplication keeps 20 recent comments. End clears chat, terminates the
   Worker (including in-flight inference/downloads), closes AudioContext and stops
@@ -79,11 +102,17 @@ has a 90-second limit. A slow connection can require another attempt.
 | Transformers.js, bundled browser ESM | `3.8.1` | ~0.9 MB JS | Apache-2.0; [Hugging Face](https://github.com/huggingface/transformers.js/tree/3.8.1) |
 | ONNX Runtime Web, matching bundled runtime's WASM | `1.22.0-dev.20250409-89f8206ba4` | Tens of MB runtime/WASM | MIT; [Microsoft](https://github.com/microsoft/onnxruntime) |
 | [Xenova/whisper-base](https://huggingface.co/Xenova/whisper-base/tree/64da57285918e20ea79ea5c88eed7197933abaa8), multilingual, q8 | `64da57285918e20ea79ea5c88eed7197933abaa8` | 76.9 MB encoder + merged decoder, plus tokenizer/config | Conversion repository Apache-2.0; [original Whisper](https://github.com/openai/whisper) MIT |
-| [onnx-community/Qwen3-0.6B-ONNX](https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/tree/58ca03a5e7b354b480b1a82b34bde8dc7b854cc0), q4f16 | `58ca03a5e7b354b480b1a82b34bde8dc7b854cc0` | 569.8 MB weights, plus tokenizer/config | [Original Qwen license](https://huggingface.co/Qwen/Qwen3-0.6B/blob/main/LICENSE), Apache-2.0; ONNX conversion linked by model card |
+| WebLLM browser ESM | `0.2.85` | 6.6 MB JS | Apache-2.0; [MLC](https://github.com/mlc-ai/web-llm/tree/v0.2.85) |
+| [mlc-ai/Qwen3-1.7B-q4f16_1-MLC](https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/tree/80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc) | `80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc` | 968.0 MB weight shards + 11.4 MB tokenizer/config | [Original Qwen](https://huggingface.co/Qwen/Qwen3-1.7B), Apache-2.0 |
+| MLC compiled WebGPU model library, `v0_2_84/base/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm` | `00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0` | 5.6 MB | Apache-2.0; [MLC binary libraries](https://github.com/mlc-ai/binary-mlc-llm-libs/tree/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0) |
 
 Sizes are decimal MB, approximate, excluding browser overhead. Models are fetched
 from immutable revision paths; runtime and WASM use exact jsDelivr npm versions.
-No model files or third-party runtime code are vendored in this project. See
+WebLLM's chat-completion method runs inside the Worker, not through an HTTP API.
+It has one pinned model entry, a 1,536-token context, 256-token prefill chunks and
+no thinking output. Its conversation/KV state is reset before each comment; only
+the bounded quoted context is supplied again. No model files or third-party runtime
+code are vendored in this project. See
 [`config.mjs`](./config.mjs) for the authoritative pins. The illustration is original CSS.
 
 ## Validation
@@ -100,7 +129,9 @@ node --test tests/gallery.test.mjs tests/pokemon-coin-flip.test.cjs tests/walk-t
 ```
 
 The normal suite uses fake media devices, mocked AI and synthesized audio buffers.
-It checks resource cleanup, permission races/errors, unavailable GPU, failed model
+It checks seeded Japanese/English audience trajectories, silence/decline, count caps,
+reactions without chat, manual-choice independence, rolling context/voice selection,
+resource cleanup, permission races/errors, unavailable GPU, failed model
 downloads, silence, language/context transfer, cadence, bounded history, filtering,
 video-first desktop/mobile layout, keyboard focus, reduced motion and network
 inactivity. DOM checks reject removed filler copy and technical badges in every
@@ -114,10 +145,13 @@ For the opt-in bounded **real-model** test on a WebGPU-capable machine:
 LOCAL_AI_SMOKE=1 node --test tests/ai-livestream-model.test.mjs
 ```
 
-This downloads the pinned assets and passes synthetic Japanese/English WAV fixtures
+This downloads the pinned ASR/WebLLM assets and passes synthetic Japanese/English WAV fixtures
 through the same ASR/generator implementation in a browser Worker. It asserts
 recognized topics, short topical generated comments, and GET-only asset traffic;
 it never requests real camera/mic access. See fixture provenance in
 `tests/fixtures/ai-livestream/README.md`. This is intentionally excluded from ordinary
 CI to avoid hardware requirements and repeated large downloads. `?debug=1` shows
-only Worker state/audio rate, not speech or model exception content.
+only Worker state/audio rate/interest, not speech or model exception content.
+
+See [the model comparison](./MODEL-EVALUATION.md) for concrete bilingual fixture
+outputs, measured resource costs, limitations and reproduction commands.

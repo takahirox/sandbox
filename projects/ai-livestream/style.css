@@ -314,10 +314,19 @@ h1 {
   font-weight: 600;
   color: #414b3d;
 }
-.pill span {
-  font-size: 18px;
-  vertical-align: -1px;
-  margin-right: 4px;
+.channel-meta {
+  display: grid;
+  gap: 5px;
+}
+.audience-count {
+  font-size: 12px;
+  color: #5d685b;
+  font-variant-numeric: tabular-nums;
+}
+.reaction-count {
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
 }
 .subscribe {
   background: #e7ecdf;

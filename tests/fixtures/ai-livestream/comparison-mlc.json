@@ -1,0 +1,141 @@
+{
+  "date": "2026-10-23T05:14:07.534Z",
+  "host": {
+    "cpu": "Apple M4 Max",
+    "memoryGiB": 64,
+    "platform": "darwin",
+    "browser": "headless Chromium",
+    "backend": "Metal"
+  },
+  "windowSeconds": 6,
+  "generationSeed": 42,
+  "modes": [
+    {
+      "name": "Qwen3-1.7B-MLC",
+      "mlc": true,
+      "gpu": {
+        "f16": true,
+        "vendor": "apple",
+        "architecture": "metal-3"
+      },
+      "browserVersion": "153.0.8010.12",
+      "type": "ready",
+      "loadMs": 121486.90000009537,
+      "assetBytes": 1064805055,
+      "files": {
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "text-generation/shards": 968001536,
+        "text-generation/tokenizer.json": 11422654,
+        "text-generation/model-library.wasm": 5566554,
+        "text-generation/config+manifest": 136410
+      },
+      "fixtures": [
+        {
+          "file": "japanese.wav",
+          "expected": "今日は公園で猫を見ました。猫はとてもかわいいです。",
+          "type": "result",
+          "comment": "猫がどの色の子だったのか?",
+          "interest": 0.40766278727683236,
+          "voice": 0,
+          "transcript": "今日は5円で猫を見ました。猫はとても可愛いです。",
+          "raw": "<think>\n\n</think>\n\n猫がどの色の子だったのか？",
+          "timings": {
+            "automatic-speech-recognition": 2635,
+            "text-generation": 637.8000001907349
+          },
+          "totalMs": 3284.5,
+          "finalComment": "猫がどの色の子だったのか?"
+        },
+        {
+          "file": "english.wav",
+          "expected": "Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "type": "result",
+          "comment": "What's your favorite coffee scent?",
+          "interest": 0.4211111111111111,
+          "voice": 1,
+          "transcript": " Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "raw": "<think>\n\n</think>\n\nWhat's your favorite coffee scent?",
+          "timings": {
+            "automatic-speech-recognition": 2320,
+            "text-generation": 183.19999980926514
+          },
+          "totalMs": 2505.5,
+          "finalComment": "What's your favorite coffee scent?"
+        },
+        {
+          "file": "ja-discovery.wav",
+          "expected": "コーヒーの苦味が減りました。温度を下げたのが理由かな。皆さんはどう思いますか？",
+          "type": "result",
+          "comment": "コーヒーの苦みが減ったのは、ボンドを下げたから。",
+          "interest": 0.859203528057739,
+          "voice": 2,
+          "transcript": "コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?",
+          "raw": "<think>\n\n</think>\n\nコーヒーの苦みが減ったのは、ボンドを下げたから。",
+          "timings": {
+            "automatic-speech-recognition": 2503.699999809265,
+            "text-generation": 355.5
+          },
+          "totalMs": 2862.2999997138977,
+          "finalComment": ""
+        },
+        {
+          "file": "en-discovery.wav",
+          "expected": "Lowering the water temperature fixed my bitter coffee! Why does that work? What would you try next?",
+          "type": "result",
+          "comment": "",
+          "interest": 0.9044444444444445,
+          "voice": 3,
+          "transcript": " Lowering the water temperature fixed my bitter coffee, why does that work? What would you try next?",
+          "raw": "<think>\n\n</think>\n\nWhy not try adding sugar?",
+          "timings": {
+            "automatic-speech-recognition": 2677.2000002861023,
+            "text-generation": 745.9000000953674
+          },
+          "totalMs": 3425.199999809265,
+          "finalComment": "Why not try adding sugar?"
+        },
+        {
+          "file": "ja-quiet.wav",
+          "expected": "今日は静かにお茶を飲んでいます。少し休みます。",
+          "type": "result",
+          "comment": "お茶を飲んで、少し休みたいです。",
+          "interest": 0.20972005296981633,
+          "voice": 0,
+          "transcript": "今日は、静かにお茶を飲んでいます。少し休みます。",
+          "raw": "<think>\n\n</think>\n\nお茶を飲んで、少し休みたいです。",
+          "timings": {
+            "automatic-speech-recognition": 2462.5999999046326,
+            "text-generation": 244.90000009536743
+          },
+          "totalMs": 2709.7999997138977,
+          "finalComment": ""
+        },
+        {
+          "file": "en-quiet.wav",
+          "expected": "I am having some tea today. I will take a little break.",
+          "type": "result",
+          "comment": "What tea are you having?",
+          "interest": 0.2411111111111111,
+          "voice": 1,
+          "transcript": " I am having some tea today, I will take a little break.",
+          "raw": "<think>\n\n</think>\n\nWhat tea are you having?",
+          "timings": {
+            "automatic-speech-recognition": 2359.5999999046326,
+            "text-generation": 187.59999990463257
+          },
+          "totalMs": 2549.1000003814697,
+          "finalComment": "What tea are you having?"
+        }
+      ],
+      "peakBrowserRssMiB": 2908.59375,
+      "assetByteMethod": "ASR progress totals + exact pinned MLC shard manifest / HTTP asset metadata; excludes runtime JS and ONNX WASM"
+    }
+  ],
+  "postprocessing": "finalComment replays the final deterministic topic/echo/language filters over observed raw output; comment preserves the original run."
+}
