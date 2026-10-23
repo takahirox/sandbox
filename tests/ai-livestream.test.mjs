@@ -203,6 +203,7 @@ test(
     const context = await browser.newContext({
       permissions: ['camera', 'microphone'],
       reducedMotion: 'reduce',
+      hasTouch: true,
     });
     const page = await context.newPage();
     const errors = [],
@@ -247,18 +248,21 @@ test(
           fixture.workers.push(this);
         }
         postMessage(data) {
-          if (data.type === 'init')
-            setTimeout(
-              () =>
-                this.onmessage?.({
-                  data:
-                    fixture.mode === 'download'
-                      ? { type: 'error', code: 'load' }
-                      : { type: 'ready' },
+          if (data.type === 'init') {
+            if (fixture.mode === 'loading') {
+              this.onmessage({ data: { type: 'progress', stage: 'Chat', progress: 35 } });
+              fixture.finishLoading = () => this.onmessage({ data: { type: 'ready' } });
+            } else {
+              setTimeout(
+                () => this.onmessage?.({
+                  data: fixture.mode === 'download'
+                    ? { type: 'error', code: 'load' }
+                    : { type: 'ready' },
                 }),
-              20,
-            );
-          else {
+                20,
+              );
+            }
+          } else {
             fixture.audio = data;
             fixture.jobs = (fixture.jobs || 0) + 1;
           }
@@ -302,6 +306,29 @@ test(
         }
       };
     });
+    const assertMinimalUI = async () => {
+      const text = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
+      for (const phrase of [
+        'little stage', 'Just for you', 'Make yourself at home.',
+        'AI · simulated', 'THE EVERYDAY SESSIONS', 'A moment, live from my corner',
+        'A little company.', 'Your AI chat joins when you go live.',
+        'Fictional voices. Your real moment.', 'A little space to be yourself.',
+        'YOUR STAGE', 'Local livestream simulation', 'ONLY ON YOUR DEVICE',
+        'OFF AIR', 'GETTING READY', 'You’re live. Take your time.',
+        'Say something. We’re listening.',
+      ]) assert.ok(!text.toLowerCase().includes(phrase.toLowerCase()), phrase);
+      assert.doesNotMatch(text, /\b(?:AI|simulated|fictional|viewers?|audience)\b/i);
+      assert.equal(await page.locator('.chat-heading').innerText(), 'Live chat');
+      assert.equal(await page.locator('#debug').isVisible(), false);
+    };
+    const assertStoppedUI = async () => {
+      assert.equal(await page.locator('#session-label').isVisible(), false);
+      assert.equal(await page.locator('video').isVisible(), false);
+      assert.equal(await page.locator('#language').isEnabled(), true);
+      assert.equal(await page.locator('#start').innerText(), '● Go live');
+      assert.equal(await page.locator('.chat').innerText(), 'Live chat');
+      await assertMinimalUI();
+    };
     const url = server.origin + '/sandbox/projects/ai-livestream/';
     await page.goto(url);
     await page.waitForTimeout(150);
@@ -317,6 +344,25 @@ test(
         (r) => r.url.startsWith(server.origin) && r.method === 'GET',
       ),
     );
+    assert.equal(await page.evaluate(() => fixture.requested), undefined);
+    await assertStoppedUI();
+    assert.equal(await page.locator('details').count(), 1);
+    assert.equal(await page.locator('#status').innerText(), '');
+    assert.equal(await page.locator('.player').innerText(), '');
+    assert.deepEqual(await page.locator('h1, h2').allInnerTexts(), ['Your corner', 'Live chat']);
+    assert.equal(
+      (await page.locator('body').innerText()).replace('Spoken language', '').replace(/\s+/g, ' ').trim(),
+      '← Sandbox About Y Your corner ♡ Like Subscribe 日本語 English ● Go live Live chat',
+      'Default UI contains only navigation, identity and controls',
+    );
+    const about = page.locator('summary');
+    await about.focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.about-content').isVisible(), true);
+    assert.match(await page.locator('.about-content').innerText(), /AI-generated fictional voices/);
+    assert.match(await page.locator('.about-content').innerText(), /no broadcast or connected audience/);
+    await page.keyboard.press('Enter');
+    assert.equal(await page.locator('.about-content').isVisible(), false);
     await page.getByRole('button', { name: 'Like (local demo only)' }).click();
     await page
       .getByRole('button', { name: 'Subscribe (local demo only)' })
@@ -329,10 +375,11 @@ test(
       await page.locator('#subscribe').getAttribute('aria-pressed'),
       'true',
     );
-    for (const width of [1280, 390, 320]) {
+    for (const width of [1600, 1280, 1024, 900, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
       const player = await page.locator('.player').boundingBox(),
         chat = await page.locator('.chat').boundingBox();
+      await assertMinimalUI();
       assert.ok(Math.abs(player.width / player.height - 16 / 9) < 0.02);
       assert.equal(
         await page.evaluate(
@@ -341,18 +388,52 @@ test(
         true,
         `No horizontal overflow at ${width}`,
       );
+      for (const control of await page.locator('.controls button, select').all()) {
+        const box = await control.boundingBox();
+        assert.ok(box.height >= 44 && box.width >= 44, 'Touch targets remain usable');
+        assert.ok(box.x >= 0 && box.x + box.width <= width, 'Controls fit the viewport');
+        assert.ok(box.y >= player.y + player.height, 'Controls stay below the player');
+      }
       assert.ok(
-        width > 680
+        width > 900
           ? chat.x > player.x + player.width
           : chat.y > player.y + player.height,
       );
     }
-    await page.locator('#start').click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#like').tap();
+    assert.equal(await page.locator('#like').getAttribute('aria-pressed'), 'false');
+    await page.locator('#subscribe').tap();
+    assert.equal(await page.locator('#subscribe').getAttribute('aria-pressed'), 'false');
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const player = await page.locator('.player').boundingBox();
+    const chat = await page.locator('.chat').boundingBox();
+    assert.ok(player.width > chat.width * 3, 'Video dominates desktop composition');
+    assert.ok(player.y < 80, 'Discreet navigation leaves space for video');
+    await page.locator('#language').selectOption('en');
+    await page.evaluate(() => { fixture.mode = 'loading'; });
+    await page.locator('#language').focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('#start').evaluate(el => document.activeElement === el), true);
+    assert.equal(await page.locator('#start').evaluate(el => getComputedStyle(el).outlineStyle), 'solid');
+    assert.equal(await page.locator('#start').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => document.getElementById('status').textContent === 'Loading chat 35%…');
+    assert.equal(await page.locator('#session-label').innerText(), 'Camera & mic on');
+    assert.equal(await page.locator('#session-label').isVisible(), true);
+    assert.equal(await page.locator('#language').isDisabled(), true);
+    assert.equal(await page.locator('#start').innerText(), 'End');
+    assert.equal(await page.locator('.chat').innerText(), 'Live chat');
+    await assertMinimalUI();
+    await page.evaluate(() => { fixture.finishLoading(); fixture.mode = ''; });
     await page.waitForFunction(
       () =>
-        document.getElementById('session-label').textContent ===
-        'LIVE · SIMULATED',
+        document.getElementById('status').textContent === '' &&
+        !document.getElementById('session-label').hidden,
     );
+    await assertMinimalUI();
+    assert.equal(await page.locator('#session-label').isVisible(), true);
+    assert.equal(await page.locator('#status').innerText(), '');
     assert.equal(
       await page.locator('.comment').count(),
       0,
@@ -368,6 +449,7 @@ test(
       fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
     });
     assert.equal(await page.evaluate(() => fixture.audio.type), 'audio');
+    assert.equal(await page.evaluate(() => fixture.audio.language), 'en');
     assert.equal(
       await page.evaluate(() => fixture.jobs),
       1,
@@ -382,6 +464,8 @@ test(
         i,
       );
     assert.equal(await page.locator('.comment').count(), 60);
+    assert.equal(await page.locator('.comment').first().evaluate(el => getComputedStyle(el).animationName), 'none');
+    await assertMinimalUI();
     await page.locator('#start').click();
     assert.equal(
       await page.evaluate(() =>
@@ -414,6 +498,18 @@ test(
       0,
       'Late inference results after End are ignored',
     );
+    await assertStoppedUI();
+    assert.equal(await page.locator('#status').innerText(), 'Camera & mic off.');
+    // End remains available during model loading and releases capture immediately.
+    await page.evaluate(() => { fixture.mode = 'loading'; });
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent === 'Loading chat 35%…');
+    await page.locator('#start').click();
+    await assertStoppedUI();
+    assert.equal(await page.evaluate(() =>
+      fixture.streams.at(-1).getTracks().every(track => track.readyState === 'ended') &&
+      fixture.workers.at(-1).terminated && fixture.contexts.at(-1).closed,
+    ), true);
     for (const [mode, message] of [
       ['denied', /permission was denied/],
       ['missing', /camera and microphone are needed/],
@@ -427,13 +523,17 @@ test(
         document.getElementById('status').classList.contains('error'),
       );
       assert.match(await page.locator('#status').innerText(), message);
-      assert.equal(await page.locator('#start').innerText(), '● Go live');
+      await assertStoppedUI();
     }
     await page.evaluate(() => {
       fixture.mode = 'delayed';
     });
     await page.locator('#start').click();
     await page.waitForFunction(() => !!fixture.allowMedia);
+    assert.equal(await page.locator('#status').innerText(), 'Allow camera & microphone access.');
+    assert.equal(await page.locator('#session-label').isVisible(), false);
+    assert.equal(await page.locator('#start').innerText(), 'End');
+    await assertMinimalUI();
     await page.locator('#start').click();
     await page.evaluate(() => fixture.allowMedia());
     await page.waitForFunction(() =>
@@ -458,8 +558,8 @@ test(
     await page.locator('#start').click();
     await page.waitForFunction(
       () =>
-        document.getElementById('session-label').textContent ===
-        'LIVE · SIMULATED',
+        document.getElementById('status').textContent === '' &&
+        !document.getElementById('session-label').hidden,
     );
     await page.evaluate(() =>
       fixture.streams.at(-1).getTracks()[0].dispatchEvent(new Event('ended')),
@@ -478,8 +578,8 @@ test(
     await page.locator('#start').click();
     await page.waitForFunction(
       () =>
-        document.getElementById('session-label').textContent ===
-        'LIVE · SIMULATED',
+        document.getElementById('status').textContent === '' &&
+        !document.getElementById('session-label').hidden,
     );
     await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
     assert.equal(
@@ -490,6 +590,7 @@ test(
       ),
       true,
     );
+    await assertStoppedUI();
     assert.deepEqual(errors, []);
     assert.ok(
       requests.every(
@@ -497,6 +598,11 @@ test(
       ),
       'No user content or external requests, including after starting',
     );
+    await page.goto(url + '?debug=1');
+    await page.locator('#start').click();
+    await page.locator('#debug').waitFor({ state: 'visible' });
+    assert.match(await page.locator('#debug').innerText(), /Worker: ready; busy: false; audio rate: 16000 Hz/);
+    await page.locator('#start').click();
     await context.close();
   },
 );
