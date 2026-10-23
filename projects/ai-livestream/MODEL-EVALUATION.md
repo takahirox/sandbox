@@ -1,6 +1,187 @@
-# Local model and pipeline evaluation — issue #50
+# Local model and pipeline evaluation — issues #52 / #50
 
-## Decision
+
+## Issue #52: retain 1.7B and repair the pipeline
+
+The shipped model was already **mlc-ai/Qwen3-1.7B-q4f16_1-MLC**, pinned revision
+`80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc`, running WebLLM 0.2.85 / WebGPU,
+with Whisper Base q8 / single-threaded WASM. This change retains those assets.
+No larger text model, new download, service, cloud inference or recurring cost is
+introduced. The historical model-size/runtime comparison below remains evidence
+for this selection; it is not a new 0.6B-to-1.7B upgrade in #52.
+
+### Failure trace and offline comparison
+
+`issue50/` snapshots the shipped config/inference from `40b9e91` for reproducible
+comparison. `node scripts/replay_livestream_pipeline.mjs` produces
+`tests/fixtures/ai-livestream/pipeline-replay.json`, and the normal automated suite
+asserts that exact evidence. Synthetic fixtures only; nothing comes from a user's
+session. Three comparisons deliberately separate model output from scheduling:
+
+| Replay | Recognized windows | Shipped #50 accepted | Revised accepted | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| Recorded real Japanese/English 1.7B output, isolated 120 s apart | 6 | 4 (67%) | 4 (67%) | Same four topical follow-ups; two echoes still suppressed |
+| Scripted natural pronoun follow-ups, Japanese/English | 2 | 0 | 2 (100%) | Lexical gate falsely rejected implicit references |
+| Scripted distinct coffee conversation, six-second windows for 120 s | 20 | 1 (5%) | 10 (50%) | Eight-second opportunity gate, no probabilistic starvation; ~5/minute with available generation |
+
+The conversation deliberately injects scheduler randomness 0.99, demonstrating a
+possible starvation path, **not average measured production acceptance**. Its ASR
+and replies are mocks. The isolated replay uses actual recorded transcripts/raw
+outputs from #50; it does not rerun weights or claim improved model fluency.
+Examples of previously rejected scripted follow-ups are “How long did that take?”
+and “それ、人懐っこい子だった？” Neither needs to copy the source noun. A fresh
+model run is reported separately below.
+
+The observed implementation causes are independently testable:
+
+1. A six-second audio window passes the worklet's 350 ms voiced threshold and the
+   Worker's RMS >= 0.006 gate; silent/invalid windows never reach ASR. VAD silence
+   and backpressure now have counters.
+2. ASR exceptions, boilerplate/empty recognition and accepted recognition have
+   different counters. Two historical Japanese detail errors recur in fresh ASR;
+   English recognition is accurate on these fixtures.
+3. The old 18-second attempt gate also consumed rejected/skipped opportunities;
+   probability at ordinary interest ~0.42 was only ~54%. Recognition taking over
+   18 seconds skipped generation altogether. Revised first recognition can generate
+   immediately, subsequent opportunities are at least eight seconds apart, and
+   there are no random skips or audience-dependent generation rates.
+4. Output parsing supports strings and structured assistant content and removes
+   only an empty disabled-thinking prefix. Nonempty reasoning, bad formatting,
+   language mismatch, safety/privacy, visual/generic output, length, duplicates,
+   disconnected topics and echoes have categorized rejection counters. Pronoun
+   references and preferences can survive without fragile exact noun/echo overlap.
+   Japanese causal endings are excluded from content-word echo scoring.
+5. The UI previously discarded every result older than 24 seconds, including a
+   valid slow reply on an unchanged topic. There is now one active inference and
+   one replaceable latest audio window. If speech arrives during generation, hold
+   its reply in Worker memory and validate it against newer recognition before
+   publishing (at most 90 seconds from the original ASR start). A changed topic,
+   expired candidate or language change discards it. No newer speech means a slow
+   reply can display directly within the existing 90-second job deadline. There
+   is no backlog burst. End terminates the Worker and clears pending audio/chat.
+
+Prompts keep latest speech primary, earlier context only for fragments/pronouns,
+and instruct the model not to infer missing prices, causes, comparisons or
+outcomes. The unrelated guitar example, four viewer styles, language reset,
+24-second / three-window / 400-character context, three recent prompt replies,
+20-comment dedup history and sampling remain bounded. Tests verify context expiry,
+voice variation, structured parsing, slow inference, changed topics, silence,
+safety, repetition and cancellation. One short response per inference is retained:
+forcing multiple replies would increase filler and repeat risk on quiet windows.
+
+`?debug=1` traces each stage with a closed vocabulary of counts, numeric timings,
+exact model/backend identity and time since the last UI comment. Browser tests
+exercise the real AudioWorklet → Worker → ASR mock → local text-engine mock →
+filter → UI path, including a valid recognized fixture yielding SKIP. Its panel
+shows accepted recognition + generation attempt + format rejection + zero comments,
+without speech, prompts, exception text, IPs, media or persistent telemetry.
+The normal screen and inert screenshot preview are unchanged.
+
+### Fresh 1.7B versus stronger 4B: measured on the same fixtures
+
+Three actual browser runs on 2026-10-23 used an Apple M4 Max / 64 GiB, Chromium
+153.0.8010.12 / Metal / shader-f16, seed 42, the six existing WAVs, the same ASR,
+1,536-token context, disabled thinking and q4f16_1 WebLLM backend. Each fixture was
+120 seconds apart to isolate topics; continuous cadence is tested offline above.
+The first 1.7B run used the initial latest-speech prompt; the second added the
+explicit no-inferred-price/cause instruction. It did **not** fix the Japanese
+ASR-induced mistakes. 4B used that same second prompt and voices.
+
+| Stack | Model/tokenizer/library assets* | Initialization | Peak browser RSS | Generation / fixture | End-to-end / fixture | Final filter acceptance |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1.7B, initial prompt | 1,064.8 MB | 121.74 s | 3.42 GiB | 0.19–0.41 s | 2.47–3.02 s | 4/6 |
+| **1.7B, revised prompt** | **1,064.8 MB** | **110.96 s** | **3.14 GiB** | **0.20–0.67 s** | **2.43–3.34 s** | **4/6** |
+| 4B, same revised prompt | 2,360.1 MB | 287.46 s | 3.67 GiB | 0.41–1.71 s | 2.78–5.21 s | 6/6 |
+
+*Same asset accounting and RSS caveats as the historical methodology below;
+runtime JS/ASR WASM add overhead. First use is roughly 1.1 GB versus 2.4 GB.
+Initialization includes downloads/session creation on one connection; it is not a
+universal hardware-speed claim. All six ASR windows preserve the fixture topic,
+but both runs misrecognize 公園 as `5円` and 温度 as `ボンド`. ASR timings were
+2.23–2.67 s for revised 1.7B and 2.37–4.05 s in the separate 4B run; the text model
+cannot repair evidence it was never given. Two model runs do not establish broad
+sampling variability; prompt variation here shows concrete output sensitivity.
+
+Representative **observed** replies (not canned replacements):
+
+| Fixture | Revised 1.7B | 4B | Assessment |
+| --- | --- | --- | --- |
+| Japanese cats | `今日は何で猫を買ったの？` | `5円で猫を見たの？` | Both follow ASR's corrupted price premise; 1.7B additionally assumes buying |
+| English coffee | `What's your favorite coffee drink?` | `What's your favorite coffee drink?` | Same short topical question |
+| Japanese discovery | `コーヒーの苦みが減ったのは、ボンドを下げたことによるですね。` | `ボンド下げたってこと？` | 1.7B retelling withheld; 4B asks about the same misheard word |
+| English discovery | `Why does coffee taste better when it's colder?` | `Try adjusting the water ratio instead.` | Both related; 4B offers a useful alternative |
+| Japanese quiet tea | `お茶を飲んでいたことだけ。` | `今日は静かにしていますか？` | 1.7B retelling withheld; 4B grammatical but redundant |
+| English quiet tea | `You sure you'll be back soon?` | `Tea? What kind?` | Both conversational, short and related to the break/tea |
+
+Filter acceptance is **not a factual-quality score**. Excluding the two known
+ASR-contaminated Japanese detail cases leaves 3/6 accepted replies for revised
+1.7B and 4/6 for 4B. Automated fixture assertions reproduce this narrow rubric;
+it does not claim to detect arbitrary hallucinations or evaluate all naturalness.
+The original #50 real run accepted 4/6, without the new price premise but with
+stiff Japanese and two withheld retellings. The fresh comparison confirms the
+scheduling/filter fixes increase opportunities, not that every generated reply
+has become fluent. ASR mistakes and unsupported assumptions remain limitations.
+
+**Retain 1.7B.** 4B improves one surviving quiet Japanese reply, but repeats both
+ASR errors, costs 1.3 GB more (~2.2× assets), and comes within 13 seconds of the
+five-minute loading deadline on this capable desktop. Its measured RSS increase
+is modest, rather than a claimed out-of-memory failure, but neither run establishes
+mobile inference feasibility. A 2.4 GB download plus slower generation is a poor
+trade for this small observed gain. Both require WebGPU/shader-f16; no CPU/cloud
+fallback or automatic model switch is introduced. The more frequent opportunities,
+reference-aware filters and safe reason counts are the material experience fix.
+
+Evidence files are `comparison-mlc-issue52-initial.json`,
+`comparison-mlc-issue52.json` and `comparison-mlc-stronger-issue52.json` under
+`tests/fixtures/ai-livestream/`. They retain actual `raw`, `transcript`, measured
+`comment`, timings and costs. `finalComment` / `finalReason` replay the final filters
+(including later echo/reference fixes); they do not overwrite the measured output.
+Only these synthetic, explicit evaluation artifacts contain speech/model content;
+production diagnostics never do.
+
+The evaluation-only stronger model is
+[mlc-ai/Qwen3-4B-q4f16_1-MLC](https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/tree/a5c9fab855e3ccbdfed2e7e69683d75f30332161),
+revision `a5c9fab855e3ccbdfed2e7e69683d75f30332161`, with the
+[compiled Qwen3-4B library](https://github.com/mlc-ai/binary-mlc-llm-libs/blob/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0/web-llm-models/v0_2_84/base/Qwen3-4B-q4f16_1_cs1k-webgpu.wasm).
+These are not permitted production download targets. Reproduce without devices:
+
+```sh
+node scripts/compare_livestream_models.mjs --mlc --issue52
+node scripts/compare_livestream_models.mjs --mlc-stronger --issue52
+```
+
+### Small-audience evidence
+
+Seed 42, one recognized signal per six seconds, five minutes, **zero chat**:
+
+| Fixture | Displayed viewers | Auto likes | Auto subscriptions |
+| --- | ---: | ---: | ---: |
+| Japanese discovery | 63 | 14 | 0 |
+| English discovery | 58 | 15 | 0 |
+| Japanese quiet tea | 38 | 0 | 0 |
+| English quiet tea | 36 | 0 | 0 |
+
+Start is 25, compared with #50's 300. Viewers change only once per 25 seconds,
+−3 to +4, with occasional departures during engaging speech; they decline during
+silence. Internal state stays close to the display. Limits are 5–180 viewers,
+500 likes and 30 subscriptions; long-run tests reach the reaction caps. Zero
+subscriptions in a short small-stream session is intentional. Manual toggles
+add exactly zero or one independently. A stalled tick integrates at most two
+seconds and publishes one bounded change; stopping cancels timers and resets the
+simulation. Historical #50's 1,821–2,010 engaged viewers and 261–268 likes in five
+minutes were disproportionate to this experience.
+
+### Issue #52 validation
+
+All local acceptance checks passed with no required human/device approval:
+15 livestream tests (including real Worklet/Worker mocked browser paths and
+recorded 1.7B/4B replay), 11 gallery/coin/walk tests, 11 Python build tests,
+71 backend tests and 27 backend browser integrations. The backend dry-run bundle,
+local D1 migration plus idempotent repeat, and full frontend build with eight safe
+gallery captures passed. The three real-model fixture runs above are additional
+evidence; normal CI requires neither weights nor a GPU. No deployment was performed.
+
+## Historical issue #50 decision
 
 Use **Qwen3 1.7B, MLC q4f16_1, WebLLM 0.2.85**, keeping **Whisper Base q8** on
 single-threaded WASM. The sharded MLC build initialized, produced better short

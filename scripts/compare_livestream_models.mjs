@@ -1,7 +1,7 @@
 // Explicitly invoked only. Public asset downloads; all model execution stays in Chromium.
 import {chromium} from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import {previewServer} from './capture_screenshots.mjs';
-import {cleanComment, sharesTopic, echoesSpeech} from '../projects/ai-livestream/config.mjs';
+import {inspectComment, relatesToSpeech, echoesSpeech} from '../projects/ai-livestream/config.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {cpus, totalmem, platform} from 'node:os';
@@ -11,6 +11,7 @@ const server = await previewServer(root);
 const variants = {
   mlc: { name:'Qwen3-1.7B-MLC', mlc:true },
   'mlc-small': { name:'Qwen3-0.6B-MLC', mlc:true, mlcSmall:true },
+  'mlc-stronger': { name:'Qwen3-4B-MLC', mlc:true, mlcStronger:true },
   baseline: { name: 'baseline-0.6B', baseline: true },
   revised: { name: 'revised-0.6B' },
   qwen3: { name: 'revised-1.7B', stronger: true },
@@ -77,10 +78,12 @@ try {
         await page.waitForFunction(n=>evaluation.results.length===n||evaluation.error,index+1,{timeout:90000});
         const error=await page.evaluate(()=>evaluation.error);if(error)throw Error(error);
         const result=await page.evaluate(i=>evaluation.results[i],index);
-        const cleaned = cleanComment(result.raw || '', [], fixture.language);
-        const finalComment = sharesTopic(cleaned, result.transcript || '', fixture.language) &&
-          !echoesSpeech(cleaned, result.transcript || '', fixture.language) ? cleaned : '';
-        record.fixtures.push({file:fixture.file,expected:fixture.text,...result,finalComment});
+        const inspected = inspectComment(result.raw || '', [], fixture.language);
+        const finalReason = !inspected.comment ? inspected.reason :
+          !relatesToSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'topic' :
+          echoesSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'echo' : 'accepted';
+        const finalComment = finalReason === 'accepted' ? inspected.comment : '';
+        record.fixtures.push({file:fixture.file,expected:fixture.text,...result,finalComment,finalReason});
         console.log(mode.name, fixture.file, JSON.stringify(result));
       }
       record.peakBrowserRssMiB=peakKiB/1024;
@@ -92,4 +95,4 @@ try {
       console.log(mode.name, String(error));
     } finally {clearInterval(timer);await browser.close();}
   }
-} finally {await server.close();await writeFile(root+'tests/fixtures/ai-livestream/comparison'+(selected ? '-'+selected : '')+'.json',JSON.stringify(report,null,2)+'\n');}
+} finally {await server.close();await writeFile(root+'tests/fixtures/ai-livestream/comparison'+(selected ? '-'+selected : '')+(process.argv.includes('--issue52') ? '-issue52' : '')+'.json',JSON.stringify(report,null,2)+'\n');}

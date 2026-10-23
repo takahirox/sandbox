@@ -31,6 +31,7 @@ class SpeechWindow extends AudioWorkletProcessor {
       this.count = 0;
       if (speech) this.voiced++;
       if (this.position === this.buffer.length) {
+        this.port.postMessage({ type: 'window', reason: this.voiced < 5600 ? 'vad_silence' : this.pending ? 'vad_busy' : 'voiced' });
         if (this.voiced >= 5600 && !this.pending) {
           this.pending = true;
           this.port.postMessage(this.buffer, [this.buffer.buffer]);
