@@ -1,0 +1,142 @@
+{
+  "date": "2026-10-23T05:14:08.657Z",
+  "host": {
+    "cpu": "Apple M4 Max",
+    "memoryGiB": 64,
+    "platform": "darwin",
+    "browser": "headless Chromium",
+    "backend": "Metal"
+  },
+  "windowSeconds": 6,
+  "generationSeed": 42,
+  "modes": [
+    {
+      "name": "Qwen3-0.6B-MLC",
+      "mlc": true,
+      "mlcSmall": true,
+      "gpu": {
+        "f16": true,
+        "vendor": "apple",
+        "architecture": "metal-3"
+      },
+      "browserVersion": "153.0.8010.12",
+      "type": "ready",
+      "loadMs": 129539.7000002861,
+      "assetBytes": 432140298,
+      "files": {
+        "automatic-speech-recognition/preprocessor_config.json": 339,
+        "automatic-speech-recognition/config.json": 2248,
+        "automatic-speech-recognition/tokenizer_config.json": 282683,
+        "automatic-speech-recognition/tokenizer.json": 2480466,
+        "automatic-speech-recognition/generation_config.json": 3776,
+        "automatic-speech-recognition/onnx/decoder_model_merged_quantized.onnx": 53707539,
+        "automatic-speech-recognition/onnx/encoder_model_quantized.onnx": 23200850,
+        "text-generation/shards": 335372288,
+        "text-generation/tokenizer.json": 11422654,
+        "text-generation/model-library.wasm": 5535989,
+        "text-generation/config+manifest": 131466
+      },
+      "fixtures": [
+        {
+          "file": "japanese.wav",
+          "expected": "今日は公園で猫を見ました。猫はとてもかわいいです。",
+          "type": "result",
+          "comment": "5円で猫を見たことがあったのか?",
+          "interest": 0.40766278727683236,
+          "voice": 0,
+          "transcript": "今日は5円で猫を見ました。猫はとても可愛いです。",
+          "raw": "<think>\n\n</think>\n\n5円で猫を見たことがあったのか？",
+          "timings": {
+            "automatic-speech-recognition": 2833.4000000953674,
+            "text-generation": 2129.0999999046326
+          },
+          "totalMs": 4969.400000095367,
+          "finalComment": "5円で猫を見たことがあったのか?"
+        },
+        {
+          "file": "english.wav",
+          "expected": "Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "type": "result",
+          "comment": "Which coffee smell did you love?",
+          "interest": 0.4211111111111111,
+          "voice": 1,
+          "transcript": " Today I made a cup of coffee. I love the smell of fresh coffee.",
+          "raw": "<think>\n\n</think>\n\nWhich coffee smell did you love?",
+          "timings": {
+            "automatic-speech-recognition": 2576.0999999046326,
+            "text-generation": 137.69999980926514
+          },
+          "totalMs": 2715.800000190735,
+          "finalComment": "Which coffee smell did you love?"
+        },
+        {
+          "file": "ja-discovery.wav",
+          "expected": "コーヒーの苦味が減りました。温度を下げたのが理由かな。皆さんはどう思いますか？",
+          "type": "result",
+          "comment": "コーヒーの苦みが減った感性。その理由は、特に心の状況に左右されるかもしれません。😊",
+          "interest": 0.859203528057739,
+          "voice": 2,
+          "transcript": "コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?",
+          "raw": "<think>\n\n</think>\n\nコーヒーの苦みが減った感性。その理由は、特に心の状況に左右されるかもしれません。😊",
+          "timings": {
+            "automatic-speech-recognition": 2507.9000000953674,
+            "text-generation": 279.09999990463257
+          },
+          "totalMs": 2789.2999997138977,
+          "finalComment": "コーヒーの苦みが減った感性。その理由は、特に心の状況に左右されるかもしれません。😊"
+        },
+        {
+          "file": "en-discovery.wav",
+          "expected": "Lowering the water temperature fixed my bitter coffee! Why does that work? What would you try next?",
+          "type": "result",
+          "comment": "",
+          "interest": 0.9044444444444445,
+          "voice": 3,
+          "transcript": " Lowering the water temperature fixed my bitter coffee, why does that work? What would you try next?",
+          "raw": "<think>\n\n</think>\n\nWhat would you try next?",
+          "timings": {
+            "automatic-speech-recognition": 2358.2999997138977,
+            "text-generation": 113.2000002861023
+          },
+          "totalMs": 2473.699999809265,
+          "finalComment": ""
+        },
+        {
+          "file": "ja-quiet.wav",
+          "expected": "今日は静かにお茶を飲んでいます。少し休みます。",
+          "type": "result",
+          "comment": "今日のお茶の名前は?",
+          "interest": 0.20972005296981633,
+          "voice": 0,
+          "transcript": "今日は、静かにお茶を飲んでいます。少し休みます。",
+          "raw": "<think>\n\n</think>\n\n今日のお茶の名前は？",
+          "timings": {
+            "automatic-speech-recognition": 2336.5999999046326,
+            "text-generation": 137.59999990463257
+          },
+          "totalMs": 2475.9000000953674,
+          "finalComment": "今日のお茶の名前は?"
+        },
+        {
+          "file": "en-quiet.wav",
+          "expected": "I am having some tea today. I will take a little break.",
+          "type": "result",
+          "comment": "Which tea would you like?",
+          "interest": 0.2411111111111111,
+          "voice": 1,
+          "transcript": " I am having some tea today, I will take a little break.",
+          "raw": "<think>\n\n</think>\n\nWhich tea would you like?",
+          "timings": {
+            "automatic-speech-recognition": 2286.4000000953674,
+            "text-generation": 110.5
+          },
+          "totalMs": 2398.5999999046326,
+          "finalComment": "Which tea would you like?"
+        }
+      ],
+      "peakBrowserRssMiB": 2350.609375,
+      "assetByteMethod": "ASR progress totals + exact pinned MLC shard manifest / HTTP asset metadata; excludes runtime JS and ONNX WASM"
+    }
+  ],
+  "postprocessing": "finalComment replays the final deterministic topic/echo/language filters over observed raw output; comment preserves the original run."
+}

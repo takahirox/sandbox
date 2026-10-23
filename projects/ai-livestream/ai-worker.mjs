@@ -1,4 +1,5 @@
-import { RUNTIME, isAssetRequest } from './config.mjs';
+import { RUNTIME, CHAT_RUNTIME, isAssetRequest } from './config.mjs';
+import { localPipeline } from './text-model.mjs';
 import { createInference } from './inference.mjs';
 
 // This realm only fetches public runtime/model assets. Never put user content in a URL.
@@ -17,15 +18,17 @@ self.onmessage = async ({ data }) => {
   busy = true;
   try {
     if (data.type === 'init' && !infer) {
-      const { pipeline, env } = await import(RUNTIME);
-      infer = await createInference(pipeline, env, (stage, event) => {
+      const [{ pipeline, env }, { CreateMLCEngine }] = await Promise.all([
+        import(RUNTIME), import(CHAT_RUNTIME),
+      ]);
+      infer = await createInference(localPipeline(pipeline, CreateMLCEngine), env, (stage, event) => {
         if (['initiate', 'progress', 'done'].includes(event.status))
           self.postMessage({
             type: 'progress',
             stage,
             progress: event.progress,
           });
-      });
+      }, { onEngagement: interest => self.postMessage({ type: 'engagement', interest }) });
       self.postMessage({ type: 'ready' });
     } else if (data.type === 'audio' && infer) {
       const result = await infer(data.audio, data.language);

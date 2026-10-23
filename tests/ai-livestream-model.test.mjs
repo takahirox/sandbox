@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
+import { MODEL_LIBRARY, sharesTopic } from '../projects/ai-livestream/config.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
 
-// Explicit opt-in: downloads ~680 MB; no credentials, camera, mic or remote inference.
+// Explicit opt-in: downloads ~1.1 GB; no credentials, camera, mic or remote inference.
 test(
   'real browser-local Japanese/English speech → relevant generated chat',
   { skip: process.env.LOCAL_AI_SMOKE !== '1', timeout: 420000 },
@@ -105,11 +106,7 @@ test(
       );
       assert.match(result.transcript, topic);
       assert.ok(result.comment.length > 0 && result.comment.length <= 110);
-      assert.match(
-        result.comment,
-        topic,
-        'Generated comment reacts to fixture topic',
-      );
+      assert.equal(sharesTopic(result.comment, result.transcript, language), true, 'Generated comment reacts to fixture topic');
     }
     await page.evaluate(() => smoke.worker.terminate());
     for (const request of traffic) {
@@ -119,7 +116,7 @@ test(
       assert.ok(
         url.origin === server.origin ||
           ['cdn.jsdelivr.net', 'huggingface.co'].includes(url.hostname) ||
-          url.hostname.endsWith('.hf.co'),
+          url.hostname.endsWith('.hf.co') || request.url === MODEL_LIBRARY,
         `Static asset origin: ${url.origin}`,
       );
       assert.ok(
@@ -129,7 +126,7 @@ test(
       if (url.pathname.startsWith('/api/'))
         assert.match(
           url.pathname,
-          /^\/api\/resolve-cache\/models\/(Xenova\/whisper-base|onnx-community\/Qwen3-0\.6B-ONNX)\/[a-f0-9]{40}\//,
+          /^\/api\/resolve-cache\/models\/(Xenova\/whisper-base|mlc-ai\/Qwen3-1\.7B-q4f16_1-MLC)\/[a-f0-9]{40}\//,
           'Only static asset metadata redirects',
         );
     }

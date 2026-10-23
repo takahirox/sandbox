@@ -7,16 +7,70 @@ import { previewServer } from '../scripts/capture_screenshots.mjs';
 import {
   ASR,
   LLM,
-  RUNTIME,
+  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
   WASM,
   isAssetRequest,
   cleanComment,
   sharesTopic,
+  echoesSpeech,
   messagesFor,
   meaningfulSpeech,
   WINDOW_SAMPLES,
 } from '../projects/ai-livestream/config.mjs';
+import { localPipeline } from '../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
+import { VirtualAudience, speechInterest, AUDIENCE_LIMITS } from '../projects/ai-livestream/audience.mjs';
+
+test('Japanese/English fixture audiences react without chat, decay, stay bounded and reset deterministically', async () => {
+  const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/topics.json', import.meta.url)));
+  function simulate(fixture) {
+    let seed = 42;
+    const audience = new VirtualAudience({ random: () => ((seed = Math.imul(seed, 16807) >>> 0) / 4294967296) });
+    audience.start(0);
+    const interest = speechInterest(fixture.text, fixture.language, 0.03);
+    for (let time = 1000; time <= 300000; time += 1000) {
+      if (time % 6000 === 0) audience.observe(interest, time);
+      const before = audience.snapshot();
+      const state = audience.tick(time);
+      assert.ok(Math.abs(before.viewers - state.viewers) <= 12);
+      assert.ok(state.viewers >= 50 && state.viewers <= AUDIENCE_LIMITS.viewers);
+    }
+    return { audience, state: audience.snapshot() };
+  }
+  for (const language of ['ja', 'en']) {
+    const engaging = fixtures.find(f => f.language === language && f.activity === 'engaging');
+    const quiet = fixtures.find(f => f.language === language && f.activity === 'quiet');
+    const { audience, state } = simulate(engaging);
+    const calm = simulate(quiet).state;
+    assert.deepEqual(simulate(engaging).state, state, 'Seeded runs are reproducible');
+    assert.ok(state.viewers > calm.viewers * 2);
+    assert.ok(state.likes > calm.likes * 5 && state.likes > 0);
+    assert.ok(state.subscribers > calm.subscribers && state.subscribers > 0);
+    const beforeSilence = audience.snapshot();
+    for (let time = 301000; time <= 480000; time += 1000) audience.tick(time);
+    assert.ok(audience.snapshot().viewers < beforeSilence.viewers / 2);
+    const settled = audience.snapshot();
+    for (let time = 481000; time <= 540000; time += 1000) audience.tick(time);
+    assert.equal(audience.snapshot().likes, settled.likes, 'Silence has no endless reactions');
+    assert.equal(audience.snapshot().subscribers, settled.subscribers);
+    const beforeStall = audience.snapshot();
+    const stalled = audience.tick(1e9);
+    assert.ok(Math.abs(stalled.viewers - beforeStall.viewers) <= 12, 'No catch-up burst after a stall');
+    for (let time = 1e9 + 1000; time < 1e9 + 30000000; time += 1000) {
+      audience.observe(1, time);
+      audience.tick(time);
+    }
+    assert.equal(audience.snapshot().likes, AUDIENCE_LIMITS.likes);
+    assert.equal(audience.snapshot().subscribers, AUDIENCE_LIMITS.subscribers);
+    audience.observe(NaN, 1e9);
+    const end = audience.stop();
+    audience.observe(1, 2e9);
+    assert.deepEqual(audience.tick(2e9), end, 'Ended audience is inert');
+    assert.deepEqual(audience.start(2e9), { running: true, viewers: 300, likes: 0, subscribers: 0, interest: 0 });
+  }
+  assert.equal(speechInterest('', 'en', 1), 0);
+  assert.equal(speechInterest('ご視聴ありがとうございました', 'ja', 1), 0);
+});
 
 test('local inference uses Japanese/English ASR, actual generator context, silence gating and cadence', async () => {
   const calls = [];
@@ -47,7 +101,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
     return generate;
   };
   const env = { backends: { onnx: { wasm: {} } } };
-  const infer = await createInference(pipeline, env, () => {});
+  const signals = [];
+  const infer = await createInference(pipeline, env, () => {}, { random: () => 0, onEngagement: value => signals.push(value) });
   const audio = new Float32Array(WINDOW_SAMPLES).fill(0.1);
   assert.deepEqual(await infer(new Float32Array(WINDOW_SAMPLES), 'ja', 0), {
     comment: '',
@@ -57,6 +112,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   assert.equal(calls[0].options.language, 'japanese');
   assert.ok(calls[1].messages.at(-1).content.includes(speech));
   assert.equal(calls[1].options.max_new_tokens, 64);
+  assert.equal(calls[1].options.do_sample, true);
+  assert.equal(calls[1].options.top_p, 0.9);
   speech = '今日はコーヒーも飲みました。';
   assert.equal((await infer(audio, 'ja', 6000)).comment, '');
   assert.equal(
@@ -64,9 +121,10 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
     1,
     'No flood',
   );
+  assert.equal(signals.length, 2, 'Speech can update engagement without chat');
   speech = 'I made fresh coffee today.';
   answer = 'Fresh coffee smells so good!';
-  assert.equal((await infer(audio, 'en', 12000)).comment, answer);
+  assert.equal((await infer(audio, 'en', 18000)).comment, answer);
   assert.equal(calls.at(-2).options.language, 'english');
   assert.equal(
     (await infer(audio, 'en', 24000)).comment,
@@ -80,6 +138,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
     '',
     'Off-topic model output is suppressed without a canned substitute',
   );
+  assert.equal(signals.length, 5, 'Suppressed/repeated replies still publish bounded signals');
+  assert.ok(signals.every(value => value >= 0 && value <= 1));
   assert.equal(env.backends.onnx.wasm.numThreads, 1);
   assert.equal(env.allowLocalModels, false);
 });
@@ -109,13 +169,61 @@ test('comment safety, bounded prompts, and hallucinated caption filtering', () =
     'https://evil.example',
     'Hi\nSecond reply',
     'x'.repeat(111),
+    'That is great!',
+    'Your face looks happy with coffee!',
+    'I can see you drinking coffee.',
+    '笑顔がいいね',
+    '<think>coffee secret</think> Nice coffee!',
   ])
     assert.equal(cleanComment(value), '');
-  assert.equal(cleanComment('<b>猫かわいい！</b>'), '猫かわいい!');
+  assert.equal(cleanComment('<b>猫かわいい！</b>', [], 'ja'), '猫かわいい!');
+  assert.equal(cleanComment('コーヒーはおいしいね', [], 'en'), '');
+  assert.equal(cleanComment('Coffee tastes good', [], 'ja'), '');
   assert.equal(meaningfulSpeech('ご視聴ありがとうございました。'), false);
   assert.equal(meaningfulSpeech('   '), false);
   assert.equal(meaningfulSpeech('今日は猫と遊びました'), true);
   assert.ok(messagesFor('a'.repeat(10000), 'ja').at(-1).content.length < 500);
+  assert.equal(sharesTopic('Kittens are so playful!', 'I met a cat.', 'en'), true);
+  assert.equal(sharesTopic('The aroma is the best part.', 'I love the smell.', 'en'), true);
+  assert.equal(sharesTopic('They are really nice!', 'They are making coffee.', 'en'), false);
+  assert.equal(sharesTopic('I will have coffee instead.', 'I am having some tea.', 'en'), false);
+  assert.equal(sharesTopic('Interesting!', 'I need a rest.', 'en'), false);
+});
+
+test('rolling speech context expires, viewer voices vary, and skipped chat still scores speech', async () => {
+  let speech = 'I lowered the coffee temperature.', answer = 'What temperature did you use?';
+  const prompts = [], signals = [];
+  const pipeline = async task => {
+    if (task === 'automatic-speech-recognition') return async () => ({ text: speech });
+    const generator = async () => [{ generated_text: answer }];
+    generator.tokenizer = { apply_chat_template(messages) { prompts.push(messages); return messages; } };
+    return generator;
+  };
+  const infer = await createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {},
+    { random: () => 0, onEngagement: value => signals.push(value) });
+  const audio = new Float32Array(96000).fill(0.03);
+  assert.ok((await infer(audio, 'en', 0)).comment);
+  speech = 'Now it is less bitter. Why does that work?';
+  await infer(audio, 'en', 6000);
+  speech = 'Should I lower it further?';
+  answer = 'Would a lower temperature help?';
+  assert.ok((await infer(audio, 'en', 18000)).comment, 'Earlier concrete topic supports a follow-up fragment');
+  assert.match(prompts[1].at(-1).content, /coffee temperature/);
+  assert.notEqual(prompts[0][0].content, prompts[1][0].content, 'Distinct voices');
+  assert.match(prompts[1].at(-1).content, /avoid_repeating/);
+  speech = 'There are oranges in the bowl.';
+  answer = 'Coffee smells wonderful!';
+  assert.equal((await infer(audio, 'en', 60000)).comment, '', 'Old topic cannot anchor off-topic output');
+  assert.doesNotMatch(prompts[2].at(-1).content.split('avoid_repeating')[0], /coffee temperature/);
+  assert.equal(signals.length, 4);
+  for (let now = 66000; now <= 108000; now += 6000) await infer(audio, 'en', now);
+  assert.equal(prompts.length, 3, 'Continued repeated speech cannot renew chat every context expiry');
+  assert.equal(signals.length, 12);
+  speech = 'ご視聴ありがとうございました。';
+  await infer(audio, 'ja', 120000);
+  assert.equal(signals.length, 12, 'Caption boilerplate cannot inflate audience interest');
+  const invalid = audio.slice(); invalid[0] = NaN;
+  assert.deepEqual(await infer(invalid, 'en', 120000), { comment: '' });
 });
 
 test('Worker fetch policy allows only pinned public assets and rejects inference or writes', () => {
@@ -129,8 +237,9 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
       true,
     );
   for (const path of [
-    RUNTIME,
+    RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
     WASM + 'ort-wasm-simd-threaded.jsep.wasm',
+    CHAT_RUNTIME, MODEL_LIBRARY,
     'https://cas-bridge.xethub.hf.co/public-asset',
   ])
     assert.equal(isAssetRequest(new URL(path)), true);
@@ -139,10 +248,69 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
     'https://huggingface.co/api/models/example',
     `https://huggingface.co/${ASR.id}/resolve/main/config.json`,
     'https://example.com/upload',
+    MODEL_LIBRARY.replace('00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0', 'main'),
+    MODEL_LIBRARY + '?speech=coffee',
     'https://cdn.jsdelivr.net/npm/unpinned/file.js',
   ])
     assert.equal(isAssetRequest(new URL(path)), false);
   assert.equal(isAssetRequest(new URL(RUNTIME), 'POST'), false);
+});
+
+test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
+  const requests = [], progress = [];
+  let resets = 0;
+  const pipeline = localPipeline(() => { throw Error('Text never uses the ASR runtime'); }, async (id, options) => {
+    assert.equal(options.appConfig.model_list.length, 1);
+    const model = options.appConfig.model_list[0];
+    assert.equal(model.model, `https://huggingface.co/${LLM.id}/resolve/${LLM.revision}/`);
+    assert.equal(model.model_lib, MODEL_LIBRARY);
+    assert.equal(model.overrides.context_window_size, 1536);
+    assert.equal(options.logLevel, 'SILENT');
+    options.initProgressCallback({ progress: 0.5, text: 'Not exposed to the UI' });
+    return {
+      async resetChat() { resets++; },
+      chat: { completions: { async create(request) {
+        requests.push(request);
+        return { choices: [{ message: { content: 'Which coffee beans did you choose?' } }] };
+      } } },
+    };
+  });
+  const generator = await pipeline('text-generation', LLM.id, { progress_callback: event => progress.push(event) });
+  const messages = messagesFor('I made coffee.', 'en');
+  for (let i = 0; i < 2; i++) await generator(messages, { max_new_tokens: 64, temperature: 0.7, top_p: 0.9 });
+  assert.equal(resets, 2);
+  assert.deepEqual(progress, [{ status: 'progress', progress: 50 }]);
+  assert.equal(requests[0].max_tokens, 64);
+  assert.equal(requests[0].extra_body.enable_thinking, false);
+  assert.equal(requests[0].seed, undefined);
+  assert.equal(requests[0].messages, messages);
+});
+
+test('recorded real bilingual model output preserves topical follow-ups and suppresses echoes', async () => {
+  const readReport = async name => JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
+  const baseline = (await readReport('baseline')).modes[0];
+  const selected = (await readReport('mlc')).modes[0];
+  assert.equal(selected.fixtures.length, 6);
+  assert.ok(baseline.fixtures.filter(f => /friend|お子様|smiled/.test(f.raw)).length >= 3,
+    'Baseline exhibited invented people or visual actions on these exact fixtures');
+  let published = 0;
+  for (const sample of selected.fixtures) {
+    const language = sample.file.startsWith('ja') ? 'ja' : 'en';
+    const cleaned = cleanComment(sample.raw, [], language);
+    const actual = sharesTopic(cleaned, sample.transcript, language) &&
+      !echoesSpeech(cleaned, sample.transcript, language) ? cleaned : '';
+    assert.equal(actual, sample.finalComment);
+    if (actual) {
+      published++;
+      assert.doesNotMatch(actual, /friend|お子様|smiled|<think>/);
+      assert.ok(actual.length <= (language === 'ja' ? 55 : 110));
+    }
+  }
+  assert.equal(published, 4, 'Four short relevant remarks; two speech echoes withheld');
+  assert.match(selected.fixtures.find(f => f.file === 'en-discovery.wav').finalComment, /sugar/,
+    'A relevant suggestion survives without copying the word coffee');
+  assert.equal(selected.fixtures.find(f => f.file === 'ja-discovery.wav').finalComment, '',
+    'Do not publish a paraphrase of a misrecognized claim');
 });
 
 test('audio worklet bounds, downsampling, voice gating, and transfer', async () => {
@@ -206,6 +374,7 @@ test(
       hasTouch: true,
     });
     const page = await context.newPage();
+    await page.clock.install();
     const errors = [],
       requests = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -322,6 +491,8 @@ test(
       assert.equal(await page.locator('#debug').isVisible(), false);
     };
     const assertStoppedUI = async () => {
+      assert.equal(await page.locator('#viewer-count').isVisible(), false);
+      assert.equal(await page.locator('#subscriber-count').isVisible(), false);
       assert.equal(await page.locator('#session-label').isVisible(), false);
       assert.equal(await page.locator('video').isVisible(), false);
       assert.equal(await page.locator('#language').isEnabled(), true);
@@ -352,7 +523,7 @@ test(
     assert.deepEqual(await page.locator('h1, h2').allInnerTexts(), ['Your corner', 'Live chat']);
     assert.equal(
       (await page.locator('body').innerText()).replace('Spoken language', '').replace(/\s+/g, ' ').trim(),
-      '← Sandbox About Y Your corner ♡ Like Subscribe 日本語 English ● Go live Live chat',
+      '← Sandbox About Y Your corner ♡ Like 0 Subscribe 日本語 English ● Go live Live chat',
       'Default UI contains only navigation, identity and controls',
     );
     const about = page.locator('summary');
@@ -419,6 +590,8 @@ test(
     assert.equal(await page.locator('#start').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.getElementById('status').textContent === 'Loading chat 35%…');
+    assert.equal(await page.locator('#viewer-count').innerText(), '300 watching');
+    assert.equal(await page.locator('#viewer-count').isVisible(), true);
     assert.equal(await page.locator('#session-label').innerText(), 'Camera & mic on');
     assert.equal(await page.locator('#session-label').isVisible(), true);
     assert.equal(await page.locator('#language').isDisabled(), true);
@@ -439,6 +612,34 @@ test(
       0,
       'No fabricated chat before speech',
     );
+    assert.equal(await page.locator('#viewer-count').innerText(), '300 watching');
+    // Three minutes of recognized, interesting speech with every chat reply skipped.
+    for (let i = 0; i < 30; i++) {
+      await page.evaluate(() => {
+        fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
+        fixture.workers[0].onmessage({ data: { type: 'engagement', interest: 0.9 } });
+        fixture.workers[0].onmessage({ data: { type: 'result', comment: '' } });
+      });
+      await page.clock.runFor(6000);
+    }
+    assert.ok(Number((await page.locator('#viewer-count').innerText()).replace(/\D/g, '')) > 500);
+    const autoLikes = Number((await page.locator('#like-count').innerText()).replaceAll(',', ''));
+    const autoSubs = Number(await page.locator('#subscriber-count').innerText());
+    assert.ok(autoLikes > 0 && autoSubs > 0);
+    assert.equal(await page.locator('.comment').count(), 0);
+    await page.locator('#like').click();
+    await page.locator('#subscribe').click();
+    assert.equal(await page.locator('#like-count').innerText(), String(autoLikes + 1));
+    assert.equal(await page.locator('#subscriber-count').innerText(), String(autoSubs + 1));
+    await page.clock.runFor(1000);
+    assert.equal(await page.locator('#like').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#subscribe').getAttribute('aria-pressed'), 'true');
+    const beforeUnlike = Number(await page.locator('#like-count').innerText());
+    await page.locator('#like').click();
+    await page.locator('#subscribe').click();
+    assert.equal(await page.locator('#like-count').innerText(), String(beforeUnlike - 1));
+    await page.clock.runFor(6000);
+    await page.evaluate(() => { fixture.jobs = 0; });
     assert.equal(await page.locator('video').evaluate((v) => v.muted), true);
     assert.equal(
       await page.evaluate(() => fixture.requested.audio.channelCount),
@@ -466,6 +667,8 @@ test(
     assert.equal(await page.locator('.comment').count(), 60);
     assert.equal(await page.locator('.comment').first().evaluate(el => getComputedStyle(el).animationName), 'none');
     await assertMinimalUI();
+    await page.locator('#like').click();
+    await page.locator('#subscribe').click();
     await page.locator('#start').click();
     assert.equal(
       await page.evaluate(() =>
@@ -499,6 +702,11 @@ test(
       'Late inference results after End are ignored',
     );
     await assertStoppedUI();
+    await page.clock.runFor(60000);
+    assert.equal(await page.locator('#like-count').innerText(), '1');
+    assert.equal(await page.locator('#subscriber-count').textContent(), '1');
+    assert.equal(await page.locator('#like').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#subscribe').getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator('#status').innerText(), 'Camera & mic off.');
     // End remains available during model loading and releases capture immediately.
     await page.evaluate(() => { fixture.mode = 'loading'; });
@@ -510,6 +718,25 @@ test(
       fixture.streams.at(-1).getTracks().every(track => track.readyState === 'ended') &&
       fixture.workers.at(-1).terminated && fixture.contexts.at(-1).closed,
     ), true);
+    // Both loading and inference have absolute deadlines; the audience timer
+    // cannot mask a stalled Worker or keep counting after a failure.
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent === 'Loading chat 35%…');
+    await page.clock.runFor(300000);
+    assert.match(await page.locator('#status').innerText(), /Loading took too long/);
+    await assertStoppedUI();
+    await page.evaluate(() => { fixture.mode = ''; });
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent === '' && !document.getElementById('viewer-count').hidden);
+    await page.evaluate(() => fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) }));
+    await page.clock.runFor(90000);
+    assert.match(await page.locator('#status').innerText(), /taking too long/);
+    await assertStoppedUI();
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent === '' && !document.getElementById('viewer-count').hidden);
+    await page.evaluate(() => fixture.workers.at(-1).onmessage({ data: { type: 'error', code: 'inference' } }));
+    assert.match(await page.locator('#status').innerText(), /trouble keeping up/);
+    await assertStoppedUI();
     for (const [mode, message] of [
       ['denied', /permission was denied/],
       ['missing', /camera and microphone are needed/],
@@ -628,6 +855,10 @@ test(
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('https://**/*', (route) => {
       remote.push(route.request().url());
+      if (route.request().url() === CHAT_RUNTIME) return route.fulfill({
+        contentType: 'text/javascript',
+        body: `export async function CreateMLCEngine() { return { async resetChat() {}, chat: { completions: { create: async () => ({choices:[{message:{content:'コーヒー、いい香りですね！'}}]}) } } }; }`,
+      });
       if (route.request().url() !== RUNTIME) return route.abort();
       return route.fulfill({
         contentType: 'text/javascript',
@@ -666,9 +897,9 @@ test(
     await page.locator('.comment').waitFor({ timeout: 15000 });
     assert.match(await page.locator('.comment').innerText(), /コーヒー/);
     assert.deepEqual(
-      remote,
-      [RUNTIME],
-      'Only the explicitly mocked runtime is requested',
+      remote.sort(),
+      [RUNTIME, CHAT_RUNTIME].sort(),
+      'Only the explicitly mocked local runtimes are requested',
     );
     await page.locator('#start').click();
     assert.equal(
