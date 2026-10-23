@@ -1,6 +1,6 @@
 # AI Livestream
 
-A static, private livestream **simulation** for [sandbox issue #50](https://github.com/takahirox/sandbox/issues/50).
+A static, private livestream **simulation** refined in [sandbox issue #52](https://github.com/takahirox/sandbox/issues/52).
 Open `index.html` through HTTPS or a localhost HTTP server, choose Japanese or English,
 and press **Go live**. Allow a camera and microphone. After the first model download,
 speak normally; an occasional fictional viewer comment responds to recent speech.
@@ -43,11 +43,17 @@ has a 90-second limit. A slow connection can require another attempt.
   audio are dropped; a second energy gate runs before recognition. Acknowledgements
   allow at most one audio message to wait on the UI thread, even if it stalls.
 - One dedicated module Worker runs ASR followed by language generation. There is
-  one job at a time, no pending inference queue, at least six seconds between
-  submitted windows and 18 seconds between comment opportunities, at most 96
-  transcription tokens and 64 generated tokens. Audio arriving while busy/loading
-  is discarded. This bounds
-  resources and prioritizes recent speech over backlog. Silence produces no job
+  one job at a time and one replaceable latest audio window while busy; no growing
+  queue. Six-second windows use a 5.5-second submission guard (allowing scheduling jitter), with an eight-second
+  minimum between comment opportunities, at most 96
+  transcription tokens and 64 generated tokens. Audio arriving while loading
+  is discarded; busy audio replaces the pending window. This bounds resources and
+  prioritizes recent speech over backlog. There are no random opportunity skips or
+  viewer-dependent inference rates. A first meaningful window can generate immediately;
+  six-second windows typically yield one opportunity every twelve seconds.
+  Slow replies are not rejected merely for taking 24 seconds. If newer speech arrived,
+  a reply is held in the Worker until the latest recognition confirms its topic (within
+  90 seconds); otherwise it is discarded. End cancels all pending work. Silence produces no job
   or filler chat. Recognizer errors/hallucinations remain possible.
 - Transcription is supplied as quoted context to Qwen, which generates the actual
   comment; there is no canned comment roulette. Reasoning mode is disabled. A
@@ -59,8 +65,9 @@ has a 90-second limit. A slow connection can require another attempt.
   penalties. One unrelated question/reply example establishes the conversational
   format; it is never substituted for generated output. Three recent replies
   discourage repetition.
-  Short, safe topical replies survive a word/concept check (common inflections and
-  a small topic-concept list permit related replies). Generic praise, visual claims, URLs,
+  Short, safe topical replies survive a word/concept or conversational-reference check
+  (including pronoun-based follow-ups). Explicit preferences and questions may reuse
+  topic words without being treated as echoes. Generic praise, visual claims, URLs,
   unsafe vocabulary, wrong-language replies, speech echoes, multiline/long replies
   and duplicates are suppressed. These
   checks are imperfect, not a moderation or factuality guarantee. Odd wording and
@@ -68,19 +75,23 @@ has a 90-second limit. A slow connection can require another attempt.
 - Audience scoring uses only recognized words, questions, detail, invitations and
   a small bounded audio RMS contribution. It does not infer emotions or understand
   video. Each score is posted before chat generation. Skipped/filtered replies
-  still influence reactions. Comment opportunity probability increases with
-  interest; repeated transcripts cannot generate repeated chat. Silence produces
+  still influence reactions. Interest affects only fictional engagement;
+  comment opportunities are deterministic. Repeated transcripts cannot generate repeated chat. Silence produces
   no topic or filler comment.
-- The timer-free `VirtualAudience` state machine starts at 300 displayed viewers
-  after capture starts (held steady while loading). One UI timer ticks each
-  second after models are ready; interest fades within 18 seconds of the last recognized speech window. Viewer changes are limited to
-  +12/−6 per second, bounded to 50–2,400. Likes/subscriptions accrue separately
-  from chat, proportional to audience size and interest, at most one of each per
-  tick; subscriptions require sustained interest above 0.55. Simulated totals cap
-  at 10,000 likes/500 subscriptions. A stalled tick integrates at most two seconds,
-  so background delays never cause a catch-up burst. End cancels the timer and
-  resets all simulated counts; manual choices are preserved and contribute exactly
-  zero or one. No counts or choices are persisted.
+- The timer-free `VirtualAudience` state machine starts at 25 displayed viewers
+  after capture starts (held steady while loading). One UI timer computes bounded
+  internal engagement each second after models are ready. The displayed watching
+  count updates at most once every 25 seconds, by −3 to +4; some viewers can leave
+  even during engaging speech. Internal state stays close to the displayed count,
+  so silence does not keep increasing the display to catch up with hidden growth.
+  Interest fades within 18 seconds of the last recognized speech. Viewer state is
+  bounded to 5–180, with a quiet target of 9 and engaged targets in the low hundreds.
+  Likes/subscriptions accrue independently of chat at the smaller audience scale;
+  subscriptions require sustained interest above 0.55 and are rare. Simulated totals
+  cap at 500 likes/30 subscriptions. A stalled tick integrates at most two seconds
+  and publishes only one bounded viewer change, so delays never create a catch-up
+  burst. End cancels the timer and resets simulated counts; manual choices are
+  preserved and contribute exactly zero or one. Nothing is persisted.
 - Network traffic consists of static page/runtime/model GETs from the site,
   jsDelivr, Hugging Face, its asset delivery hosts and a pinned model library on
   raw.githubusercontent.com. The inference Worker's fetch guard permits only GET asset requests. No inference API, WebSocket,
@@ -151,7 +162,26 @@ recognized topics, short topical generated comments, and GET-only asset traffic;
 it never requests real camera/mic access. See fixture provenance in
 `tests/fixtures/ai-livestream/README.md`. This is intentionally excluded from ordinary
 CI to avoid hardware requirements and repeated large downloads. `?debug=1` shows
-only Worker state/audio rate/interest, not speech or model exception content.
+only ephemeral numeric counters, last ASR/generation timings, seconds since the last
+visible comment, and exact model/backend identity. It traces VAD silence/backpressure,
+audio submissions/pending windows, ASR errors/accepted recognition, cadence/repeated
+speech, generation errors, categorized output rejection, context validation, Worker
+results, UI insertion/discards and engagement ticks. A closed event vocabulary
+rejects arbitrary strings. No audio, transcripts, prompts, runtime exceptions or
+identifying details enter this panel, logs, telemetry or storage. End clears it.
+
+The ordinary suite also replays the recorded 1.7B outputs and scripted bilingual
+follow-ups through the issue #50 and current pipelines, without weights:
+
+```sh
+node scripts/replay_livestream_pipeline.mjs
+```
+
+`pipeline-replay.json` records acceptance frequency/reasons and deterministic
+small-audience trajectories. This is a scheduling/filter comparison, not a new
+model-quality or hardware benchmark. The real-model comparison can be saved
+separately from historical evidence with
+`node scripts/compare_livestream_models.mjs --mlc --issue52`.
 
 See [the model comparison](./MODEL-EVALUATION.md) for concrete bilingual fixture
 outputs, measured resource costs, limitations and reproduction commands.

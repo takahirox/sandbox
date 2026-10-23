@@ -33,7 +33,7 @@ test('Japanese/English fixture audiences react without chat, decay, stay bounded
       const before = audience.snapshot();
       const state = audience.tick(time);
       assert.ok(Math.abs(before.viewers - state.viewers) <= 12);
-      assert.ok(state.viewers >= 50 && state.viewers <= AUDIENCE_LIMITS.viewers);
+      assert.ok(state.viewers >= 5 && state.viewers <= AUDIENCE_LIMITS.viewers);
     }
     return { audience, state: audience.snapshot() };
   }
@@ -43,12 +43,12 @@ test('Japanese/English fixture audiences react without chat, decay, stay bounded
     const { audience, state } = simulate(engaging);
     const calm = simulate(quiet).state;
     assert.deepEqual(simulate(engaging).state, state, 'Seeded runs are reproducible');
-    assert.ok(state.viewers > calm.viewers * 2);
+    assert.ok(state.viewers > calm.viewers * 1.5);
     assert.ok(state.likes > calm.likes * 5 && state.likes > 0);
-    assert.ok(state.subscribers > calm.subscribers && state.subscribers > 0);
+    assert.ok(state.subscribers >= calm.subscribers && state.subscribers <= 2, 'Subscriptions are rare on a small stream');
     const beforeSilence = audience.snapshot();
     for (let time = 301000; time <= 480000; time += 1000) audience.tick(time);
-    assert.ok(audience.snapshot().viewers < beforeSilence.viewers / 2);
+    assert.ok(audience.snapshot().viewers < beforeSilence.viewers);
     const settled = audience.snapshot();
     for (let time = 481000; time <= 540000; time += 1000) audience.tick(time);
     assert.equal(audience.snapshot().likes, settled.likes, 'Silence has no endless reactions');
@@ -66,7 +66,7 @@ test('Japanese/English fixture audiences react without chat, decay, stay bounded
     const end = audience.stop();
     audience.observe(1, 2e9);
     assert.deepEqual(audience.tick(2e9), end, 'Ended audience is inert');
-    assert.deepEqual(audience.start(2e9), { running: true, viewers: 300, likes: 0, subscribers: 0, interest: 0 });
+    assert.deepEqual(audience.start(2e9), { running: true, viewers: 25, likes: 0, subscribers: 0, interest: 0 });
   }
   assert.equal(speechInterest('', 'en', 1), 0);
   assert.equal(speechInterest('ご視聴ありがとうございました', 'ja', 1), 0);
@@ -188,6 +188,15 @@ test('comment safety, bounded prompts, and hallucinated caption filtering', () =
   assert.equal(sharesTopic('They are really nice!', 'They are making coffee.', 'en'), false);
   assert.equal(sharesTopic('I will have coffee instead.', 'I am having some tea.', 'en'), false);
   assert.equal(sharesTopic('Interesting!', 'I need a rest.', 'en'), false);
+  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたからだ。',
+    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
+  assert.equal(echoesSpeech('お茶を飲んでいたことだけ。', '今日は、静かにお茶を飲んでいます。少し休みます。', 'ja'), true);
+  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたことによるですね。',
+    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
+  assert.equal(echoesSpeech('I love fresh coffee.', 'I love fresh coffee.', 'en'), true);
+  assert.equal(echoesSpeech('どの豆にしたの？', 'どの豆にしたの？', 'ja'), true);
+  assert.equal(echoesSpeech('Fresh coffee, a new grinder and beans — I like that!',
+    'I made fresh coffee with a new grinder and beans.', 'en'), false);
 });
 
 test('rolling speech context expires, viewer voices vary, and skipped chat still scores speech', async () => {
@@ -213,7 +222,8 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
   assert.match(prompts[1].at(-1).content, /avoid_repeating/);
   speech = 'There are oranges in the bowl.';
   answer = 'Coffee smells wonderful!';
-  assert.equal((await infer(audio, 'en', 60000)).comment, '', 'Old topic cannot anchor off-topic output');
+  answer = 'Which oranges did you choose?';
+  assert.equal((await infer(audio, 'en', 60000)).comment, answer, 'Latest speech anchors the prompt after context expiry');
   assert.doesNotMatch(prompts[2].at(-1).content.split('avoid_repeating')[0], /coffee temperature/);
   assert.equal(signals.length, 4);
   for (let now = 66000; now <= 108000; now += 6000) await infer(audio, 'en', now);
@@ -327,7 +337,7 @@ test('audio worklet bounds, downsampling, voice gating, and transfer', async () 
       AudioWorkletProcessor: class {
         constructor() {
           this.port = {
-            postMessage: (audio, transfer) => sent.push({ audio, transfer }),
+            postMessage: (audio, transfer) => { if (audio instanceof Float32Array) sent.push({ audio, transfer }); },
           };
         }
       },
@@ -431,7 +441,7 @@ test(
                 20,
               );
             }
-          } else {
+          } else if (data.type === 'audio') {
             fixture.audio = data;
             fixture.jobs = (fixture.jobs || 0) + 1;
           }
@@ -590,7 +600,7 @@ test(
     assert.equal(await page.locator('#start').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
     await page.keyboard.press('Enter');
     await page.waitForFunction(() => document.getElementById('status').textContent === 'Loading chat 35%…');
-    assert.equal(await page.locator('#viewer-count').innerText(), '300 watching');
+    assert.equal(await page.locator('#viewer-count').innerText(), '25 watching');
     assert.equal(await page.locator('#viewer-count').isVisible(), true);
     assert.equal(await page.locator('#session-label').innerText(), 'Camera & mic on');
     assert.equal(await page.locator('#session-label').isVisible(), true);
@@ -612,7 +622,7 @@ test(
       0,
       'No fabricated chat before speech',
     );
-    assert.equal(await page.locator('#viewer-count').innerText(), '300 watching');
+    assert.equal(await page.locator('#viewer-count').innerText(), '25 watching');
     // Three minutes of recognized, interesting speech with every chat reply skipped.
     for (let i = 0; i < 30; i++) {
       await page.evaluate(() => {
@@ -622,10 +632,10 @@ test(
       });
       await page.clock.runFor(6000);
     }
-    assert.ok(Number((await page.locator('#viewer-count').innerText()).replace(/\D/g, '')) > 500);
+    assert.ok(Number((await page.locator('#viewer-count').innerText()).replace(/\D/g, '')) > 40);
     const autoLikes = Number((await page.locator('#like-count').innerText()).replaceAll(',', ''));
     const autoSubs = Number(await page.locator('#subscriber-count').innerText());
-    assert.ok(autoLikes > 0 && autoSubs > 0);
+    assert.ok(autoLikes > 0 && autoLikes < 30 && autoSubs <= 2);
     assert.equal(await page.locator('.comment').count(), 0);
     await page.locator('#like').click();
     await page.locator('#subscribe').click();
@@ -638,7 +648,7 @@ test(
     await page.locator('#like').click();
     await page.locator('#subscribe').click();
     assert.equal(await page.locator('#like-count').innerText(), String(beforeUnlike - 1));
-    await page.clock.runFor(6000);
+    await page.clock.runFor(5999);
     await page.evaluate(() => { fixture.jobs = 0; });
     assert.equal(await page.locator('video').evaluate((v) => v.muted), true);
     assert.equal(
@@ -649,13 +659,21 @@ test(
       fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
       fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
     });
-    assert.equal(await page.evaluate(() => fixture.audio.type), 'audio');
+    assert.equal(await page.evaluate(() => fixture.audio.type), 'audio', 'Six-second window jitter does not discard fresh audio');
     assert.equal(await page.evaluate(() => fixture.audio.language), 'en');
+    await page.evaluate(() => fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.2) }));
     assert.equal(
       await page.evaluate(() => fixture.jobs),
       1,
-      'Busy Worker never accumulates queued audio',
+      'Busy Worker keeps only one active inference',
     );
+    await page.clock.runFor(30000);
+    await page.evaluate(() => fixture.workers[0].onmessage({
+      data: { type: 'result', comment: 'Which beans did you choose?' },
+    }));
+    assert.equal(await page.locator('.comment').count(), 1, 'A legitimate slow worker reply reaches the UI');
+    assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Only the latest pending window is submitted');
+    assert.ok(Math.abs(await page.evaluate(() => fixture.audio.audio[0]) - 0.2) < 0.001);
     for (let i = 0; i < 65; i++)
       await page.evaluate(
         (i) =>
@@ -828,7 +846,8 @@ test(
     await page.goto(url + '?debug=1');
     await page.locator('#start').click();
     await page.locator('#debug').waitFor({ state: 'visible' });
-    assert.match(await page.locator('#debug').innerText(), /Worker: ready; busy: false; audio rate: 16000 Hz/);
+    assert.match(await page.locator('#debug').innerText(), /Qwen3-1.7B-q4f16_1-MLC/);
+    assert.match(await page.locator('#debug').innerText(), /WebGPU/);
     await page.locator('#start').click();
     await context.close();
   },
@@ -852,12 +871,13 @@ test(
     });
     const errors = [],
       remote = [];
+    let reject = false;
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('https://**/*', (route) => {
       remote.push(route.request().url());
       if (route.request().url() === CHAT_RUNTIME) return route.fulfill({
         contentType: 'text/javascript',
-        body: `export async function CreateMLCEngine() { return { async resetChat() {}, chat: { completions: { create: async () => ({choices:[{message:{content:'コーヒー、いい香りですね！'}}]}) } } }; }`,
+        body: `export async function CreateMLCEngine() { return { async resetChat() {}, chat: { completions: { create: async () => ({choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]}) } } }; }`,
       });
       if (route.request().url() !== RUNTIME) return route.abort();
       return route.fulfill({
@@ -908,6 +928,166 @@ test(
       ),
       true,
     );
+    reject = true;
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?debug=1');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => {
+      const text = document.getElementById('debug').textContent;
+      return text && JSON.parse(text).counts.format === 1;
+    }, null, { timeout: 15000 });
+    const diagnostics = JSON.parse(await page.locator('#debug').innerText());
+    assert.equal(diagnostics.counts.transcription_accepted, 1);
+    assert.equal(diagnostics.counts.generation_attempt, 1);
+    assert.equal(diagnostics.counts.worker_result, 1);
+    assert.equal(await page.locator('.comment').count(), 0, 'A filtered output has a visible diagnostic cause');
+    assert.doesNotMatch(JSON.stringify(diagnostics), /コーヒー|SKIP|prompt|SECRET/);
+    await page.locator('#start').click();
+    assert.equal(await page.locator('#debug').textContent(), '');
     assert.deepEqual(errors, []);
   },
 );
+
+test('displayed viewers have a deterministic 25-second cadence and bounded stall changes', () => {
+  const audience = new VirtualAudience({ random: () => 0.5 });
+  assert.equal(audience.start(0).viewers, 25);
+  let previous = audience.snapshot(), lastChange = 0, changes = 0;
+  for (let now = 1000; now <= 120000; now += 1000) {
+    audience.observe(now < 60000 ? 0.95 : 0, now);
+    const state = audience.tick(now);
+    if (state.viewers !== previous.viewers) {
+      assert.ok(now - lastChange >= 25000);
+      assert.ok(Math.abs(state.viewers - previous.viewers) <= 4);
+      lastChange = now;
+      changes++;
+    }
+    previous = state;
+  }
+  assert.ok(changes >= 2 && changes <= 4);
+  const stalled = audience.tick(1e9);
+  assert.ok(Math.abs(stalled.viewers - previous.viewers) <= 4);
+  assert.deepEqual(audience.tick(1e9), stalled);
+});
+
+test('offline issue #50 replay isolates scheduler starvation and fragile lexical rejection', async () => {
+  const { evaluation } = await import('../scripts/replay_livestream_pipeline.mjs');
+  const actual = await evaluation();
+  const saved = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/pipeline-replay.json', import.meta.url)));
+  assert.deepEqual(actual, saved, 'Committed evidence is reproducible without models or hardware');
+  assert.equal(actual.isolated.after.accepted, 4, 'Real recorded bilingual replies retain quality decisions');
+  assert.equal(actual.pronounFollowups.before.accepted, 0);
+  assert.equal(actual.pronounFollowups.after.accepted, 2);
+  assert.equal(actual.conversation.before.accepted, 1);
+  assert.equal(actual.conversation.after.accepted, 10, 'Five distinct comments/minute despite highest injected randomness');
+  assert.equal(actual.conversation.after.reasons.cadence, 10);
+});
+
+test('diagnostics categorize failed ASR, filters, parsing, safety and generation without content', async () => {
+  const { Diagnostics } = await import('../projects/ai-livestream/diagnostics.mjs');
+  const diagnostics = new Diagnostics();
+  let speech = 'I brewed coffee with fresh beans.', raw = 'Which roast did you choose?', failure = '';
+  const pipeline = async task => {
+    if (task === 'automatic-speech-recognition') return async () => {
+      if (failure === 'asr') throw Error('SECRET raw transcript');
+      return { text: speech };
+    };
+    const generate = async () => {
+      if (failure === 'generation') throw Error('SECRET model prompt');
+      return [{ generated_text: raw }];
+    };
+    generate.tokenizer = { apply_chat_template: messages => messages };
+    return generate;
+  };
+  const infer = await createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {}, {
+    random: () => 1, onDiagnostic: (event, value) => diagnostics.record(event, value),
+  });
+  const audio = new Float32Array(96000).fill(0.03);
+  let now = 0;
+  const run = async () => { now += 12000; speech += ' Again.'; return infer(audio, 'en', now); };
+  assert.equal((await run()).comment, raw);
+  assert.equal((await run()).comment, '', 'Repeated model reply is suppressed');
+  for (const [value, reason] of [
+    ['SKIP', 'format'], ['You are ugly.', 'safety'], ['Call my phone number 1234567890.', 'safety'],
+    ['I can see you drinking coffee.', 'generic_or_visual'], ['You look happy.', 'generic_or_visual'],
+    ['コーヒーが好き', 'language'], ['Tomatoes are lovely!', 'topic'],
+    ['<think>SECRET</think> coffee', 'reasoning'], ['x'.repeat(111), 'length'],
+  ]) {
+    raw = value;
+    assert.equal((await run()).comment, '', value);
+    assert.ok(diagnostics.counts[reason] >= 1, reason);
+  }
+  raw = [{ role: 'assistant', content: 'How long did that take?' }];
+  assert.equal((await run()).comment, 'How long did that take?', 'Structured output and implicit reference');
+  failure = 'asr'; await run();
+  assert.equal(diagnostics.counts.asr_error, 1);
+  failure = 'generation'; await run();
+  assert.equal(diagnostics.counts.generation_error, 1);
+  assert.ok(diagnostics.counts.output_discarded >= 10);
+  failure = ''; speech = 'Thank you for watching.';
+  await infer(audio, 'en', now + 12000);
+  await infer(new Float32Array(96000), 'en', now + 24000);
+  assert.equal(diagnostics.counts.meaningless_speech, 1);
+  assert.equal(diagnostics.counts.silence, 1);
+  diagnostics.record('SECRET raw transcript', 'SECRET');
+  assert.doesNotMatch(diagnostics.summary(), /SECRET|brewed|Again|raw transcript|model prompt|1234567890/);
+});
+
+test('slow inference survives elapsed time and validates newer speech before publishing', async () => {
+  let time = 0, superseded = false;
+  let speech = 'I brewed some coffee today.', reply = 'Which beans did you choose?';
+  const reasons = [];
+  const pipeline = async task => {
+    if (task === 'automatic-speech-recognition') return async () => {
+      time += 20000; return { text: speech };
+    };
+    const generate = async () => { time += 30000; return [{ generated_text: reply }]; };
+    generate.tokenizer = { apply_chat_template: messages => messages };
+    return generate;
+  };
+  const make = () => createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {}, {
+    clock: () => time, isSuperseded: () => superseded, onDiagnostic: reason => reasons.push(reason),
+  });
+  const audio = new Float32Array(96000).fill(0.03);
+  let infer = await make();
+  assert.equal((await infer(audio, 'en')).comment, reply, 'No age-only 18s/24s cutoff');
+  infer = await make(); superseded = true;
+  assert.equal((await infer(audio, 'en')).comment, '', 'Hold a response when newer speech is waiting');
+  superseded = false; speech = 'The coffee has a sweeter aroma now.';
+  assert.equal((await infer(audio, 'en')).comment, reply, 'Still relevant after newer ASR');
+  infer = await make(); superseded = true;
+  await infer(audio, 'en');
+  superseded = false; speech = 'My cat likes chasing string.'; reply = 'Which toy does your cat prefer?';
+  assert.equal((await infer(audio, 'en')).comment, reply, 'Discard old coffee response after topic shift');
+  assert.ok(reasons.includes('stale_topic'));
+  assert.ok(reasons.includes('awaiting_context'));
+});
+
+test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance from ASR grounding', async () => {
+  const { inspectComment, relatesToSpeech } = await import('../projects/ai-livestream/config.mjs');
+  for (const [name, accepted, grounded] of [
+    ['mlc-issue52-initial', 4, 3], ['mlc-issue52', 4, 3], ['mlc-stronger-issue52', 6, 4],
+  ]) {
+    const report = JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
+    const model = report.modes[0];
+    assert.equal(model.fixtures.length, 6);
+    let count = 0, cleanDetails = 0;
+    for (const sample of model.fixtures) {
+      const language = sample.file.startsWith('ja') ? 'ja' : 'en';
+      const inspected = inspectComment(sample.raw, [], language);
+      const reason = !inspected.comment ? inspected.reason :
+        !relatesToSpeech(inspected.comment, sample.transcript, language) ? 'topic' :
+        echoesSpeech(inspected.comment, sample.transcript, language) ? 'echo' : 'accepted';
+      assert.equal(reason, sample.finalReason);
+      assert.equal(reason === 'accepted' ? inspected.comment : '', sample.finalComment);
+      if (sample.finalComment) {
+        count++;
+        // Narrow, explicit synthetic-fixture rubric, not a semantic safety claim.
+        if (!/5円|安い|買った|ボンド/u.test(sample.finalComment)) cleanDetails++;
+      }
+      assert.ok(sample.totalMs > 0 && sample.totalMs < 90000);
+    }
+    assert.equal(count, accepted);
+    assert.equal(cleanDetails, grounded);
+  }
+  assert.equal(LLM.id, 'mlc-ai/Qwen3-1.7B-q4f16_1-MLC', 'Stronger model is evaluation-only');
+  assert.equal(isAssetRequest(new URL('https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/mlc-chat-config.json')), false);
+});

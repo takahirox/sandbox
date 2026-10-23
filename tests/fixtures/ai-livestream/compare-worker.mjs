@@ -35,15 +35,15 @@ self.onmessage = async ({data}) => {
         }
         if (data.modern && task === 'automatic-speech-recognition') options.session_options = { graphOptimizationLevel: 'basic' };
         if (data.modern) env.remotePathTemplate = `{model}/resolve/${options.revision}/`;
-        const model = data.mlc && task === 'text-generation' ? await mlcGenerator(data.mlcSmall) : await pipeline(task, id, {...options, progress_callback: event => {
+        const model = data.mlc && task === 'text-generation' ? await mlcGenerator(data.mlcSmall, data.mlcStronger) : await pipeline(task, id, {...options, progress_callback: event => {
           if (event.total) files[`${task}/${event.file}`] = event.total;
         }});
         if (data.mlc && task === 'text-generation') {
           // Exact byte sizes from the pinned shard manifest / asset metadata.
-          files['text-generation/shards'] = data.mlcSmall ? 335372288 : 968001536;
+          files['text-generation/shards'] = data.mlcStronger ? 2262920192 : data.mlcSmall ? 335372288 : 968001536;
           files['text-generation/tokenizer.json'] = 11422654;
-          files['text-generation/model-library.wasm'] = data.mlcSmall ? 5535989 : 5566554;
-          files['text-generation/config+manifest'] = 2075 + (data.mlcSmall ? 129391 : 134335);
+          files['text-generation/model-library.wasm'] = data.mlcStronger ? 5847049 : data.mlcSmall ? 5535989 : 5566554;
+          files['text-generation/config+manifest'] = 2075 + (data.mlcStronger ? 180452 : data.mlcSmall ? 129391 : 134335);
         }
         const wrapped = async (...args) => {
           const start = performance.now();

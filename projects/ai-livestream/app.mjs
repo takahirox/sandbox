@@ -1,5 +1,6 @@
 import { VirtualAudience } from './audience.mjs';
 import { MIN_AUDIO_INTERVAL, VOICES } from './config.mjs';
+import { Diagnostics } from './diagnostics.mjs';
 
 const $ = (id) => document.getElementById(id);
 const start = $('start'),
@@ -46,6 +47,7 @@ function stop(message = 'Camera & mic off.', error = false) {
     clearTimer(session);
     clearInterval(session.audienceTimer);
     session.worker?.terminate();
+    session.pending = null;
     session.node?.disconnect();
     if (session.node) {
       session.node.port.onmessage = null;
@@ -75,7 +77,7 @@ function stop(message = 'Camera & mic off.', error = false) {
 }
 
 function addComment(text, voice = 0) {
-  if (!text || text.length > 110) return;
+  if (!text || text.length > 110) return false;
   const log = $('messages');
   const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
   const name = VOICES[Number.isInteger(voice) && voice >= 0 ? voice % VOICES.length : 0].name;
@@ -94,10 +96,26 @@ function addComment(text, voice = 0) {
   while (log.querySelectorAll('.comment').length > 60)
     log.querySelector('.comment').remove();
   if (follow) log.scrollTop = log.scrollHeight;
+  return true;
 }
 
 async function begin() {
-  const session = { busy: false, ready: false, lastAudio: -Infinity };
+  const session = { busy: false, ready: false, lastAudio: -Infinity, pending: null,
+    diagnostics: debug ? new Diagnostics() : null };
+  const record = (event, value) => session.diagnostics?.record(event, value);
+  const renderDebug = () => {
+    if (!debug || active !== session) return;
+    $('debug').hidden = false;
+    $('debug').textContent = session.diagnostics.summary();
+  };
+  const submit = audio => {
+    session.lastAudio = performance.now();
+    session.busy = true;
+    record('audio_submitted');
+    deadline(session, 90000, 'This device is taking too long. Try starting again.');
+    session.worker.postMessage(
+      { type: 'audio', audio, language: $('language').value }, [audio.buffer]);
+  };
   active = session;
   start.textContent = 'End';
   start.classList.add('active');
@@ -196,17 +214,26 @@ async function begin() {
         session.audienceTimer = setInterval(() => {
           if (active !== session) return;
           audience.tick(performance.now());
+          record('engagement_tick');
           renderAudience();
+          renderDebug();
         }, 1000);
         report('');
       } else if (data.type === 'engagement') {
         // The signal belongs to the submitted audio, not to a late model response.
         audience.observe(data.interest, session.lastAudio);
+      } else if (data.type === 'diagnostic') {
+        record(data.event, data.value);
       } else if (data.type === 'result') {
         clearTimer(session);
         session.busy = false;
-        if (performance.now() - session.lastAudio <= 24000)
-          addComment(data.comment, data.voice);
+        record('worker_result');
+        if (data.comment) record(addComment(data.comment, data.voice) ? 'ui_comment' : 'ui_discard');
+        if (session.pending) {
+          const audio = session.pending;
+          session.pending = null;
+          submit(audio);
+        }
       } else if (data.type === 'error') {
         stop(
           data.code === 'load'
@@ -215,39 +242,34 @@ async function begin() {
           true,
         );
       }
-      if (debug && active === session) {
-        $('debug').hidden = false;
-        $('debug').textContent =
-          `Worker: ${data.type}; busy: ${session.busy}; audio rate: ${session.context.sampleRate} Hz; interest: ${audience.snapshot().interest.toFixed(2)}`;
-      }
+      renderDebug();
     };
     session.node.port.onmessage = ({ data: audio }) => {
-      session.node.port.postMessage('ack');
-      if (
-        active !== session ||
-        !session.ready ||
-        session.busy ||
-        performance.now() - session.lastAudio < MIN_AUDIO_INTERVAL
-      )
+      if (active !== session) return;
+      if (audio?.type === 'window') {
+        record('audio_windows');
+        record(audio.reason);
+        renderDebug();
         return;
-      session.lastAudio = performance.now();
-      session.busy = true;
-      deadline(
-        session,
-        90000,
-        'This device is taking too long. Try starting again.',
-      );
-      session.worker.postMessage(
-        { type: 'audio', audio, language: $('language').value },
-        [audio.buffer],
-      );
+      }
+      session.node.port.postMessage('ack');
+      if (!session.ready || !(audio instanceof Float32Array)) return;
+      if (session.busy) {
+        // One replaceable latest window, never a growing queue or catch-up burst.
+        session.pending = audio;
+        session.worker.postMessage({ type: 'superseded' });
+        record('audio_pending');
+        return;
+      }
+      if (performance.now() - session.lastAudio < MIN_AUDIO_INTERVAL) return;
+      submit(audio);
     };
     deadline(
       session,
       300000,
       'Loading took too long. Check your connection and try again.',
     );
-    session.worker.postMessage({ type: 'init' });
+    session.worker.postMessage({ type: 'init', debug });
   } catch (error) {
     if (active !== session) return;
     const messages = {

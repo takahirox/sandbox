@@ -13,11 +13,15 @@ globalThis.fetch = (input, options) => {
 };
 let infer;
 let busy = false;
+let superseded = false;
+let debug = false;
 self.onmessage = async ({ data }) => {
+  if (data.type === 'superseded') { superseded = true; return; }
   if (busy) return;
   busy = true;
   try {
     if (data.type === 'init' && !infer) {
+      debug = data.debug === true;
       const [{ pipeline, env }, { CreateMLCEngine }] = await Promise.all([
         import(RUNTIME), import(CHAT_RUNTIME),
       ]);
@@ -28,9 +32,15 @@ self.onmessage = async ({ data }) => {
             stage,
             progress: event.progress,
           });
-      }, { onEngagement: interest => self.postMessage({ type: 'engagement', interest }) });
+      }, { onEngagement: interest => self.postMessage({ type: 'engagement', interest }),
+        isSuperseded: () => superseded,
+        onDiagnostic: (event, value) => {
+          if (debug) self.postMessage({ type: 'diagnostic', event, value });
+        },
+      });
       self.postMessage({ type: 'ready' });
     } else if (data.type === 'audio' && infer) {
+      superseded = false;
       const result = await infer(data.audio, data.language);
       self.postMessage({ type: 'result', ...result });
     }
