@@ -1212,14 +1212,32 @@ test('continuous six-second audio windows do not starve replies when ASR exceeds
   }
 });
 
-test('fresh and held replies resolve reference-only continuations against bounded recent context', async t => {
+test('fresh and held replies resolve ordinary continuations against bounded recent context', async t => {
   for (const fixture of [
     { language: 'en', first: 'I switched to a ceramic coffee dripper.',
       continuation: 'It was a little slower this time.', reply: 'Do ceramic drippers change the flavor?',
       shift: 'It reminded me of my cat.' },
     { language: 'ja', first: '陶器のコーヒードリッパーに替えました。',
       continuation: '今回は少し遅かった。', reply: '陶器のドリッパーで味は変わった?',
-      shift: '猫が遊んでいます。' },
+      shift: '今回は猫が遊んでいます。' },
+    { language: 'en', first: 'I made coffee with a ceramic dripper.',
+      continuation: 'It tastes much smoother now.', reply: 'Do ceramic drippers change the flavor?',
+      shift: 'It reminded me of my cat.' },
+    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
+      continuation: 'それで味がまろやかになった。', reply: '陶器のドリッパーは使いやすい?',
+      shift: 'それより猫の話をします。' },
+    { language: 'en', first: 'I made coffee with a ceramic dripper.',
+      continuation: 'That took longer than I expected.', reply: 'Do ceramic drippers change the flavor?',
+      shift: 'That is my cat playing with a toy.' },
+    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
+      continuation: 'そのあと、もう一度試してみました。', reply: '陶器のドリッパーで味は変わった?',
+      shift: 'それはうちの猫のおもちゃです。' },
+    { language: 'en', first: 'I made coffee with a ceramic dripper.',
+      continuation: 'It fits my morning routine better.', reply: 'Do ceramic drippers change the flavor?',
+      shift: 'That is a cat playing with a toy.' },
+    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
+      continuation: 'それで私の淹れ方も変わりました。', reply: '陶器のドリッパーは使いやすい?',
+      shift: 'それは猫の話です。' },
   ]) {
     for (const mode of ['fresh', 'held', 'shift', 'expired', 'intervening_subject']) {
       await t.test(`${fixture.language}: ${mode}`, async () => {
