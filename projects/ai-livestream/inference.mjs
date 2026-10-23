@@ -73,7 +73,7 @@ export async function createInference(pipeline, env, progress, {
     const interest = speechInterest(text, language, rms) * (repeated ? 0.5 : 1);
     onEngagement(interest);
     const previous = context.map(item => item.text).join(' ').slice(-400);
-    // Resolve fragments only through the contiguous, bounded recent context.
+    // Resolve reference-led continuations through contiguous, bounded context.
     // An explicit new subject stops the chain, even if an older topic remains
     // in the prompt. Never revive an expired subject through stored resolutions.
     const groundingParts = [text];

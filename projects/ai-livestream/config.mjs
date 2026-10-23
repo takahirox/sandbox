@@ -102,12 +102,21 @@ export function sharesTopic(comment, speech, language) {
   return topicTerms(speech, language).some(word => words.has(word));
 }
 
-// Only reference-only continuations inherit an earlier subject. Keep this narrow:
-// a new noun (e.g. "It reminded me of my cat") must anchor its own topic instead.
+// Reference-led speech can describe new properties/actions without repeating its
+// subject. Recognize that structure, rather than whitelisting complete predicates.
+// Explicit transitions and introductions of another subject break the chain.
+// This is a bounded heuristic, not semantic proof (as with relatesToSpeech).
 export function isReferenceContinuation(speech, language) {
   const text = speech.normalize('NFKC').trim();
-  if (language === 'en')
-    return /^(?:(?:and|but|so|now)\s+)?(?:it|that|this|they|those|these)\s+(?:is|was|were|are|seems?|seemed|feels?|felt|got|turned out)\s+(?:(?:a little|a bit|much|slightly|really|still|even|more|less|not|so|too|very)\s+)*(?:slower|slow|faster|fast|quicker|quick|longer|shorter|better|worse|easier|harder|different|same)(?:\s+(?:this time|than before|now|today|again|though|to me))*[.!?]*$/iu.test(text);
+  if (language === 'en') {
+    if (/\b(?:anyway|instead|speaking of|moving on|(?:change|changing|switch|switching) (?:the )?(?:topic|subject)|remind(?:s|ed)?\b[^.!?]*\bof)\b/iu.test(text) ||
+        /\b(?:is|are|was|were)\s+(?:my|your|his|her|our|their|a|an)\s+(?!(?:little|bit)\b)\p{L}/iu.test(text)) return false;
+    return /^(?:(?:and|but|so|now)[,\s]+)*(?:it|that|this|they|those|these)\b/iu.test(text);
+  }
+  if (/ところで|それより|話(?:題)?(?:は|を|が)?(?:変|替)|別の話|の話|(?:それ|これ|あれ)(?:は|が)(?:私|僕|うち|あなた|彼|彼女)の/u.test(text)) return false;
+  if (/^(?:(?:それ|これ|あれ)(?:は|が|で|って|を|に)|その(?:あと|後|結果)|この(?:あと|後))/u.test(text)) return true;
+  // Without a reference, keep the existing conservative subjectless fragments:
+  // a temporal/adverbial opener alone can also introduce a new concrete subject.
   return /^(?:(?:それ|これ|あれ)(?:は|が|って)?[、,\s]*)?(?:今回は|今度は)?(?:少し|ちょっと|かなり|もっと|前より|やはり|やっぱり)*(?:遅かった|速かった|早かった|長かった|短かった|よかった|良かった|難しかった|簡単だった)(?:です|ね|よ)?[。!?]*$/u.test(text);
 }
 
