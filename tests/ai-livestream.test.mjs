@@ -199,6 +199,28 @@ test('comment safety, bounded prompts, and hallucinated caption filtering', () =
     'I made fresh coffee with a new grinder and beans.', 'en'), false);
 });
 
+test('reference follow-up fixtures ground pronouns without admitting unrelated subjects', async () => {
+  const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/reference-followups.json', import.meta.url)));
+  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+  for (const fixture of fixtures) {
+    for (const accepted of [true, false]) {
+      for (const reply of fixture[accepted ? 'accepted' : 'rejected']) {
+        const reasons = [];
+        const generate = async () => [{ generated_text: reply }];
+        generate.tokenizer = { apply_chat_template: messages => messages };
+        const infer = await createInference(async task => task === 'automatic-speech-recognition'
+          ? async () => ({ text: fixture.speech }) : generate,
+        { backends: { onnx: { wasm: {} } } }, () => {}, {
+          onDiagnostic: reason => reasons.push(reason),
+        });
+        assert.equal((await infer(audio, fixture.language, 0)).comment,
+          accepted ? reply.normalize('NFKC') : '', reply);
+        assert.ok(reasons.includes(accepted ? 'output_accepted' : 'topic'), reply);
+      }
+    }
+  }
+});
+
 test('rolling speech context expires, viewer voices vary, and skipped chat still scores speech', async () => {
   let speech = 'I lowered the coffee temperature.', answer = 'What temperature did you use?';
   const prompts = [], signals = [];
@@ -1059,6 +1081,77 @@ test('slow inference survives elapsed time and validates newer speech before pub
   assert.equal((await infer(audio, 'en')).comment, reply, 'Discard old coffee response after topic shift');
   assert.ok(reasons.includes('stale_topic'));
   assert.ok(reasons.includes('awaiting_context'));
+});
+
+test('held replies must still address the latest topic when one of several earlier topics remains', async () => {
+  let speech = 'I brewed coffee while my cat chased a toy.';
+  let reply = 'Which toy does your cat prefer?', superseded = true, time = 0;
+  const reasons = [];
+  const generate = async () => [{ generated_text: reply }];
+  generate.tokenizer = { apply_chat_template: messages => messages };
+  const infer = await createInference(async task => task === 'automatic-speech-recognition'
+    ? async () => ({ text: speech }) : generate,
+  { backends: { onnx: { wasm: {} } } }, () => {}, {
+    clock: () => time, isSuperseded: () => superseded,
+    onDiagnostic: reason => reasons.push(reason),
+  });
+  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+  assert.equal((await infer(audio, 'en')).comment, '');
+  superseded = false; time = 12000;
+  speech = 'The coffee has a sweeter aroma now.';
+  reply = 'Which coffee beans did you choose?';
+  assert.equal((await infer(audio, 'en')).comment, reply, 'The held cat question cannot follow coffee-only speech');
+  assert.ok(reasons.includes('stale_topic'));
+  assert.ok(reasons.includes('output_discarded'));
+});
+
+test('speech arriving during held-reply validation waits for the newest ASR without extending expiry', async t => {
+  for (const outcome of ['relevant', 'changed_topic', 'expired']) {
+    await t.test(outcome, async () => {
+      let speech = 'I brewed fresh coffee.', reply = 'Which beans did you choose?';
+      let superseded = true, time = 0, asrCalls = 0, generations = 0;
+      const reasons = [];
+      const validating = Promise.withResolvers(), asrStarted = Promise.withResolvers();
+      const generate = async () => {
+        generations++; time += 30000;
+        return [{ generated_text: reply }];
+      };
+      generate.tokenizer = { apply_chat_template: messages => messages };
+      const infer = await createInference(async task => task === 'automatic-speech-recognition'
+        ? async () => {
+          if (++asrCalls === 2) {
+            asrStarted.resolve();
+            return validating.promise;
+          }
+          return { text: speech };
+        } : generate,
+      { backends: { onnx: { wasm: {} } } }, () => {}, {
+        clock: () => time, isSuperseded: () => superseded,
+        onDiagnostic: reason => reasons.push(reason),
+      });
+      const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+      assert.equal((await infer(audio, 'en')).comment, '');
+      time = 40000; superseded = false;
+      speech = 'The coffee aroma is sweeter now.';
+      const pending = infer(audio, 'en');
+      await asrStarted.promise;
+      superseded = true;
+      validating.resolve({ text: speech });
+      assert.equal((await pending).comment, '', 'No publication while a newer voiced window awaits recognition');
+      assert.equal(generations, 1, 'One held candidate; no extra inference while awaiting context');
+      assert.equal(reasons.filter(reason => reason === 'awaiting_context').length, 2);
+      assert.ok(!reasons.includes('output_accepted'));
+
+      superseded = false;
+      time = outcome === 'expired' ? 90001 : 50000;
+      if (outcome === 'changed_topic') {
+        speech = 'My cat likes chasing string.';
+        reply = 'Which toy does your cat prefer?';
+      }
+      assert.equal((await infer(audio, 'en')).comment, outcome === 'expired' ? '' : reply);
+      if (outcome !== 'relevant') assert.ok(reasons.includes('stale_topic'));
+    });
+  }
 });
 
 test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance from ASR grounding', async () => {

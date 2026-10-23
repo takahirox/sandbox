@@ -85,10 +85,11 @@ function topicText(value) {
 }
 function topicTerms(value, language) {
   const common = new Set(
-    'だ よ ね からだ からです な の は が を に と も で です います たい から ので だった 今日 昨日 明日 私 自分 これ それ ここ そこ こと もの とても です ます ました ません ある いる する した して ない という am be been being doing do done has had having get got take taking little say saying ask asked question answer used use next feel feeling trying tried try work works working enjoy enjoying need let the and are was were for but not you can will would could should they them their there then when where how why who does did too also today yesterday tomorrow really think want going something anything thanks thank this that with from have made make today just really very like love some what good nice great stream your about said'.split(
+    'だ よ ね からだ からです な の は が を に と も で です います たい から ので だった 今日 昨日 明日 私 自分 これ それ その あれ どれ ここ そこ こと もの とても です ます ました ません ある いる する した して ない という am be been being doing do done has had having get got take taking little say saying ask asked question answer used use next feel feeling trying tried try work works working enjoy enjoying need let the and are was were for but not you can will would could should they them their it its itself these those there then when where how why who does did too also today yesterday tomorrow really think want going something anything thanks thank this that with from have made make today just really very like love some what good nice great stream your about said'.split(
       ' ',
     ),
   );
+  common.add('好き');
   return [...new Intl.Segmenter(language, { granularity: 'word' }).segment(topicText(value))]
     .filter(({ segment, isWordLike }) => isWordLike && !common.has(segment) &&
       (segment.length >= 2 || /\p{Script=Han}/u.test(segment)))
@@ -101,13 +102,20 @@ export function sharesTopic(comment, speech, language) {
   return topicTerms(speech, language).some(word => words.has(word));
 }
 
-// Pronoun-based follow-ups do not need to repeat nouns from the transcript.
-// Keep rejecting disconnected assertions; this is a heuristic, not semantic proof.
+// Only bounded reference-only questions may omit the transcript's topic words.
+// A pronoun alone cannot ground a new subject or an assertion. This remains a
+// conservative heuristic, not semantic proof.
 export function relatesToSpeech(comment, speech, language) {
-  return sharesTopic(comment, speech, language) ||
-    (language === 'ja' ? /それ|その|あれ|どれ|どうして|どのくらい/u :
-      /\b(that|those|it|they|them|which one|how long|how come)\b/iu).test(comment) ||
-    (language === 'en' && /\b(?:you|your)\b.*\?/iu.test(comment));
+  if (sharesTopic(comment, speech, language)) return true;
+  const question = comment.normalize('NFKC').trim();
+  if (language === 'en')
+    return /^(?:how long did (?:that|it) take|how did (?:that|it) (?:go|turn out)|(?:would|will|did) you (?:do|try|make) (?:that|it) again|which one (?:did|would) you (?:choose|pick|prefer)|(?:did|do) you (?:like|enjoy) (?:that|it)|what would you (?:try|do) next)\?$/iu.test(question) ||
+      (/\b(?:break|back|return|pause|rest)\b/iu.test(speech) &&
+        /^(?:are you coming back soon|will you be back soon|you sure you'll be back soon)\?$/iu.test(question));
+  return /^(?:それ|あれ)(?:は|って)?[、,\s]*(?:どうだった(?:の)?|どうでしたか|どのくらいかかった(?:の)?|また試したい|またやりたい)\?$/u.test(question) ||
+    // A temperament question needs an animate referent, not just 「それ」.
+    (/(?:猫|犬|子供|子ども)/u.test(speech) &&
+      /^それ[、,\s]*(?:人懐っこい|おとなしい|元気な)子だった(?:の)?\?$/u.test(question));
 }
 
 export function echoesSpeech(comment, speech, language) {

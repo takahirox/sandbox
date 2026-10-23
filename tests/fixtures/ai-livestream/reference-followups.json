@@ -1,0 +1,38 @@
+[
+  {
+    "language": "en",
+    "speech": "I brewed fresh coffee and it smells wonderful.",
+    "accepted": ["How long did that take?", "Did you enjoy it?", "Which beans did you choose?"],
+    "rejected": [
+      "What is your favorite football team?",
+      "The spaceship exploded because it ran out of fuel.",
+      "How long until the football match?",
+      "Did you enjoy the football match?",
+      "It ran out of spaceship fuel.",
+      "You sure you'll be back soon?"
+    ]
+  },
+  {
+    "language": "en",
+    "speech": "I am having some tea today. I will take a little break.",
+    "accepted": ["You sure you'll be back soon?", "Will you be back soon?"],
+    "rejected": ["What is your favorite football team?"]
+  },
+  {
+    "language": "ja",
+    "speech": "今日はコーヒーをいれました。香りが好きです。",
+    "accepted": ["それはどうだったの？", "どの豆にしたの？"],
+    "rejected": [
+      "それ、宇宙船の燃料は何？",
+      "その宇宙船は燃料切れで爆発した。",
+      "あなたの好きなサッカーチームは？",
+      "それ、人懐っこい子だった？"
+    ]
+  },
+  {
+    "language": "ja",
+    "speech": "今日は公園で猫を見ました。猫はとてもかわいいです。",
+    "accepted": ["それ、人懐っこい子だった？", "それはどうだったの？"],
+    "rejected": ["それ、宇宙船の燃料は何？"]
+  }
+]

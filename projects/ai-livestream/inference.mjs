@@ -84,7 +84,14 @@ export async function createInference(pipeline, env, progress, {
       const held = candidate;
       candidate = null;
       if (held.language === language && clock() - held.started <= 90000 &&
-          sharesTopic(held.text, text, language)) {
+          sharesTopic(held.text, text, language) &&
+          relatesToSpeech(held.comment, text, language)) {
+        // Another window can arrive while the validating ASR call is pending.
+        // Keep the original deadline until the newest speech has been assessed.
+        if (isSuperseded()) {
+          candidate = held;
+          return finish('awaiting_context', { interest });
+        }
         remember(held.comment);
         return finish('output_accepted', { comment: held.comment, interest, voice: held.voice });
       }
