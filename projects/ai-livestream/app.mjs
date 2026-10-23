@@ -36,10 +36,7 @@ function deadline(session, delay, message) {
   }, delay);
 }
 
-function stop(
-  message = 'Session ended. Your camera & mic are off.',
-  error = false,
-) {
+function stop(message = 'Camera & mic off.', error = false) {
   const session = active;
   active = null;
   if (session) {
@@ -57,24 +54,20 @@ function stop(
   }
   video.srcObject = null;
   $('player').classList.remove('has-camera');
-  $('session-dot').classList.remove('live');
-  $('player-tag').textContent = 'YOUR STAGE';
-  $('session-label').textContent = 'OFF AIR';
+  $('session-label').hidden = true;
   start.classList.remove('active');
+  start.title = 'Start camera and microphone';
   start.innerHTML = '<span aria-hidden="true">●</span> Go live';
   $('language').disabled = false;
   // User content lives only for the current session, including in the DOM.
   $('messages')
     .querySelectorAll('.comment')
     .forEach((node) => node.remove());
-  $('chat-empty').hidden = false;
-  $('chat-hint').textContent = 'Your AI chat joins when you go live.';
   report(message, error);
 }
 
 function addComment(text) {
   if (!text || text.length > 110) return;
-  $('chat-empty').hidden = true;
   const log = $('messages');
   const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
   const name = names[(serial++ + Math.floor(Math.random() * 4)) % names.length];
@@ -100,6 +93,7 @@ async function begin() {
   active = session;
   start.textContent = 'End';
   start.classList.add('active');
+  start.title = 'Stop camera and microphone';
   $('language').disabled = true;
   report('Checking your device…');
   try {
@@ -125,7 +119,7 @@ async function begin() {
       );
       return;
     }
-    report('Allow camera & microphone to join.');
+    report('Allow camera & microphone access.');
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 1280 },
@@ -150,12 +144,11 @@ async function begin() {
           stop('Camera or microphone disconnected. Try again.', true);
       });
     video.srcObject = stream;
+    $('session-label').hidden = false;
     await video.play();
     if (active !== session) return;
     $('player').classList.add('has-camera');
-    $('player-tag').textContent = 'ONLY ON YOUR DEVICE';
-    $('session-label').textContent = 'GETTING READY';
-    report('Loading your chat… First visit downloads about 680 MB.');
+    report('Loading… First download: about 680 MB.');
     session.context = new AudioContext({ sampleRate: 16000 });
     await session.context.resume();
     if (active !== session) return;
@@ -187,10 +180,7 @@ async function begin() {
       } else if (data.type === 'ready') {
         clearTimer(session);
         session.ready = true;
-        $('session-label').textContent = 'LIVE · SIMULATED';
-        $('session-dot').classList.add('live');
-        $('chat-hint').textContent = 'Say something. We’re listening.';
-        report('You’re live. Take your time.');
+        report('');
       } else if (data.type === 'result') {
         clearTimer(session);
         session.busy = false;
@@ -273,5 +263,5 @@ window.addEventListener('pagehide', () => stop());
 window.addEventListener('beforeunload', () => stop());
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && active)
-    stop('Session paused. Your camera & mic are off.');
+    stop('Camera & mic off.');
 });

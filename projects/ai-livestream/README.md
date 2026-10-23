@@ -1,10 +1,13 @@
-# Little Stage
+# AI Livestream
 
 A static, private livestream **simulation** for [sandbox issue #46](https://github.com/takahirox/sandbox/issues/46).
 Open `index.html` through HTTPS or a localhost HTTP server, choose Japanese or English,
 and press **Go live**. Allow a camera and microphone. After the first model download,
 speak normally; an occasional fictional viewer comment responds to recent speech.
 **End** releases both devices. Switching tabs or leaving the page also ends the session.
+The unobtrusive **About** menu explains the simulation, local reactions, permissions,
+and initial model download. The player shows **Camera & mic on** whenever capture
+is active, including during loading; no real broadcast or audience is claimed.
 Likes and subscriptions are temporary local button states. There is no audience,
 account, upload, stream, analytics, or backend.
 
@@ -25,15 +28,15 @@ device. Japanese recognition with Base can miss words, particularly with noise,
 quiet speech, or partial sentences. Select the spoken language before starting.
 Downloads stop with End; completed model assets can be reused from browser cache.
 Failed downloads, lost devices, GPU/runtime errors and slow operations end cleanly
-and leave Start available. Loading has a five-minute limit and each inference job
+and leave Go live available. Loading has a five-minute limit and each inference job
 has a 90-second limit. A slow connection can require another attempt.
 
 ## Local processing and privacy
 
 - The initial preview uses only project HTML, CSS and JS. It does not request
   devices, import the AI runtime, download weights, or run inference. Gallery
-  screenshots render the same inert illustration and empty simulated chat.
-- Only explicit Start requests camera and mic. The video element is locally muted.
+  screenshots render the same inert illustration and empty chat.
+- Only explicit Go live requests camera and mic. The video element is locally muted.
   An AudioWorklet averages microphone samples to mono 16 kHz with a fixed six-second
   window (96,000 float samples). Windows with under 350 ms of sufficiently loud
   audio are dropped; a second energy gate runs before recognition. Acknowledgements
@@ -99,7 +102,11 @@ node --test tests/gallery.test.mjs tests/pokemon-coin-flip.test.cjs tests/walk-t
 The normal suite uses fake media devices, mocked AI and synthesized audio buffers.
 It checks resource cleanup, permission races/errors, unavailable GPU, failed model
 downloads, silence, language/context transfer, cadence, bounded history, filtering,
-mobile layout and network inactivity. CI runs these without weights or hardware.
+video-first desktop/mobile layout, keyboard focus, reduced motion and network
+inactivity. DOM checks reject removed filler copy and technical badges in every
+session state, verify the single About disclosure, and check contextual loading,
+capture, ended and error feedback. The gallery suite captures the inert preview
+without media permissions or model downloads. CI runs these without weights or hardware.
 
 For the opt-in bounded **real-model** test on a WebGPU-capable machine:
 

@@ -65,6 +65,8 @@ test('normal build discovers real covers, isolates network access, and renders a
     assert.equal(image.readUInt16BE(0), 0xffd8, 'Real JPEG output');
     assert.ok(image.length > 1000 && image.length < 300000, 'Optimized cover size');
   }
+  assert.equal(report['ai-livestream'].blockedRequests, 0, 'Livestream capture never attempts model downloads or external traffic');
+  assert.equal(report['ai-livestream'].blockedWebSockets, 0);
   assert.ok(report['network-probe'].blockedRequests >= 4);
   assert.equal(report['network-probe'].blockedWebSockets, 2);
   for (const name of ['broken-script', 'missing-asset', 'remote-asset']) {
