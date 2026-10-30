@@ -4,6 +4,21 @@ A lightweight playground for independent web experiments, published at
 <https://takahirox.github.io/sandbox/>. The home page discovers projects
 automatically; there is no project registry to maintain.
 
+## UI/UX
+
+Apply these principles to the home page and each project's user-facing interface:
+
+1. **Keep it simple.** Show only necessary information and actions; avoid
+   unnecessary UI elements.
+2. **Show, don't tell.** Prefer layout, spacing and visual hierarchy over
+   explanatory labels or prose to communicate structure.
+3. **Intuitive and predictable.** Keep appearance and behavior consistent with
+   user expectations; don't interrupt the user's work.
+
+Preserve necessary control labels, accessible names, error messages, and
+information needed to use the interface. Simplification must preserve meaningful
+consent, destructive-action safeguards, and necessary warnings.
+
 ## Add a project
 
 1. Create `projects/<project-name>/index.html`. Prefer a lowercase name with
