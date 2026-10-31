@@ -126,3 +126,4 @@ No repository setting or workflow edit is needed when adding subsequent projects
 ## Development
 
 For AI-assisted development and review, see the [development flow](docs/development-flow.md) and [review guidelines](docs/review-guidelines.md).
+Choose validation using the [test and CI performance principles](docs/development-flow.md#test-and-ci-performance-principles).
