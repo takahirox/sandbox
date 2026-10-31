@@ -49,6 +49,10 @@ Also verify the ordinary quality of the change:
 
 Review interface changes against the [UI/UX principles](../README.md#uiux).
 
+Apply the [test and CI performance principles](development-flow.md#test-and-ci-performance-principles). Review additional defect coverage, duplication, and execution/maintenance cost together:
+
+> Does this change provide sufficient confidence with the lightest appropriate validation, without redundant execution?
+
 ## Check Validation Timing
 
 Mandatory pre-merge acceptance criteria must be achievable and verifiable before merge. Require all implementation requirements and applicable pre-merge tests to be satisfied. Checks possible only after merge must not be prerequisites for pre-merge Pull Request approval.

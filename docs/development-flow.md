@@ -40,6 +40,8 @@ A Pull Request should only claim to close an Issue when it fully addresses that 
 
 If the Pull Request intentionally implements only part of the Issue, it should state that clearly and should not present the Issue as fully resolved.
 
+Choose and report validation using the [test and CI performance principles](#test-and-ci-performance-principles).
+
 ## 3. Review Before Merge
 
 Every Pull Request should be reviewed before merge.
@@ -90,3 +92,64 @@ Merge
   ↓
 Required post-merge verification (if any)
 ```
+
+## Test and CI Performance Principles
+
+**Detect the required failures at the lightest appropriate layer, without redundant execution.**
+Preserve required correctness, regressions, and meaningful integration coverage
+when moving or consolidating checks.
+
+1. **Prefer the lightest meaningful test layer.** Use fast Python/Node unit or
+   component tests for calculations, branches, game rules, and broad data cases.
+   Reserve Chromium/Playwright, Miniflare/workerd with D1 and Durable Objects,
+   real WebRTC, and real-model checks for boundaries that need those environments.
+   Test concrete defects rather than mirroring implementation details.
+2. **Choose combinations deliberately.** Cover distinct paths with representative
+   project, state, viewport, language, model, and deployment cases instead of
+   multiplying every dimension. Exhaust combinations when their interactions
+   matter, such as all nine rock-paper-scissors hand pairs. Retain required
+   regressions and integration assertions when redistributing coverage.
+3. **Match validation to the change.** Documentation-only changes need Markdown,
+   link/anchor, consistency, and whitespace checks (`git diff --check`); they do
+   not alone require application builds or browser suites. UI changes need
+   relevant interaction, accessibility, layout, and preview checks; core/runtime
+   changes need relevant rules, persistence, protocol, and failure/recovery tests.
+   CI/build changes need workflow/configuration, build, and affected integration
+   validation. Use focused checks for fast feedback and the applicable full
+   regression suites before merge. The current [Pages workflow](../.github/workflows/pages.yml)
+   runs its configured validation on PRs without change-based selection; this
+   guidance does not waive those checks. Provisioning, production migrations,
+   Worker deployment, and Pages publication run on `main`; required deployed-site
+   checks belong in separately recorded post-merge verification. Optional extra
+   validation is distinct from mandatory pre-merge checks. The livestream's
+   [opt-in real-model check](../projects/ai-livestream/README.md#validation)
+   remains outside ordinary CI; relevant Issue requirements still apply.
+4. **Reuse work and eliminate duplicate execution.** Reuse builds, fixtures,
+   downloads, and expensive setup where safe, with cache keys matching inputs
+   and tool versions and isolated mutable test state. CI already uses npm caching
+   keyed by the Worker lockfile. Avoid equivalent runs for the same revision
+   through overlapping push/PR triggers; preserve the distinct `main` deployment
+   responsibility. Cancel superseded validation when safe, preserving deployment
+   ordering (the current workflow does not cancel in-progress runs). Measure
+   resource use before adding parallel workers. Repeated execution can be
+   necessary: applying local D1 migrations twice verifies idempotence.
+5. **Review test value and added cost together.** Ask which additional defect a
+   new or expanded test detects, whether existing coverage already supplies that
+   confidence, and what execution and maintenance cost it adds. Watch repeated
+   fresh browser/runtime/bundle setup, large fixtures or model downloads, long
+   emulation/alarm waits, and Cartesian-product growth. Preserve real-alarm and
+   screenshot network-isolation checks that establish distinct guarantees.
+6. **Maintain an execution-time budget.** No normal-CI timing baseline or target
+   is documented yet. Establish one from actual representative runs during
+   test/CI performance work, then monitor growth and investigate overruns.
+   Separate elapsed feedback time, total runner/computation time, and queue time.
+   Revisit validation structure and duplication before sacrificing meaningful
+   assertions or required coverage. Existing per-capture limits and model timing
+   reports are not a normal-CI budget; this guidance adds no benchmark, hardware,
+   or approval gate.
+
+Use the [Pages workflow](../.github/workflows/pages.yml),
+[site build instructions](../README.md#build-and-preview-locally), and
+[Worker checks](persistent-counter.md#local-development-and-pre-merge-checks)
+for current commands and setup. Changes to triggers, selection, caches, timeouts,
+workers, or tests require separately scoped implementation work.
