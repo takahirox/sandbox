@@ -20,7 +20,7 @@ Verify that the Pull Request addresses all parts of the Issue that it claims to 
 
 Do not approve a Pull Request as closing an Issue when important requirements remain unimplemented.
 
-If the change is intentionally partial, the Pull Request should say so and the Issue should remain open.
+If the change is intentionally partial, the Pull Request must state the remaining scope and must not automatically close the parent Issue. Pending post-merge-only verification does not make an otherwise complete implementation partial.
 
 ## Check for Unnecessary Work
 
@@ -57,9 +57,13 @@ Apply the [test and CI performance principles](development-flow.md#test-and-ci-p
 
 Mandatory pre-merge acceptance criteria must be achievable and verifiable before merge. Require all implementation requirements and applicable pre-merge tests to be satisfied. Checks possible only after merge must not be prerequisites for pre-merge Pull Request approval.
 
+Preserve `Closes #N` for a fully implemented Issue whose mandatory pre-merge acceptance is satisfied. Do not request removing it, keep the source Issue open, or withhold approval solely because post-merge-only verification is pending. Such requests cause a Review → Fix → Publish → Review loop when ProjectWeave restores the closing reference. Missing implementation, mandatory pre-merge tests, required protections, and genuinely necessary pre-merge human acceptance remain blockers.
+
 For example, for a merge-triggered deployment, review the code/configuration, local build results, and applicable automated test results before merge. Deployment success and verification of the newly published site are required post-merge checks, recorded separately and reported as pending until performed.
 
-Confirm that the Pull Request accurately reports what was validated, what failed or was not run, and which required post-merge checks remain pending. Pending post-merge verification is not missing implementation and does not justify claiming those checks passed. Follow the [development flow](development-flow.md#6-perform-required-post-merge-verification) to perform and report them after merge.
+Confirm that required post-merge checks are justified by the actual change. Documentation-only edits do not introduce routine manual approval, physical-device, heavyweight-model-download, or deployment gates; use the documentation checks in the linked test and CI performance principles.
+
+Confirm that the Pull Request accurately reports what was validated, what failed or was not run, and which required post-merge checks remain pending or environment-blocked. Follow the [merge and closure lifecycle](development-flow.md#5-merge), then [record evidence and track discovered defects in new or existing linked Issues](development-flow.md#6-perform-required-post-merge-verification). Closing the original Issue does not claim pending checks passed; an unavailable environment alone does not establish a product defect. Do not reopen the original Issue solely for post-merge follow-up.
 
 ## Review Outcome
 

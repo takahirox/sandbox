@@ -119,8 +119,10 @@ One-time repository setup: in **Settings → Pages → Build and deployment**, s
 **GitHub Actions** as the source. Ensure GitHub Actions is enabled and any
 `github-pages` environment protection rules allow deployment from `main`.
 See [GitHub's Pages workflow documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
-After merging, check the **Deploy playground to Pages** workflow in the Actions
-tab and visit the site and follow its project links to verify publication.
+For changes requiring publication verification, after merging check the **Deploy
+playground to Pages** workflow in the Actions tab and visit the site and follow
+its project links. Follow the [merge and closure lifecycle](docs/development-flow.md#5-merge):
+close the fully implemented Issue at merge, then record required post-merge evidence.
 No repository setting or workflow edit is needed when adding subsequent projects.
 
 ## Development

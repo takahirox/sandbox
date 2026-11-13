@@ -24,7 +24,9 @@ For a merge-triggered deployment, validate the code/configuration, local build, 
 
 ### Required post-merge verification
 
-Record checks possible only after merge separately, or state that none are required. For a merge-triggered deployment, check deployment success and verify the newly published site after merge. Report each check as pending until performed, then record its actual result; do not claim it passed based on pre-merge validation.
+Record checks possible only after merge separately when the actual change needs them, or state that none are required. For a merge-triggered deployment, check deployment success and verify the newly published site after merge. Report pending, not-run, or environment-blocked checks honestly.
+
+Follow the [merge, closure, and follow-up lifecycle](https://github.com/takahirox/sandbox/blob/main/docs/development-flow.md#5-merge): close a fully implemented Issue after successful merge, then record required post-merge evidence. Track discovered defects in new or existing linked Issues; pending post-merge-only checks do not make implementation partial or require keeping this Issue open.
 
 ## Context
 
