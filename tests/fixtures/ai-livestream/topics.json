@@ -1,8 +1,0 @@
-[
-  {"file":"japanese.wav","language":"ja","text":"今日は公園で猫を見ました。猫はとてもかわいいです。","topic":"猫|公園","activity":"ordinary"},
-  {"file":"english.wav","language":"en","text":"Today I made a cup of coffee. I love the smell of fresh coffee.","topic":"coffee","activity":"ordinary"},
-  {"file":"ja-discovery.wav","language":"ja","text":"コーヒーの苦味が減りました。温度を下げたのが理由かな。皆さんはどう思いますか？","topic":"コーヒー|苦|温度","activity":"engaging"},
-  {"file":"en-discovery.wav","language":"en","text":"Lowering the water temperature fixed my bitter coffee! Why does that work? What would you try next?","topic":"coffee|water|temperature|bitter","activity":"engaging"},
-  {"file":"ja-quiet.wav","language":"ja","text":"今日は静かにお茶を飲んでいます。少し休みます。","topic":"お茶|茶|休","activity":"quiet"},
-  {"file":"en-quiet.wav","language":"en","text":"I am having some tea today. I will take a little break.","topic":"tea|break","activity":"quiet"}
-]
