@@ -204,12 +204,14 @@
     if (point.radius < 25 || point.radius > 171) return;
     const shortTip = distanceToTip(point, period, 60);
     const longTip = distanceToTip(point, 60, 90);
-    const onNumbers = point.radius >= 106;
-    const moveMinute = !onNumbers && longTip <= 34 && longTip < shortTip;
-    const onHand = !onNumbers && (moveMinute || shortTip <= 34);
-    // Away from the grips, a tap on a number places the short hand at that hour.
-    const start = onHand ? time : wrap(Math.round(point.angle / 30) * 60 + time % 60, period);
-    drag = { id: event.pointerId, original: time, start, minutes: moveMinute, angle: point.angle, traveled: 0 };
+    const moveMinute = longTip <= 34 && longTip < shortTip;
+    const numberTime = wrap(Math.round(point.angle / 30) * 60 + time % 60, period);
+    const start = moveMinute || shortTip <= 34 ? time : numberTime;
+    // The inner edge of the numbers overlaps the minute grip's hit area.
+    const numberTap = moveMinute && point.radius >= 98
+      ? { time: numberTime, x: event.clientX, y: event.clientY }
+      : null;
+    drag = { id: event.pointerId, original: time, start, minutes: moveMinute, angle: point.angle, traveled: 0, numberTap };
     clock.setPointerCapture(event.pointerId);
     clock.classList.add('is-dragging');
     time = start;
@@ -218,6 +220,11 @@
 
   function moveDrag(event) {
     if (!drag || event.pointerId !== drag.id) return;
+    if (drag.numberTap) {
+      // Allow a little finger movement before treating the gesture as a drag.
+      if (Math.hypot(event.clientX - drag.numberTap.x, event.clientY - drag.numberTap.y) < 6) return;
+      drag.numberTap = null;
+    }
     const point = clockPoint(event);
     if (point.radius < 25) return;
     // Accumulate the shortest delta so crossing 12 in either direction keeps the hour in sync.
@@ -243,7 +250,8 @@
       return;
     }
     const step = lesson === 'whole' ? 60 : 30;
-    settleTime(Math.round(time / step) * step);
+    const finalTime = ending.numberTap?.time ?? time;
+    settleTime(Math.round(finalTime / step) * step);
   }
 
   clock.addEventListener('pointermove', moveDrag);
