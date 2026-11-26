@@ -165,6 +165,16 @@ test('mouse can tap a number and drag the short hand to a snapped hour', async t
   assert.match(await feedback(page).textContent(), /せいかい/);
 });
 
+test('touch can tap the lower part of 12 where it overlaps the minute grip target', async t => {
+  const page = await openGame(t, { viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true });
+  await button(page, 'あわせる').tap();
+  assert.deepEqual(await angles(page), [150, 0]);
+  const label = await page.locator('#clock .numbers text').filter({ hasText: /^12$/ }).boundingBox();
+  await page.touchscreen.tap(label.x + label.width / 4, label.y + label.height * .78);
+  assert.deepEqual(await angles(page), [0, 0]);
+  assert.match(await feedback(page).textContent(), /いまは 12じ/);
+});
+
 test('touch moves both hands continuously across 12, snaps on release, and fits portrait and landscape', async t => {
   const page = await openGame(t, { viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true });
   await assertFits(page);
@@ -173,8 +183,8 @@ test('touch moves both hands continuously across 12, snaps on release, and fits 
   await assertFits(page);
   assert.equal(await page.locator('#clock').evaluate(clock => getComputedStyle(clock).touchAction), 'none');
   const session = await page.context().newCDPSession(page);
-  const touch = async (type, angle) => {
-    const touchPoints = angle === undefined ? [] : [await clockPoint(page, angle, 90)];
+  const touch = async (type, angle, radius = 90) => {
+    const touchPoints = angle === undefined ? [] : [await clockPoint(page, angle, radius)];
     await session.send('Input.dispatchTouchEvent', { type, touchPoints });
     // Chromium can coalesce touch moves until the next animation frame.
     if (type === 'touchMove') await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
@@ -188,7 +198,10 @@ test('touch moves both hands continuously across 12, snaps on release, and fits 
   assert.equal(await page.evaluate(() => scrollY), 0);
   await touch('touchCancel');
   assert.deepEqual(await angles(page), [330, 0]);
-  await touch('touchStart', 0);
+  // Start 11 CSS pixels outward from the grip, over the 12 label on this phone.
+  const clockWidth = (await page.locator('#clock').boundingBox()).width;
+  await touch('touchStart', 0, 90 + 11 * 360 / clockWidth);
+  assert.deepEqual(await angles(page), [330, 0]);
   await touch('touchMove', 180);
   await touch('touchEnd');
   assert.deepEqual(await angles(page), [345, 180]);
