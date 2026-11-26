@@ -63,7 +63,7 @@ npm ci --prefix workers/persistent-counter
 # On Linux/CI, add --with-deps to install Chromium's system dependencies too.
 npm exec --prefix workers/persistent-counter -- playwright install chromium
 python3 -m unittest discover -s tests -v
-node --test tests/pokemon-coin-flip.test.cjs tests/gallery.test.mjs tests/walk-to-hospital.test.mjs
+node --test tests/pokemon-coin-flip.test.cjs tests/gallery.test.mjs tests/walk-to-hospital.test.mjs tests/learn-the-clock.test.mjs
 python3 scripts/build_site.py
 python3 -m http.server 8000 --directory _site
 ```

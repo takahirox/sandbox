@@ -58,7 +58,7 @@ test('normal build discovers real covers, isolates network access, and renders a
   assert.ok(!stderr.includes('private-token-do-not-log'));
   const output = resolve(root, '_site');
   const report = JSON.parse(await readFile(resolve(output, 'capture-report.json'), 'utf8'));
-  const valid = ['ai-livestream', 'bingo', 'happy-cat', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'p2p-pong', 'walk-to-hospital', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
+  const valid = ['ai-livestream', 'bingo', 'happy-cat', 'learn-the-clock', 'pokemon-coin-flip', 'persistent-counter', 'rock-paper-scissors', 'p2p-pong', 'walk-to-hospital', 'new-demo', 'odd & "日本語"', '__proto__', 'network-probe'];
   for (const name of valid) {
     assert.equal(report[name].status, 'ok', `${name}: ${JSON.stringify(report[name])}`);
     const image = await readFile(resolve(output, 'covers', coverName(name)));
@@ -67,6 +67,7 @@ test('normal build discovers real covers, isolates network access, and renders a
   }
   assert.equal(report['ai-livestream'].blockedRequests, 0, 'Livestream capture never attempts model downloads or external traffic');
   assert.equal(report['ai-livestream'].blockedWebSockets, 0);
+  assert.deepEqual(report['learn-the-clock'], { status: 'ok', blockedRequests: 0, blockedWebSockets: 0 });
   assert.ok(report['network-probe'].blockedRequests >= 4);
   assert.equal(report['network-probe'].blockedWebSockets, 2);
   for (const name of ['broken-script', 'missing-asset', 'remote-asset']) {
@@ -126,6 +127,11 @@ test('normal build discovers real covers, isolates network access, and renders a
   await newCard.locator('img').waitFor({ state: 'hidden' });
   assert.equal(await newCard.locator('.fallback').getAttribute('aria-hidden'), null);
   assert.match(await newCard.innerText(), /Screenshot unavailable/);
+
+  await page.locator('.card[href="./projects/learn-the-clock/"]').click();
+  await page.waitForURL('**/projects/learn-the-clock/');
+  assert.equal(await page.getByRole('heading', { name: 'いま なんじ？' }).textContent(), 'いま なんじ？');
+  assert.equal(await page.getByRole('button', { name: '3じ', exact: true }).isVisible(), true);
 
   // A second normal build automatically adds a cover and removes stale output.
   await add('another-demo', '<h1>Another automatic addition</h1>');
