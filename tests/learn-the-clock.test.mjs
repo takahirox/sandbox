@@ -174,9 +174,11 @@ test('touch moves both hands continuously across 12, snaps on release, and fits 
   assert.deepEqual(await angles(page), [345, 180]);
   assert.match(await feedback(page).textContent(), /せいかい/);
 
-  await next(page).tap();
+  // Chromium can suppress a synthetic tap immediately after the injected drag.
+  await next(page).press('Enter');
   await page.setViewportSize({ width: 568, height: 320 });
   await assertFits(page);
+  assert.deepEqual(await angles(page), [330, 0]);
   await touch('touchStart', 0);
   for (const angle of [80, 160, 240, 320, 365]) await touch('touchMove', angle);
   await touch('touchEnd');
