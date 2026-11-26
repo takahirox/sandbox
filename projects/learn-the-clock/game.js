@@ -6,6 +6,7 @@
   const hourHand = get('hour-hand');
   const minuteHand = get('minute-hand');
   const prompt = get('prompt');
+  const readingDescription = get('reading-description');
   const choices = get('choices');
   const answers = [...choices.querySelectorAll('button')];
   const adjustments = get('adjustments');
@@ -80,12 +81,13 @@
     const offset = lesson === 'whole' ? 120 : (index === 0 ? 30 : 90);
     time = setting ? wrap(target - offset, period) : target;
     const task = setting ? `${labelTime(target)}に してね` : 'いま なんじ？';
-    prompt.textContent = task;
     if (setting && activities[target]) {
       const context = document.createElement('span');
       context.className = 'prompt-context';
       context.textContent = activities[target] + ' ';
-      prompt.prepend(context);
+      prompt.replaceChildren(context, task);
+    } else if (prompt.textContent !== task) {
+      prompt.textContent = task;
     }
 
     if (!setting) {
@@ -102,6 +104,7 @@
     feedback();
     renderClock();
     describeClock();
+    readingDescription.textContent = setting ? '' : clockDescription.textContent;
     showActions();
   }
 

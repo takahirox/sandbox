@@ -126,6 +126,26 @@ test('whole-hour reading and keyboard setting give feedback, unlock half hours b
   assert.match(await feedback(page).textContent(), /せいかい/);
 });
 
+test('advancing a reading round exposes the new hand positions in the live prompt', async t => {
+  const page = await openGame(t);
+  const session = await page.context().newCDPSession(page);
+  await answer(page, '3じ').press('Enter');
+  await page.keyboard.press('Enter');
+
+  assert.equal(await answer(page, '7じ').evaluate(node => node === document.activeElement), true);
+  const { nodes } = await session.send('Accessibility.getFullAXTree');
+  const prompt = nodes.find(node => node.role?.value === 'heading' && node.name?.value === 'いま なんじ？');
+  const description = nodes.find(node => node.role?.value === 'StaticText' && /みじかい はりは 7、ながい はりは 12/.test(node.name?.value));
+  assert.ok(prompt);
+  assert.ok(description);
+  const descriptionSpan = nodes.find(node => node.nodeId === description.parentId);
+  const livePrompt = nodes.find(node => node.nodeId === prompt.parentId);
+  assert.equal(descriptionSpan?.parentId, livePrompt?.nodeId);
+  const properties = Object.fromEntries(livePrompt.properties.map(({ name, value }) => [name, value.value]));
+  assert.equal(properties.live, 'polite');
+  assert.equal(properties.atomic, true);
+});
+
 test('mouse can tap a number and drag the short hand to a snapped hour', async t => {
   const page = await openGame(t);
   await button(page, 'あわせる').click();
