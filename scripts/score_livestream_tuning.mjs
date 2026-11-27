@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { WINDOW_SAMPLES } from '../projects/ai-livestream/config.mjs';
+import { MAX_SEGMENT_SAMPLES } from '../projects/ai-livestream/audio-format.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
 
 const fixtures = new URL('../tests/fixtures/ai-livestream/', import.meta.url);
@@ -23,8 +23,8 @@ export async function replayTuningMode(mode, holdout, { transcriptFirst = false 
     onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
   });
   const infer = await createReplay();
-  const voiced = new Float32Array(WINDOW_SAMPLES).fill(0.02);
-  const silence = new Float32Array(WINDOW_SAMPLES);
+  const voiced = new Float32Array(MAX_SEGMENT_SAMPLES).fill(0.02);
+  const silence = new Float32Array(MAX_SEGMENT_SAMPLES);
   const replay = async (infer, record, language, now, audio) => {
     row = record;
     events = [];

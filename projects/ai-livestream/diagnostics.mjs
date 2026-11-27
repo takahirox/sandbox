@@ -2,7 +2,7 @@ import { ASR, LLM, TUNED_MODEL_ID } from './config.mjs';
 
 // Closed vocabulary: runtime exceptions, speech and arbitrary worker fields
 // cannot become diagnostic text. Counts are ephemeral and bounded.
-const events = new Set(`audio_windows vad_silence vad_busy audio_submitted audio_pending
+const events = new Set(`audio_segments audio_submitted audio_pending
   audio_received invalid_audio silence asr_attempt asr_error meaningless_speech
   transcription_accepted repeated_speech cadence generation_attempt generation_error
   reasoning format safety visual length awaiting_context stale_candidate
@@ -18,6 +18,8 @@ export class Diagnostics {
   }
   record(event, value, now = performance.now()) {
     if (events.has(event)) this.counts[event] = Math.min(1e9, (this.counts[event] || 0) + 1);
+    if (event === 'vad_busy' && Number.isSafeInteger(value) && value > 0)
+      this.counts[event] = Math.min(1e9, (this.counts[event] || 0) + value);
     if (['asr_ms', 'generation_ms'].includes(event) && Number.isFinite(value))
       this.timings[event] = Math.round(Math.max(0, Math.min(90000, value)));
     if (event === 'ui_comment') this.lastComment = now;

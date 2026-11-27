@@ -24,10 +24,7 @@ export const SMALL_MODEL_FILES = ['00001', '00002'].map(part =>
   `https://huggingface.co/${SMALL_LLM.id}/resolve/${SMALL_LLM.revision}/Q8_0-${part}-of-00002.gguf`);
 export const TUNED_ADAPTER_URL = new URL('./models/resolve/e3866302664199c2/livestream.gguf', import.meta.url).href;
 export const TUNED_MODEL_ID = 'Qwen3-0.6B-Livestream-WBD-Q8_0';
-export const SAMPLE_RATE = 16000;
-export const WINDOW_SAMPLES = SAMPLE_RATE * 6;
 export const MIN_COMMENT_INTERVAL = 8000;
-export const MIN_AUDIO_INTERVAL = 5500;
 export const MAX_COMMENT_LENGTH = 110;
 
 export function isAssetRequest(url, method = 'GET') {
