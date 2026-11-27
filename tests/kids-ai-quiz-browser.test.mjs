@@ -159,6 +159,28 @@ test('real model rounds stay playable on repeated mobile advances', async t => {
   }
 });
 
+test('the real model asks which objects to count in a held-out mixed picture', async t => {
+  // Five pencils and two other objects were held out regardless of object names.
+  const { page, paths } = await open(t, {
+    seed: 551, options: { viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true },
+  });
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+  assert.ok(paths.some(path => path.endsWith('/quiz-gru-v1.bin')));
+  assert.equal(await heading(page).textContent(), 'えんぴつ は いくつ ある？');
+  const groups = page.locator('#illustration .counters');
+  assert.deepEqual(await groups.evaluateAll(rows => rows.map(row =>
+    [...row.children].map(child => child.dataset.icon))), [Array(5).fill('✏️'), Array(2).fill('⭐')]);
+  assert.ok(!(await page.locator('#illustration').textContent()).includes('＋'));
+  assert.deepEqual(await labels(page).allTextContents(), ['9', '0', '5']);
+  await assertFits(page);
+  await choices(page).nth(0).tap();
+  assert.equal(await status(page).textContent(), 'もういちど えらんでね。');
+  await choices(page).nth(1).tap();
+  assert.equal(await status(page).textContent(), 'もういちど えらんでね。');
+  await choices(page).nth(2).tap();
+  assert.equal(await status(page).textContent(), 'せいかい！');
+});
+
 test('touch and keyboard stay responsive on phone viewports with no workers, WASM, storage or speech', async t => {
   const seed = 70;
   const { context, page, paths } = await open(t, {
@@ -239,17 +261,62 @@ test('unreadable model weights fall back and the next visit can recover', async 
   assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
 });
 
-test('a stalled model fetch times out into playable fallback', async t => {
-  let held;
+test('a stalled startup falls back and a later round adopts a successful retry', { timeout: 10_000 }, async t => {
+  const held = [];
+  let notify;
+  const retryStarted = new Promise(resolve => { notify = resolve; });
   const { page } = await open(t, {
-    handleModel: route => { held = route; },
+    init: () => {
+      const RealWorker = Worker;
+      window.Worker = class extends RealWorker {
+        constructor(...args) {
+          super(...args);
+          this.addEventListener('message', ({ data }) => { if (data.item) window.generatedRound = true; });
+        }
+      };
+    },
+    handleModel: route => {
+      held.push(route);
+      if (held.length === 2) notify();
+      if (held.length > 2) return route.continue();
+    },
   });
-  await held.abort().catch(() => {});
   assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
   const first = await heading(page).textContent();
+  await retryStarted;
+  await held[0].abort().catch(() => {});
   await next(page).click();
   await page.locator('#answers button:enabled').first().waitFor();
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
   assert.notEqual(await heading(page).textContent(), first);
+  await held[1].continue();
+  await page.waitForFunction(() => window.generatedRound);
+  await next(page).click();
+  await page.locator('#answers button:enabled').first().waitFor();
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+  assert.equal(held.length, 2);
+});
+
+test('a second startup timeout keeps later fallback rounds playable', { timeout: 10_000 }, async t => {
+  const held = [];
+  const { page } = await open(t, {
+    init: () => {
+      const RealWorker = Worker;
+      window.terminated = 0;
+      window.Worker = class extends RealWorker {
+        terminate() { window.terminated++; super.terminate(); }
+      };
+    },
+    handleModel: route => { held.push(route); },
+  });
+  await page.waitForFunction(() => window.terminated === 2);
+  for (const route of held) await route.abort().catch(() => {});
+  for (let i = 0; i < 2; i++) {
+    await next(page).click();
+    await page.locator('#answers button:enabled').first().waitFor();
+    assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+  }
+  assert.equal(held.length, 2);
 });
 
 test('pagehide cancels an in-flight opener and page restore starts a fresh worker', async t => {

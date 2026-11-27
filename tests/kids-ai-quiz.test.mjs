@@ -175,6 +175,23 @@ test('semantic validation rejects malformed, ambiguous and incorrect proposals',
   assert.deepEqual(generateRound({ generate: () => [] }, [], seeded(68)), { item: null, attempts, invalid: attempts });
 });
 
+test('mixed pictures are checked against the named objects and quantities', () => {
+  const row = ['counting', 'はな 2 + かさ 3', 'かさ は いくつ ある？', '3', '2', '5'];
+  const item = verifyRound(row, seeded(68));
+  assert.equal(item.key, 'select:3:2');
+  assert.equal(item.choices[item.correct].label, '3');
+  assert.equal(item.clue.split, 2);
+  assert.equal(item.clue.secondIcon, '☂️');
+  assert.equal(item.clue.separate, true);
+  const reversed = ['counting', 'かさ 3 + はな 2', 'かさ は なんこ？', '3', '2', '5'];
+  assert.equal(verifyRound(reversed).key, item.key);
+  assert.equal(verifyRound(['counting', row[1], 'ぜんぶで なんこ？', '5', '2', '3']).key, 'add:2:3');
+  assert.equal(verifyRound(['counting', row[1], row[2], '5', '2', '3']), null);
+  assert.equal(verifyRound(['counting', row[1], 'ほし は なんこ？', ...row.slice(3)]), null);
+  assert.equal(verifyRound(['counting', 'かさ 2 + かさ 3', ...row.slice(2)]), null);
+  assert.equal(verifyRound(['counting', 'はな 7 + かさ 3', ...row.slice(2)]), null);
+});
+
 test('the shipped weights generate varied verified questions including held-out problem instances', async () => {
   assert.throws(() => loadModel(new ArrayBuffer(12)), /Unrecognized/);
   const model = loadModel((await readFile(modelURL)).buffer);

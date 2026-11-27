@@ -20,21 +20,35 @@ function readHistory(storage) {
 
 export function modelSession({ random = Math.random, storage, timeout = 1500 } = {}) {
   const recent = readHistory(storage);
-  let worker, pending, unavailable = false;
+  let worker, pending, ready = false, unavailable = false;
+  let retried = false, recovering = false;
 
   function stop() {
     worker?.terminate();
     worker = undefined;
+    ready = false;
     pending?.finish(null);
   }
 
   function disable() {
     unavailable = true;
+    recovering = false;
+    stop();
+  }
+
+  function onTimeout() {
+    if (ready || retried) {
+      disable();
+      return;
+    }
+    retried = true;
+    recovering = true;
     stop();
   }
 
   return {
     stop,
+    get recovering() { return recovering; },
     generate() {
       if (pending) return pending.promise;
       if (unavailable || typeof Worker !== 'function') return Promise.resolve(null);
@@ -44,8 +58,16 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
           worker = active;
           active.onmessage = ({ data }) => {
             if (worker !== active || !pending) return;
-            if (data?.failed) disable();
-            else pending.finish(data?.item ?? null);
+            if (data?.ready) {
+              ready = true;
+            } else if (data?.failed) disable();
+            else {
+              const item = data?.item;
+              // A child may have already played this target in fallback while retrying.
+              const repeatedWhileRecovering = recovering && item && recent.at(-1)?.key === item.key;
+              recovering = false;
+              pending.finish(repeatedWhileRecovering ? null : item ?? null);
+            }
           };
           active.onerror = event => {
             event.preventDefault();
@@ -57,7 +79,7 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
         }
         let finish;
         const promise = new Promise(resolve => { finish = resolve; });
-        const timer = setTimeout(disable, timeout);
+        const timer = setTimeout(onTimeout, timeout);
         pending = {
           promise,
           finish(item) {
