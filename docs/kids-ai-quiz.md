@@ -1,145 +1,162 @@
 # Local Japanese quiz experiment
 
-[さんたく くいず](../projects/kids-ai-quiz/index.html) opens with a playable
-question. Each press of 「つぎへ」 picks a fresh fact and asks a browser-local
-model to sample three candidate rounds, each with a phrasing and three choices.
-The first proposal that passes validation is used. If the model is unavailable,
-too slow, or returns three rejected proposals, the game makes a vetted round
-for the same fact. Players can skip a question or stop waiting at any time.
+The Japanese three-choice quiz builds a playable round on every normal visit.
+The next button also skips a round. A wrong answer invites another try, while a
+correct answer moves focus to the next button. A Japanese voice appears only
+when the browser offers one that runs on the device. Speech starts on request
+and stops when the player advances or leaves the page.
+[Play the quiz](../projects/kids-ai-quiz/index.html)
 
-The game has seven topics and 49 anchors. Every anchor appears once before the
-next cycle, with no consecutive questions from the same topic and a gap between
-reuses of each anchor. Each anchor supports three approved phrasings and up to
-60 arrangements of plausible choices. The knowledge base limits what the model
-can ask about. Speech is opt-in, with a Japanese on-device voice when available.
-The text, pictures, and accessible clue descriptions are available without speech.
+## How rounds are generated
 
-## Model selection
+The browser runs a small symbolic solver over relationships and number rules.
+For example, the animal table can ask how a dolphin moves, where it lives, or
+what covers a duck's back. Each relationship defines its own true answers and
+contrasts. The solver chooses a topic and an unused subject or number problem,
+preferring a different kind of problem from those played recently. It instantiates
+the prompt and chooses two distinct, nonmatching options. Counting, joining
+groups, removing crossed-out objects, and comparing three pictured groups use
+single-digit values with bounded combinations. Each round checks for exactly
+one matching choice and three distinct labels.
+[Relationships](../projects/kids-ai-quiz/content.mjs) ·
+[Solver and number rules](../projects/kids-ai-quiz/quiz.mjs)
 
-| Approach considered | Japanese and browser implications |
+The previous 320-parameter sampler already met the transfer budget, but it
+only chose presentation tokens after the subject had been selected. A trained
+semantic sampler would still need a verified set of facts or a checker for
+its claims. Even a small general Japanese-capable model such as Qwen2.5-0.5B
+ships a 491 MB 4-bit file before including a runtime. A domain-specific
+constraint solver can instantiate relationships and number problems from a
+small set of rules, with no training, weight download, or inference
+dependencies. The bounded search fits in a browser event handler.
+[Qwen publisher's model files](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/tree/main) ·
+[Smith and Mateas on declarative procedural generation](https://adamsmith.as/papers/tciaig-asp4pcg.pdf)
+
+The first round and each advance use the same synchronous path. There is no
+pending generation to wait for or cancel. If the solver throws or returns a
+rejected proposal, the game takes the first eligible problem and constructs
+its three choices with the same rules. Both paths rotate through topics and
+prefer unseen IDs. When a topic runs out of unseen questions, its least recently
+played question becomes eligible again. A gallery capture requests a fixed,
+inert example and leaves storage and speech untouched.
+
+The history holds up to 256 nonpersonal question IDs in browser storage,
+using roughly 2.5 KB in the sample below. If storage is unavailable or cleared,
+the quiz still works using the current tab's history. Simultaneous tabs keep
+their own in-memory histories and can overwrite one another's recent state.
+Inference, history, and speech stay on the device. The quiz has no backend,
+account, analytics, or third-party runtime. The original code and vocabulary
+are available under the [MIT license](../projects/kids-ai-quiz/LICENSE.txt).
+
+## Semantic diversity
+
+The evaluation runs 24 seeded visits of 12 rounds each. It shares one store
+across the new visits to model reloads. The baseline uses the shipped WASM
+and its original reset-on-reload behavior. One ID represents one subject and
+relationship or one number problem. Paraphrases, answer order, distractors,
+swapped addends, pictured object substitutions, and the choice of greatest or
+least for the same three quantities share an ID.
+
+| Measure | Previous quiz | Solver | Fallback only |
+| --- | ---: | ---: | ---: |
+| Distinct questions possible | 49 | 242 | 242 |
+| Distinct questions sampled | 48 | 183 | 179 |
+| Topics sampled | 7 | 10 | 10 |
+| Distinct first rounds out of 24 | 1 | 23 | 23 |
+| Exact revisits over all 288 rounds | 240 (83.3%) | 105 (36.5%) | 109 (37.8%) |
+| Exact repeat within the prior 12 rounds | 56 (19.4%) | 0 | 0 |
+| Exact or related repeat within the prior 12 rounds | 266 (92.4%) | 77 (26.7%) | 176 (61.1%) |
+
+A related repeat is a round that shares a group with an earlier round in the
+12-round window, including across visits. The baseline has one group per
+topic. The solver groups questions such as animal coats with the same
+covering, sums with the same result, or rounds from a single task like color
+matching. This intentionally counts some genuinely different experiences as
+related and measures rule-level similarity. It is an automated proxy for
+what a child might find repetitive.
+
+| Topic | Before sampled | Solver sampled | Solver possible |
+| --- | ---: | ---: | ---: |
+| Animals | 6 | 28 | 37 |
+| Objects and their uses | 0 | 18 | 18 |
+| Everyday situations | 7 | 8 | 8 |
+| Places | 0 | 8 | 8 |
+| Food | 7 | 22 | 22 |
+| Vehicles | 7 | 18 | 18 |
+| Shapes | 7 | 16 | 16 |
+| Colors | 7 | 7 | 7 |
+| Counting, joining and taking away | 7 | 28 | 73 |
+| Comparing quantities | 0 | 30 | 35 |
+
+The 242 IDs comprise 134 relationship or matching targets and 108 number
+problems. The fixed vocabulary, contrast sets, and single-digit limits keep the
+space finite. Small topics such as colors cycle sooner. The old quiz combined
+objects and routines in one topic, listed under everyday situations for the
+baseline column.
+
+| Example | Answer |
 | --- | --- |
-| Qwen2.5-0.5B-Instruct | Apache-2.0, 490 million parameters and Japanese support. The publisher’s 4-bit Q4_K_M GGUF alone is 491 MB. Local adaptation would still need a compatible browser runtime and that order of download and memory. [Model card](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct) · [Published GGUF](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/blob/main/qwen2.5-0.5b-instruct-q4_k_m.gguf) |
-| Sarashina2.2-0.5B-Instruct | MIT, Japanese-focused, with an ONNX conversion for Transformers.js. Its published q4 ONNX file is 939 MB. Transformers.js supports CPU/WASM and WebGPU depending on the model and runtime. [Publisher’s model](https://huggingface.co/sbintuitions/sarashina2.2-0.5b-instruct-v0.1) · [ONNX files](https://huggingface.co/onnx-community/sarashina2.2-0.5b-instruct-v0.1-ONNX/tree/main/onnx) · [Transformers.js documentation](https://huggingface.co/docs/transformers.js/index) |
-| Conditional log-linear token model | 320 learned parameters. It learns preferences for Japanese phrasing and distractors from a small original corpus. The game renders tokens using a curated vocabulary. The exported model runs on the CPU in a dedicated WebAssembly worker. [WebAssembly specification](https://www.w3.org/TR/wasm-core/) |
+| おたまじゃくしが くらす ところは？ | いけ |
+| あひるの せなかを おおうのは？ | はね |
+| おうちで よむ ほんを かりるのは どこ？ | としょかん |
+| とうふを つくる もとに なるのは？ | だいず |
+| かどは いくつ？ with a hexagon | 6 |
+| あわせて なんこ？ with groups of 1 and 3 fish | 4 |
+| ばつの りんごを とると、いくつ のこる？ with 1 of 3 apples crossed out | 2 |
+| いちばん すくないのは？ with groups of 2, 3 and 7 apples | 2 apples |
 
-The first two options would provide open-ended Japanese generation. Their
-published download sizes and adaptation costs ruled them out for this experiment
-before any weights were fetched or phone performance measured. The chosen
-architecture allows local training, a small static asset, and a finite output
-grammar that the game can check exhaustively.
+## Browser measurements
 
-## Training and verification
+The loopback benchmark uses Chromium 153.0.8010.12 on Apple M4 Max with a
+390×740 mobile viewport and 4× Chromium CPU throttling. Each version gets
+32 fresh browser contexts with seven advances each. Startup measures
+navigation to three enabled choices. Advance measures the click handler
+through generation and DOM update, including the previous worker startup and
+WASM load on its first advance. Figures use median and p95 in milliseconds.
 
-The [dataset recipe](../scripts/kids-ai-quiz/dataset.mjs) expands original
-Japanese wording, everyday facts, and semantic groups from the
-[content catalog](../projects/kids-ai-quiz/content.mjs). The dataset uses synthetic
-combinations of these hand-authored materials. No third-party corpora, weights,
-private data, or child interactions enter training. Emoji are native text
-glyphs. The original quiz code, catalog, recipes, and weights are released
-under the [MIT license](../projects/kids-ai-quiz/LICENSE.txt).
+| Measure | Previous quiz | Solver |
+| --- | ---: | ---: |
+| Startup assets, raw / gzip bytes | 28,184 / 10,558 | 30,187 / 11,392 |
+| First-advance assets, raw / gzip bytes | 2,188 / 1,611 | 0 |
+| Time to first playable round, median / p95 | 36.7 / 40.3 ms | 37.3 / 41.4 ms |
+| First advance, median / p95 | 18.6 / 22.3 ms | 3.8 / 7.3 ms |
+| Warm advance, median / p95 | 18.0 / 21.2 ms | 2.3 / 6.4 ms |
+| Main JavaScript heap after GC, median / p95 | 1,978,952 / 1,986,976 B | 2,056,812 / 2,058,652 B |
+| WASM linear memory | 65,536 B | 0 |
 
-The same model is trained on 1,260 general quiz examples and then adapted on
-1,260 child quiz examples. The general examples favor conventional written
-Japanese and mix close and easy distractors from the same topic. The recipe
-checks that all general examples have three distinct, relevant choices with
-one defensible answer. Child examples favor short hiragana, nearby distractors,
-and balanced positions for the answer. The recipe checks that child targets
-pass the quiz validator and that all 5,040 corrupted examples fail it. These
-corruptions include repeated choices, a duplicate answer, choices from other
-topics, and longer text with kanji. Both models sample the same token space,
-so their raw proposals can still include invalid tokens.
+The larger ruleset adds 834 gzip bytes at startup and saves 777 gzip bytes
+over the first two rounds combined. The median main JavaScript heap rises by
+about 76 KiB while the separate WASM allocation goes away.
 
-The model samples four categorical tokens in order from learned softmax
-distributions. They select a wording, two distractor ranks from a fact-specific
-pool, and the position of the correct answer. Distributions are conditioned on
-topic and, for the second distractor, on the first. Training uses supervised
-cross-entropy, with an added unlikelihood loss for rejected tokens during
-adaptation. The shipped artifact includes the float32 coefficients and sampler.
+Static transfer counts HTML, CSS, JavaScript, and any fetched worker or
+model files. Gzip sums files individually and excludes HTTP headers. Main
+JavaScript heap is Chromium's post-GC used heap after seven advances. The
+previous worker's JavaScript heap and browser process memory are outside that
+measurement, so the main-heap comparison describes only the page. Physical
+Pixel 7a performance and a child's subjective playtest remain optional
+follow-up. Loopback timings exclude real network conditions and phone
+battery behavior.
 
-The verifier checks the token shape, allowlisted wording, three distinct
-choices, and topic membership. For each choice, it checks the text clue's
-catalog of defensible answers or compares the choice to the rendered color,
-shape, or count. The sole match must be at the keyed position. Generated and
-fallback rounds use the same checks. The model uses a closed vocabulary, and
-semantic coverage depends on the quality of the curated rules. The language
-and relevance scores below are automated proxies alongside catalog review.
+## Reproduce and verify
 
-## Reproduce the experiment
-
-The recorded run used CPython 3.13.13, Node.js 26.12.1 and
-[WABT 1.0.39](https://github.com/WebAssembly/wabt/releases/tag/1.0.39).
-Training uses the Python and Node standard libraries plus `wat2wasm`.
-The evaluation rebuilds both stages in a temporary directory, verifies the
-shipped artifact byte for byte, and prints metrics and raw examples.
+The evaluation reads the previous project from Git revision
+`1d8075bbea02d3acf4191f2c33684a743cd5f295` in a temporary directory. Omit
+`--browser` for the seeded content sample alone. For the browser benchmark,
+use the repository's pinned Playwright and Chromium. The original model
+training recipe is available at that revision.
+[Evaluation script](../scripts/kids-ai-quiz/evaluate.mjs)
 
 ```sh
-python3 scripts/kids-ai-quiz/train.py
-node scripts/kids-ai-quiz/evaluate.mjs
+npm ci --prefix workers/persistent-counter
+npm exec --prefix workers/persistent-counter -- playwright install chromium
+node scripts/kids-ai-quiz/evaluate.mjs --browser
 node --test tests/kids-ai-quiz.test.mjs tests/kids-ai-quiz-browser.test.mjs
+python3 scripts/build_site.py
 ```
 
-Version 2 is `quiz-model-v2.wasm`, SHA-256
-`c9dcb5fb8b7c54a94f2c3c4316862a54c10c9332b59f8c62b80f0cd298225da8`.
-The local CPU training and export took 0.52 seconds in a timed run.
-Training files live outside the static project.
-
-## Held-out results
-
-Two anchors per topic were withheld as question targets from both stages.
-The split shares the seven topics and phrasing vocabulary with training.
-A held-out label can appear as a distractor in another example. The model
-receives rank and topic tokens, so it never learns the held-out label or clue
-text. The evaluation checks 60 rounds per held-out anchor with three proposals
-each, under identical seeds and conditions. A separately written rubric
-checks each offered choice against the rendered clue. A separate regression
-probes the earlier kicking question with both the ball and shoes present.
-
-| Measure | General baseline | Child-adapted v2 |
-| --- | ---: | ---: |
-| Structured four-token proposals | 2,520 / 2,520 | 2,520 / 2,520 |
-| Three distinct choices and exactly one correct answer | 2,434 / 2,520 | 2,491 / 2,520 |
-| Short hiragana-centered language | 1,034 / 2,520 | 2,506 / 2,520 |
-| All choices relevant to the topic | 2,486 / 2,520 | 2,504 / 2,520 |
-| Proposals passing every check | 980 / 2,520 | 2,461 / 2,520 |
-| Rounds with an accepted proposal within three draws | 665 / 840 | 840 / 840 |
-| Mean distinct accepted distractor pairs per anchor | 10 / 10 | 10 / 10 |
-| Accepted pair seen among the last four for that anchor | 337 / 980 | 940 / 2,461 |
-| Model transfer size before HTTP compression | 1,554 bytes | 1,554 bytes |
-| Fixed WASM linear memory | 64 KiB | 64 KiB |
-| Warm sampling per proposal, median and p95 | 0.625 / 0.834 µs | 0.625 / 0.750 µs |
-
-The timings above are from Node.js on an Apple M4 Max. They measure the
-four-token sampler and exclude UI, worker startup, and network. In a separate
-Chromium 153 run with a 390×740 viewport and 4× CPU throttling, the first
-request through the real worker returned in 21.4 ms and the next three in
-15.7–17.0 ms on loopback.
-The worker benchmark includes the first model fetch and initialization. Neither
-measurement establishes runtime, memory pressure, or battery use on a Pixel 7a.
-
-Both models passed with 「にゃあにゃあ なくのは？」 and 「ねこ」「いぬ」
-「ひつじ」. The baseline also proposed the coherent 「ねこ」「ひつじ」「ぶた」
-with `次のうち「にゃあにゃあ」と鳴くのはどの動物でしょうか。`, which failed
-the child-language check. Raw adapted proposals sometimes repeated 「あひる」
-as both distractors, used kanji in 「鳴き声」, or included 「きゅうきゅうしゃ」
-in a corn question. All were rejected. Adaptation gave the largest gain in
-child-language compliance and raised the rate of repeated pairs per anchor
-from 34.4% to 38.2%. Across 490 simulated game rounds, topic rotation produced
-zero consecutive same-topic rounds and zero repeats of an anchor within the
-previous 12 rounds.
-
-## Browser limits and validation
-
-The first paint and gallery capture use only game assets, with no worker
-creation or model fetch. The first advance fetches the 1,554-byte WASM asset
-from the same origin. One worker retains the instantiated model for later
-rounds in the tab, and a restart uses ordinary HTTP caching for the versioned
-URL when available. The loader caps the asset at 4 KiB, requests run one at a
-time, and each round has a 1.5-second deadline covering load and inference.
-The 64 KiB model linear-memory figure excludes JavaScript, the worker, and
-browser overhead. The game uses no backend, telemetry, or browser storage.
-
-Browser tests exercise real WASM inference, cold preview, mobile touch and
-keyboard, reduced motion, optional speech, cancellation, and error recovery.
-The normal Pages build discovers the project and captures its first round.
-After merge, Pages deployment and the published project link remain to be
-verified. Physical Pixel 7a playtesting is follow-up.
+The tests check every plan against the declared contrasts or independent
+arithmetic, and spot-check each relationship using a separate answer rubric.
+Browser checks cover seeded fresh visits and reloads, gallery isolation,
+portrait and landscape touch targets, keyboard and focus behavior, fallback
+on the same click, and opt-in speech cancellation. After merge, verify the
+Pages deployment and the published project link.

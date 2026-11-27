@@ -1,31 +1,55 @@
-import { createGenerator } from './model.mjs';
-import { createSession, fallback, firstQuestion, validate } from './quiz.mjs';
+import { createSession } from './quiz.mjs';
 
-const [question, clue, illustration, answers, speak, next, retry, feedback] =
-  ['question', 'clue', 'illustration', 'answers', 'speak', 'next', 'retry', 'feedback'].map(id => document.getElementById(id));
+const [question, clue, illustration, answers, speak, next, feedback] =
+  ['question', 'clue', 'illustration', 'answers', 'speak', 'next', 'feedback'].map(id => document.getElementById(id));
 const game = document.querySelector('main');
-const session = createSession();
-const generator = createGenerator();
+const capture = globalThis.__sandboxCapture === true;
+let storage;
+if (!capture) {
+  try {
+    storage = window.localStorage;
+  } catch {
+    // Play with in-memory history when browser storage is blocked.
+  }
+}
+const session = capture ? null : createSession({ storage });
 
-let item = firstQuestion;
+// A stable, inert gallery cover. Normal visits generate their first round.
+let item = session?.next() ?? {
+  topic: 'animals',
+  question: 'わんわん なくのは？',
+  clue: { icon: '♪' },
+  choices: [{ label: 'ねこ', icon: '🐈' }, { label: 'いぬ', icon: '🐕' }, { label: 'ぶた', icon: '🐖' }],
+  correct: 1,
+};
 let solved = false;
-let pending = false;
-let modelState = 'ready';
 
-function art(icon, topic, number) {
+function art({ icon, kind, label }) {
   const node = document.createElement('span');
   node.className = 'art';
-  node.dataset.icon = icon;
+  if (icon) node.dataset.icon = icon;
   node.setAttribute('aria-hidden', 'true');
-  if (topic === 'colors') node.classList.add('swatch');
-  else if (topic === 'shapes') {
+  if (kind === 'swatch') node.classList.add('swatch');
+  else if (kind === 'shape') {
     node.classList.add('shape');
     if (icon !== 'oval') node.textContent = icon;
-  } else if (number) {
+  } else if (kind === 'number') {
     node.dataset.number = '';
-    node.textContent = number;
-  } else if (icon !== '▰') node.textContent = icon;
+    node.textContent = label;
+  } else if (icon !== '▰') node.textContent = icon ?? '';
   return node;
+}
+
+function counters({ icon, count, crossed = 0 }) {
+  const group = document.createElement('span');
+  group.className = 'counters';
+  group.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < count; i++) {
+    const counter = art({ icon });
+    if (i >= count - crossed) counter.classList.add('crossed');
+    group.append(counter);
+  }
+  return group;
 }
 
 function render() {
@@ -34,27 +58,33 @@ function render() {
   game.dataset.topic = item.topic;
   question.textContent = item.question;
   clue.textContent = item.clue.spoken ?? '';
-  const pictures = Array.from({ length: item.clue.count ?? 1 }, () => art(item.clue.icon, item.topic));
-  illustration.replaceChildren(...pictures);
+  const { icon, count, split } = item.clue;
+  if (split) {
+    const plus = document.createElement('span');
+    plus.textContent = '＋';
+    illustration.replaceChildren(counters({ icon, count: split }), plus, counters({ icon, count: count - split }));
+  } else {
+    illustration.replaceChildren(count ? counters(item.clue) : art(item.clue));
+  }
+
   answers.replaceChildren(...item.choices.map((choice, index) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'answer';
-    const number = item.topic === 'counting' ? choice.label : '';
     const caption = document.createElement('span');
     caption.textContent = choice.label;
-    if (number) caption.className = 'sr-only';
-    button.append(art(choice.icon, item.topic, number), caption);
+    if (choice.kind === 'number' || choice.count) caption.className = 'sr-only';
+    if (choice.count) button.append(counters(choice));
+    else if (choice.icon || choice.kind) button.append(art(choice));
+    else button.classList.add('text-answer');
+    button.append(caption);
     button.addEventListener('click', () => answer(index, button));
     return button;
   }));
-  next.textContent = 'つぎへ';
-  speak.disabled = false;
-  retry.hidden = modelState !== 'error';
 }
 
 function answer(index, button) {
-  if (pending || solved) return;
+  if (capture || solved) return;
   for (const choice of answers.children) delete choice.dataset.result;
   if (index !== item.correct) {
     button.dataset.result = 'retry';
@@ -69,49 +99,20 @@ function answer(index, button) {
   for (const choice of answers.children) choice.disabled = true;
 }
 
-async function advance() {
-  pending = true;
-  retry.hidden = true;
-  stopTalking();
-  const fact = session.next();
-  let generated;
-
-  if (modelState === 'ready') {
-    for (const choice of answers.children) choice.disabled = true;
-    speak.disabled = true;
-    feedback.textContent = 'もんだいを つくってるよ…';
-    next.textContent = 'すぐ あそぶ';
-    const result = await generator.generate(fact.topic);
-    if (result.kind === 'ok') {
-      for (const candidate of result.candidates) {
-        generated = validate(fact, candidate);
-        if (generated) break;
-      }
-    } else if (result.kind === 'unsupported') modelState = 'unsupported';
-    else if (result.kind !== 'stopped') modelState = 'error';
-  }
-
-  item = generated ?? fallback(fact);
-  pending = false;
-  feedback.textContent = { error: 'つくれなかったよ。', unsupported: 'このまま あそべるよ。' }[modelState] ?? '';
-  render();
-  question.focus({ preventScroll: true });
+if (capture) game.inert = true;
+else {
+  next.disabled = false;
+  next.addEventListener('click', () => {
+    stopTalking();
+    item = session.next();
+    feedback.textContent = '';
+    render();
+    question.focus({ preventScroll: true });
+  });
 }
 
-next.addEventListener('click', () => {
-  if (pending) generator.stop();
-  else void advance();
-});
-
-retry.addEventListener('click', () => {
-  if (pending) return;
-  modelState = 'ready';
-  next.focus({ preventScroll: true });
-  void advance();
-});
-
 // Use on-device Japanese voices when the browser offers one.
-const speech = window.speechSynthesis;
+const speech = capture ? null : window.speechSynthesis;
 let voice;
 let utterance;
 function stopTalking() {
@@ -129,7 +130,7 @@ if (speech?.getVoices && typeof SpeechSynthesisUtterance === 'function') {
   updateVoice();
   speech.addEventListener('voiceschanged', updateVoice);
   speak.addEventListener('click', () => {
-    if (!voice || pending) return;
+    if (!voice) return;
     stopTalking();
     const description = item.clue.spoken ? item.clue.spoken + '。' : '';
     const labels = item.choices.map(choice => choice.label).join('、');
@@ -152,9 +153,5 @@ if (speech?.getVoices && typeof SpeechSynthesisUtterance === 'function') {
   });
 }
 
-window.addEventListener('pagehide', () => {
-  stopTalking();
-  generator.stop();
-});
-
+window.addEventListener('pagehide', stopTalking);
 render();
