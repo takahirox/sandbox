@@ -109,9 +109,11 @@ has a 90-second limit. A slow connection can require another attempt.
 ## Utterance endpointing
 
 The AudioWorklet uses 20 ms frames, DC-corrected energy and adjacent-sample
-differences to reject broadband noise. A broadband frame can raise the noise
-floor only up to the lowest noise observation across the last three frames,
-so a 20 ms burst that straddles two frames cannot mask the next utterance.
+differences to reject broadband noise. Broadband frames and noise observations
+above three times the voice-gate RMS can raise the floor only up to the lowest
+noise observation across the last three frames. This limits the effect of a
+20 ms burst even when it straddles two frames. Smoother noise closer to the
+voice gate can update the floor immediately.
 Among smooth frames, nearly exact repetition at 100 or 120 Hz with at least
 half the power at the fundamental identifies mains hum. Other smooth frames
 that pass the energy gate are checked for repetition in the 80–400 Hz pitch range.
@@ -164,9 +166,9 @@ filtered noise starts during speech, the submission delay falls from 5.4 s
 with the previous detector to 760 ms. The quiet-speech fixture reaches
 recognition in under two seconds. At RMS 0.0044, seeded 100 and 120 Hz hum
 alone submits no PCM, and both utterances mixed into the hum submit 600 ms
-after they end. A 20 ms broadband burst before the quiet English WAV yields
-the same segment boundaries and submission timing as the clean recording,
-including when the burst spans two frames.
+after they end. Broadband and filtered 20 ms bursts before the quiet English
+WAV yield the same segment boundaries as the clean recording and reach the
+fixture recognizer at 4.144 s, including when a burst spans two frames.
 
 Across these patterns, the idle Worker would run ASR seven times before the
 change and eight times after it. Delivered PCM fell from 42 s to 22 s. On an
