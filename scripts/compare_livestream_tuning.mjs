@@ -1,8 +1,9 @@
-// Run explicitly: node scripts/compare_livestream_tuning.mjs [all|baseline|tuned|small] [output.json]
+// node scripts/compare_livestream_tuning.mjs [all|baseline|tuned|small] [output.json]
+// Append --follow-up <candidate.gguf> to compare the two adapters and the baseline.
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpus, platform, totalmem } from 'node:os';
+import { cpus, platform, release, totalmem } from 'node:os';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from './capture_screenshots.mjs';
 import { LLM, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_FILES, TUNED_ADAPTER_URL } from '../projects/ai-livestream/config.mjs';
@@ -10,22 +11,34 @@ import { LLM, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_FILES, TUNED_ADAPTER_URL } f
 const root = new URL('../', import.meta.url);
 const fixtureDir = new URL('tests/fixtures/ai-livestream/', root);
 const readJSON = async path => JSON.parse(await readFile(path, 'utf8'));
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const [variant, output, flag, candidatePath] = process.argv.slice(2);
+const followUp = flag === '--follow-up' && Boolean(candidatePath);
+if (flag && !followUp) throw Error('Expected --follow-up <candidate.gguf>');
+const modes = variant && variant !== 'all' ? [variant]
+  : followUp ? ['baseline', 'tuned', 'candidate'] : ['baseline', 'tuned', 'small'];
+if (modes.some(model => !['baseline', 'tuned', followUp ? 'candidate' : 'small'].includes(model)))
+  throw Error('Unknown model');
+const oldAdapter = new URL('projects/ai-livestream/models/resolve/e3866302664199c2/livestream.gguf', root);
+const adapters = followUp ? {
+  tuned: await readFile(oldAdapter),
+  candidate: await readFile(candidatePath),
+} : {};
+const holdoutPath = followUp ? 'follow-up-holdout.json' : 'tuning-holdout.json';
 const [originalSpeech, confirmationSpeech, heldOutBytes] = await Promise.all([
   readJSON(new URL('topics.json', fixtureDir)),
   readJSON(new URL('tuning-audio.json', fixtureDir)),
-  readFile(new URL('tuning-holdout.json', fixtureDir)),
+  readFile(new URL(holdoutPath, fixtureDir)),
 ]);
 const speech = [...originalSpeech, ...confirmationSpeech];
 const heldOut = JSON.parse(heldOutBytes);
-const [variant, output] = process.argv.slice(2);
-const modes = variant && variant !== 'all' ? [variant] : ['baseline', 'tuned', 'small'];
-if (modes.some(model => !['baseline', 'tuned', 'small'].includes(model))) throw Error('Unknown model');
 const server = await previewServer(root.pathname);
 const report = {
   date: new Date().toISOString(),
-  host: { cpu: cpus()[0].model, memoryGiB: totalmem() / 2**30, platform: platform() },
+  host: { cpu: cpus()[0].model, memoryGiB: totalmem() / 2**30, platform: platform(), release: release() },
   generationSeed: 42,
-  holdoutSha256: createHash('sha256').update(heldOutBytes).digest('hex'),
+  ...(followUp ? { holdout: holdoutPath, transcriptFirst: true } : {}),
+  holdoutSha256: sha256(heldOutBytes),
   modes: [],
 };
 const runtimeSizes = new Map();
@@ -63,6 +76,14 @@ async function run(mode) {
   }, 1000);
   try {
     const page = await browser.newPage({ permissions: ['camera'] });
+    const adapterPath = new URL(TUNED_ADAPTER_URL).pathname.slice(root.pathname.length);
+    const adapterURL = `${server.origin}/sandbox/${adapterPath}`;
+    const adapter = adapters[mode];
+    // Serve the comparison bytes at the exact URL the production engine requests.
+    // Keep the production allowlist and loading path identical for both adapters.
+    if (adapter) await page.route(adapterURL, route => route.fulfill({
+      status: 200, contentType: 'application/octet-stream', body: adapter,
+    }));
     const requests = [];
     page.on('request', request => {
       requests.push({ url: request.url(), method: request.method(), body: request.postData(),
@@ -105,7 +126,7 @@ async function run(mode) {
           benchmark.results.push({ ...data, jobMs: performance.now() - benchmark.jobStarted });
         };
         benchmark.worker.postMessage({ type: 'init', model });
-      }, mode);
+      }, mode === 'candidate' ? 'tuned' : mode);
       await page.waitForFunction(() => benchmark.status, null, { timeout: 300000 });
       const result = await page.evaluate(() => benchmark.status);
       if (result.type === 'error') throw Error(result.message);
@@ -144,18 +165,20 @@ async function run(mode) {
       await page.waitForTimeout(2000);
       return frames();
     })();
-    const audio = [];
-    const text = [];
-    for (const [index, fixture] of speech.entries()) {
-      const result = await feed(await samples(fixture.file), fixture.language, index * 120000);
-      audio.push({ file: fixture.file, language: fixture.language, expected: fixture.text,
-        ...(fixture.confirmation ? { confirmation: true } : {}), ...result });
-    }
+    const audio = [], text = [];
+    const runAudio = async () => {
+      for (const [index, fixture] of speech.entries()) {
+        const result = await feed(await samples(fixture.file), fixture.language, index * 120000);
+        audio.push({ file: fixture.file, language: fixture.language, expected: fixture.text,
+          ...(fixture.confirmation ? { confirmation: true } : {}), ...result });
+      }
+    };
+    if (!followUp) await runAudio();
     const voiced = Array(96000).fill(0.02);
     for (const [index, fixture] of heldOut.entries()) {
       const turns = [];
       for (const [turn, transcript] of fixture.turns.entries()) {
-        const now = (index + speech.length) * 120000 + turn * 12000;
+        const now = (index + (followUp ? 0 : speech.length)) * 120000 + turn * 12000;
         turns.push(await feed(transcript === null ? null : voiced, fixture.language, now, transcript));
       }
       text.push({ id: fixture.id, turns });
@@ -164,6 +187,8 @@ async function run(mode) {
     console.log(`${mode}: warm load`);
     const warm = await load();
     const cameraDuringWarm = await frames();
+    if (followUp) await runAudio();
+    const cameraDuringAudio = followUp ? await frames() : undefined;
     const baseline = mode === 'baseline';
     const selected = baseline ? LLM : SMALL_LLM;
     const assets = {
@@ -182,8 +207,8 @@ async function run(mode) {
       });
     } else {
       assets.textShards = 325085216 + 314362336; // Both pinned GGUF shards include model metadata.
-      if (mode === 'tuned')
-        assets.textAdapter = (await readFile(new URL(TUNED_ADAPTER_URL))).byteLength;
+      if (mode !== 'small')
+        assets.textAdapter = (adapter ?? await readFile(new URL(TUNED_ADAPTER_URL))).byteLength;
     }
     for (const request of requests) {
       const url = new URL(request.url);
@@ -194,10 +219,8 @@ async function run(mode) {
             url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'huggingface.co' || url.hostname.endsWith('.hf.co')))
         throw Error('Unexpected browser traffic ' + request.method + ' ' + url.origin);
     }
-    const [, overlay, adapter] = new URL(TUNED_ADAPTER_URL).pathname.split('/').slice(-3);
-    const adapterRequests = requests.filter(({ url }) => url ===
-      `${server.origin}/sandbox/projects/ai-livestream/models/resolve/${overlay}/${adapter}`).length;
-    if (adapterRequests !== (mode === 'tuned' ? 2 : 0))
+    const adapterRequests = requests.filter(({ url }) => url === adapterURL).length;
+    if (adapterRequests !== (assets.textAdapter ? 2 : 0))
       throw Error('Unexpected trained adapter requests');
     const runtimeURLs = new Set(requests.filter(request =>
       request.url.startsWith('https://cdn.jsdelivr.net/npm/')).map(request => request.url));
@@ -211,11 +234,15 @@ async function run(mode) {
     })));
     return { mode, browser: browser.version(), gpu, assets,
       baseRevision: selected.revision,
-      ...(mode === 'tuned' ? { overlay, adapter } : {}),
+      ...(assets.textAdapter ? {
+        overlay: adapter ? sha256(adapter).slice(0, 16) : adapterPath.split('/').at(-2),
+        adapter: adapterPath.split('/').at(-1),
+        ...(adapter ? { adapterSha256: sha256(adapter) } : {}),
+      } : {}),
       assetBytes: [...Object.values(assets), ...Object.values(runtimeAssets)].reduce((total, size) => total + size, 0),
       runtimeAssets,
       coldLoadMs: cold.loadMs, warmLoadMs: warm.loadMs, peakBrowserRssMiB: peakKiB / 1024,
-      cameraIdle, cameraDuringCold, cameraDuringJobs, cameraDuringWarm, audio, text };
+      cameraIdle, cameraDuringCold, cameraDuringJobs, cameraDuringWarm, cameraDuringAudio, audio, text };
   } finally {
     clearInterval(timer);
     await browser.close();

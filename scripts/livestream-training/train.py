@@ -37,6 +37,9 @@ LR = 0.0003
 LORA_LAYERS = range(20, 28)
 RANK = 8
 ALPHA = RANK
+PARENT_DIGEST = "e3866302664199c20d0c4b35fee826b06562ebb9782fd46059e35ea0de1d2192"
+PARENT_ADAPTER = (SOURCE.parents[1] / "projects/ai-livestream/models/resolve" /
+                  PARENT_DIGEST[:16] / "livestream.gguf")
 
 
 class LoraLinear(nn.Module):
@@ -103,8 +106,11 @@ def lora_modules(model):
         yield layer.mlp, "down_proj", f"blk.{index}.ffn_down.weight"
         yield layer.self_attn, "o_proj", f"blk.{index}.attn_output.weight"
 
-def training_rows(tokenizer):
-    rows = subprocess.check_output(["node", SOURCE / "prompts.mjs"], text=True)
+def training_rows(tokenizer, follow_up):
+    command = ["node", SOURCE / "prompts.mjs"]
+    if follow_up:
+        command.append("--follow-up")
+    rows = subprocess.check_output(command, text=True)
     examples = []
     for line in rows.splitlines():
         row = json.loads(line)
@@ -143,7 +149,17 @@ def assistant_loss(model, inputs, positions, targets, mask):
     return (nn.losses.cross_entropy(logits, targets) * mask).sum() / mask.sum()
 
 
-def tune(base, shards, output):
+def resume_adapter(modules):
+    with PARENT_ADAPTER.open("rb") as source:
+        if hashlib.file_digest(source, "sha256").hexdigest() != PARENT_DIGEST:
+            raise ValueError("Unexpected parent adapter SHA-256")
+    tensors = {tensor.name: tensor.data for tensor in gguf.GGUFReader(PARENT_ADAPTER).tensors}
+    for name, module in modules:
+        module.a = mx.array(tensors[f"{name}.lora_a"].reshape(module.a.shape), dtype=mx.float32)
+        module.b = mx.array(tensors[f"{name}.lora_b"].reshape(module.b.shape), dtype=mx.float32)
+
+
+def tune(base, shards, output, follow_up):
     mx.random.seed(SEED)
     rng = random.Random(SEED)
     model = load_gguf_model(base, shards)
@@ -153,15 +169,18 @@ def tune(base, shards, output):
         module = LoraLinear(getattr(parent, key))
         setattr(parent, key, module)
         modules.append((name, module))
+    if follow_up:
+        resume_adapter(modules)
     model.freeze()
     for _, module in modules:
         module.unfreeze(keys=["a", "b"])
 
-    examples = training_rows(tokenizer)
+    examples = training_rows(tokenizer, follow_up)
+    epochs = 2 if follow_up else EPOCHS
     grad = nn.value_and_grad(model, assistant_loss)
-    optimizer = optim.Adam(learning_rate=LR)
+    optimizer = optim.Adam(learning_rate=0.00012 if follow_up else LR)
     started = perf_counter()
-    for epoch in range(EPOCHS):
+    for epoch in range(epochs):
         rng.shuffle(examples)
         losses = []
         for offset in range(0, len(examples), BATCH_SIZE):
@@ -173,7 +192,7 @@ def tune(base, shards, output):
         mean = sum(losses) / len(losses)
         if not np.isfinite(mean):
             raise ValueError("Non-finite training loss")
-        print(f"epoch {epoch + 1}/{EPOCHS}, assistant loss {mean:.4f}, {perf_counter() - started:.1f}s", flush=True)
+        print(f"epoch {epoch + 1}/{epochs}, assistant loss {mean:.4f}, {perf_counter() - started:.1f}s", flush=True)
     print(f"Metal peak allocator memory: {mx.get_peak_memory() / 2**30:.2f} GiB", flush=True)
     writer = gguf.GGUFWriter(output, "qwen3")
     writer.add_type(gguf.GGUFType.ADAPTER)
@@ -193,6 +212,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("work", type=Path, help="Scratch directory for pinned downloads")
     parser.add_argument("output", type=Path, help="Output path for the trained GGUF adapter")
+    parser.add_argument("--follow-up", action="store_true", help="Continue the pinned initial adapter")
     args = parser.parse_args()
     base = args.work / "base"
     for name in ("config.json", "tokenizer.json", "tokenizer_config.json"):
@@ -201,7 +221,7 @@ def main():
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(lambda path: download(WBD + path.name, path), shards))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    tune(base, shards, args.output)
+    tune(base, shards, args.output, args.follow_up)
 
 
 if __name__ == "__main__":

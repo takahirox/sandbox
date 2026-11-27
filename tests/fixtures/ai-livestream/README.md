@@ -59,3 +59,12 @@ WAVs contain no user recordings and were excluded along with the transcript
 fixtures from training and teacher generation. The raw browser turns,
 separate quality ratings, and reproduction steps are in the
 [tuning evaluation](../../../projects/ai-livestream/TUNING-EVALUATION.md).
+
+`follow-up-holdout.json` contains the fresh, independently authored spoken
+Japanese and English transcript scenarios for the second round. They were
+excluded from both training corpora and checkpoint selection.
+`follow-up-benchmark.json` records raw and displayed browser outputs for all
+three stacks, with WAV and text runs in separate fields. The accompanying
+`follow-up-ratings.json` annotates displayed final turns and WAV replies.
+See the [follow-up evaluation](../../../projects/ai-livestream/FOLLOW-UP-EVALUATION.md)
+for scoring and reproduction.

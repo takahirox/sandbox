@@ -1,5 +1,9 @@
 # Livestream comment tuning evaluation
 
+The [follow-up evaluation](./FOLLOW-UP-EVALUATION.md) compares a second
+adapter against this round's checkpoint and the 1.7B baseline on fresh
+spoken transcripts. The results below document the first round.
+
 The default for [Issue #62](https://github.com/takahirox/sandbox/issues/62) is
 Qwen3 0.6B WBD with a task-specific GGUF LoRA. The original 1.7B model is
 available via [`?model=baseline`](./?model=baseline). The experiment also

@@ -1,5 +1,6 @@
 // Replay saved generation for quality scoring and report the original run timings.
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WINDOW_SAMPLES } from '../projects/ai-livestream/config.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
@@ -7,41 +8,46 @@ import { createInference } from '../projects/ai-livestream/inference.mjs';
 const fixtures = new URL('../tests/fixtures/ai-livestream/', import.meta.url);
 const json = async path => JSON.parse(await readFile(path, 'utf8'));
 
-export async function replayTuningMode(mode, holdout) {
+export async function replayTuningMode(mode, holdout, { transcriptFirst = false } = {}) {
   let row, events;
   const generate = async () => {
     if (typeof row.raw !== 'string') throw Error('Missing saved model output for replay');
     return [{ generated_text: row.raw }];
   };
   generate.tokenizer = { apply_chat_template: messages => messages };
-  const infer = await createInference(async task => task === 'automatic-speech-recognition'
+  const createReplay = () => createInference(async task => task === 'automatic-speech-recognition'
     ? async () => ({ text: row.transcript }) : generate,
   { backends: { onnx: { wasm: {} } } }, () => {}, {
-    model: mode.mode,
+    model: mode.mode === 'candidate' ? 'tuned' : mode.mode,
     failOnGenerationError: true,
     onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
   });
+  const infer = await createReplay();
   const voiced = new Float32Array(WINDOW_SAMPLES).fill(0.02);
   const silence = new Float32Array(WINDOW_SAMPLES);
-  const replay = async (record, language, now, audio) => {
+  const replay = async (infer, record, language, now, audio) => {
     row = record;
     events = [];
     const { comment } = await infer(audio, language, now);
     return { ...record, comment, events };
   };
   const audio = [], text = [];
-  for (const [index, record] of mode.audio.entries())
-    audio.push(await replay(record, record.language, index * 120000, voiced));
+  const replayAudio = async instance => {
+    for (const [index, record] of mode.audio.entries())
+      audio.push(await replay(instance, record, record.language, index * 120000, voiced));
+  };
+  if (!transcriptFirst) await replayAudio(infer);
   for (const [index, { id, turns }] of mode.text.entries()) {
     const fixture = holdout.find(item => item.id === id);
     const replayed = [];
     for (const [turn, record] of turns.entries()) {
-      const now = (mode.audio.length + index) * 120000 + turn * 12000;
-      replayed.push(await replay(record, fixture.language, now,
+      const now = (index + (transcriptFirst ? 0 : mode.audio.length)) * 120000 + turn * 12000;
+      replayed.push(await replay(infer, record, fixture.language, now,
         fixture.turns[turn] === null ? silence : voiced));
     }
     text.push({ id, turns: replayed });
   }
+  if (transcriptFirst) await replayAudio(await createReplay());
   return { audio, text };
 }
 
@@ -84,8 +90,8 @@ function recordedTimings(rows) {
   };
 }
 
-export async function scoreTuningMode(mode, reviewed, holdout) {
-  const replay = await replayTuningMode(mode, holdout);
+export async function scoreTuningMode(mode, reviewed, holdout, options) {
+  const replay = await replayTuningMode(mode, holdout, options);
   const audio = replay.audio.map(row => ({ ...row, id: row.file }));
   const heldOut = replay.text.map(({ id, turns }) => {
     const { language, withhold, confirmation } = holdout.find(row => row.id === id);
@@ -105,6 +111,7 @@ export async function scoreTuningMode(mode, reviewed, holdout) {
     japaneseAudio: subset(audio.filter(row => row.language === 'ja' && !row.confirmation), reviewed.audio),
     japaneseConfirmationAudio: subset(audio.filter(row => row.confirmation), reviewed.audio),
     japaneseHeldOut: subset(heldOut.filter(row => row.language === 'ja' && !row.confirmation), reviewed.heldOut),
+    englishHeldOut: subset(heldOut.filter(row => row.language === 'en'), reviewed.heldOut),
     japaneseConfirmation: subset(heldOut.filter(row => row.confirmation), reviewed.heldOut),
   };
 }
@@ -112,10 +119,14 @@ export async function scoreTuningMode(mode, reviewed, holdout) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [reportPath = new URL('tuning-benchmark.json', fixtures),
     ratingsPath = new URL('tuning-ratings.json', fixtures)] = process.argv.slice(2);
-  const [report, ratings, holdout] = await Promise.all([
-    json(reportPath), json(ratingsPath), json(new URL('tuning-holdout.json', fixtures)),
-  ]);
+  const [report, ratings] = await Promise.all([json(reportPath), json(ratingsPath)]);
+  const holdoutBytes = await readFile(new URL(report.holdout ?? 'tuning-holdout.json', fixtures));
+  if (createHash('sha256').update(holdoutBytes).digest('hex') !== report.holdoutSha256)
+    throw Error('Holdout does not match the recorded run');
+  const holdout = JSON.parse(holdoutBytes);
   for (const mode of report.modes) {
-    console.log(JSON.stringify(await scoreTuningMode(mode, ratings[mode.mode], holdout), null, 2));
+    console.log(JSON.stringify(await scoreTuningMode(mode, ratings[mode.mode], holdout, {
+      transcriptFirst: report.transcriptFirst,
+    }), null, 2));
   }
 }

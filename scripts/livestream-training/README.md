@@ -77,3 +77,51 @@ the runtime pin and artifact test, and rerun the browser comparison.
 The training run on an Apple M4 Max / 64 GiB took 38.4 seconds for the optimizer
 loop and peaked at 2.38 GiB in the MLX allocator. Mean response-only loss fell
 from 2.7035 to 1.2150. The evaluation scores are recorded separately.
+
+## Second round
+
+The [owner update] made clean, spoken Japanese the primary evaluation. The
+first adapter sometimes added details to clean transcripts and rarely asked
+questions. This round restores its 32 FP16 LoRA arrays into FP32 trainable
+weights and continues training over the same frozen WBD base. The parent
+adapter's SHA-256 is checked before loading.
+
+The implementation assistant authored `follow-up.jsonl` under [CC0 1.0]. It
+contains 64 new Japanese examples, 16 per viewer voice. The targets include
+brief questions about details the speaker can answer, casual reactions,
+preferences and responses to changes. Some examples resolve a pronoun from
+the preceding turn, change the subject or explicitly correct a word. The
+training set also replays all 52 original English rows and all 18 original
+Japanese `SKIP` rows. No teacher, recordings or user data were used in this
+round. The fresh evaluation transcripts and all WAVs were excluded.
+
+The follow-up uses the existing response-only objective, seed 62, batch
+size 4, clipping at 1 and a fresh Adam optimizer. Train for two epochs with
+learning rate 0.00012 (68 updates), then export only the final adapter. The
+lower learning rate and replay aim to retain prior behavior while adding
+question and reaction supervision. Neither the training schedule nor the
+candidate artifact was chosen by looking at the fresh evaluation outputs.
+
+Run the same environment setup as above, then:
+
+```sh
+"$work/venv/bin/python" scripts/livestream-training/train.py "$work" "$work/follow-up.gguf" --follow-up
+shasum -a 256 scripts/livestream-training/follow-up.jsonl "$work/follow-up.gguf"
+```
+
+| File | SHA-256 |
+| --- | --- |
+| `follow-up.jsonl` | `f114d8b24ff05d21e2c61820f7eaf001e726db268d6bc2d90bc65c7f434efba1` |
+| `follow-up.gguf` | `3385b8fa05610879ebcf51d967979f113d3b2455e9e3d97eb6e11eb5eb1e8e8e` |
+
+On the Apple M4 Max with Python 3.12.13 and the pinned requirements, the
+optimizer loop took 7.1 seconds and MLX reported 2.39 GiB peak allocator
+memory. Mean training loss fell from 2.2723 in epoch one to 1.5876 in epoch two.
+The [exported candidate] uses the same [Apache-2.0 license] as the parent
+adapter. See the [follow-up evaluation] for browser results and the deployment
+decision.
+
+[owner update]: https://github.com/takahirox/sandbox/pull/63#issuecomment-7208271222
+[exported candidate]: ./artifacts/3385b8fa05610879/livestream.gguf
+[Apache-2.0 license]: ../../projects/ai-livestream/models/LICENSE
+[follow-up evaluation]: ../../projects/ai-livestream/FOLLOW-UP-EVALUATION.md
