@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f1eaff">
+  <title>さんたく くいず</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./game.mjs"></script>
+</head>
+<body>
+  <main class="game" data-topic="animals">
+    <div class="challenge">
+      <div class="illustration" id="illustration" aria-hidden="true"></div>
+      <div class="prompt">
+        <h1 id="question" tabindex="-1" aria-describedby="clue">わんわん なくのは？</h1>
+        <span class="sr-only" id="clue"></span>
+        <button type="button" id="speak" class="speak" aria-label="もんだいを きく" hidden>🔊</button>
+      </div>
+    </div>
+    <div class="answers" id="answers" role="group" aria-label="こたえを えらぶ"></div>
+    <div class="controls">
+      <p id="feedback" role="status"></p>
+      <button type="button" id="next" class="pill">つぎへ</button>
+      <button type="button" id="retry" class="pill retry" hidden>もういちど つくる</button>
+    </div>
+  </main>
+</body>
+</html>

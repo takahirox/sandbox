@@ -1,0 +1,256 @@
+:root {
+  color-scheme: light;
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", "BIZ UDPGothic", system-ui, sans-serif;
+  font-weight: 700;
+  color: #2e2150;
+  background: #f1eaff;
+  font-synthesis: none;
+}
+
+*, ::before, ::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  min-height: 100svh;
+  margin: 0;
+  padding: clamp(12px, 4vw, 36px);
+  display: grid;
+  place-items: center;
+  background-image: radial-gradient(#d7c6ef 1.5px, transparent 1.5px);
+  background-size: 25px 25px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 3px solid #5e37aa;
+  outline-offset: 4px;
+}
+
+.game {
+  width: min(100%, 780px);
+  padding: clamp(20px, 5vw, 52px) clamp(13px, 5vw, 56px) clamp(16px, 3vw, 30px);
+  background: #fffdf8;
+  border: 2px solid #dfd1f5;
+  border-radius: clamp(25px, 5vw, 46px);
+  box-shadow: 0 10px 0 #decdf5, 0 20px 40px #52367b16;
+  text-align: center;
+}
+
+.illustration {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-content: center;
+  width: 148px;
+  min-height: 100px;
+  margin: 0 auto 20px;
+}
+
+.illustration::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 6px;
+  background: #e0ee9a;
+  border-radius: 48% 52% 58% 42% / 55% 43% 57% 45%;
+  transform: rotate(-8deg);
+}
+
+.illustration::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -9px;
+  top: 5px;
+  width: 18px;
+  aspect-ratio: 1;
+  background: #b499eb;
+  clip-path: polygon(50% 0, 63% 37%, 100% 50%, 63% 63%, 50% 100%, 37% 63%, 0 50%, 37% 37%);
+  box-shadow: 0 0 0 2px #fffdf8;
+}
+
+[data-topic="animals"] .illustration .art {
+  color: #4f348c;
+  font-size: 4.1rem;
+  rotate: -10deg;
+  text-shadow: 3px 3px #fffceb;
+}
+
+[data-topic="counting"] .illustration {
+  width: 155px;
+  grid-template-columns: repeat(4, auto);
+  gap: 5px;
+  align-content: center;
+}
+
+[data-topic="counting"] .illustration .art { font-size: 1.35rem; }
+[data-topic="counting"] .illustration::before { background: #fff0ad; }
+
+.prompt {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: clamp(18px, 3.6vw, 33px);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.4rem, 4.8vw, 2.75rem);
+  line-height: 1.35;
+  letter-spacing: .035em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+h1:focus { outline: none; }
+
+.speak {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid #d6c3f6;
+  border-radius: 50%;
+  background: #f3ebff;
+  font-size: 1.15rem;
+}
+
+.answers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(7px, 2vw, 18px);
+}
+
+.answer {
+  --edge: #ddcaef;
+  --card: #f3e8ff;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  justify-items: center;
+  align-items: center;
+  gap: 8px;
+  min-height: clamp(100px, 21vw, 155px);
+  padding: 14px 4px 12px;
+  border-radius: clamp(15px, 3.5vw, 25px);
+  border: 2px solid var(--edge);
+  background: var(--card);
+  box-shadow: 0 5px 0 var(--edge);
+  font-size: clamp(.9rem, 3.7vw, 1.42rem);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.answer:nth-child(2) { --edge: #badfcb; --card: #e3f6ea; }
+.answer:nth-child(3) { --edge: #efcda7; --card: #fff0d9; }
+.answer[data-result="correct"] { --edge: #388858; --card: #dff6d7; }
+.answer[data-result="retry"] { --edge: #926ab9; }
+
+.answer:disabled { cursor: default; }
+.answer:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge); }
+
+@media (hover: hover) {
+  .answer:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 8px 0 var(--edge); }
+}
+
+.art {
+  display: grid;
+  place-items: center;
+  font-size: clamp(2rem, 8vw, 4.1rem);
+  line-height: 1;
+}
+
+.art[data-icon="▰"] {
+  width: .8em;
+  height: .55em;
+  background: repeating-linear-gradient(90deg, #5e93ad 0 15%, #aadee7 15% 34%, #5e93ad 34% 50%);
+  border-radius: .08em;
+  rotate: -12deg;
+}
+
+.art[data-number] { color: #4f348c; font-variant-numeric: tabular-nums; }
+.art.shape { color: #5e3da0; }
+.art[data-icon="oval"] { width: .85em; height: .52em; background: #5e3da0; border-radius: 50%; }
+.swatch {
+  width: .83em;
+  aspect-ratio: 1;
+  border: 2px solid #2e2150;
+  border-radius: 50%;
+  background: var(--paint);
+  box-shadow: inset 0 -4px #0002, inset 0 4px #fff5;
+}
+[data-icon="red"] { --paint: #db4040; }
+[data-icon="blue"] { --paint: #2c69db; }
+[data-icon="yellow"] { --paint: #ffdf39; }
+[data-icon="green"] { --paint: #499440; }
+[data-icon="purple"] { --paint: #864bc3; }
+[data-icon="orange"] { --paint: #f38236; }
+[data-icon="pink"] { --paint: #f483b5; }
+
+.controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  margin-top: clamp(17px, 3vw, 27px);
+  min-height: 48px;
+}
+
+#feedback { margin: 0; font-size: 1rem; line-height: 1.45; }
+#feedback:empty { position: absolute; }
+.game[data-solved] #feedback { color: #225c3c; }
+
+.pill {
+  min-height: 44px;
+  padding: 7px 24px;
+  border: 1px solid #d9c5f8;
+  border-radius: 40px;
+  background: #f1e8ff;
+  font-size: 1rem;
+}
+
+.game[data-solved] #next { color: #fff; background: #603ca0; border-color: #603ca0; }
+.retry { background: #fffdf8; }
+
+.answer[data-result="correct"] .art { animation: hop 410ms ease-out; }
+@keyframes hop {
+  50% { transform: translateY(-8px) rotate(-8deg); }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-height: 450px) and (min-width: 560px) {
+  body { padding: 10px; }
+  .game { padding: 14px 22px; }
+  .challenge { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .illustration { margin: 0; flex: 0 0 113px; min-height: 76px; }
+  .prompt { flex: 1; margin: 0; }
+  h1 { font-size: clamp(1.3rem, 3.7vw, 2rem); }
+  .answer { min-height: 91px; padding: 7px 4px; }
+  .answer .art { font-size: 2.5rem; }
+  .controls { margin-top: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .answer { transition: none; }
+  .answer[data-result="correct"] .art { animation: none; }
+}
