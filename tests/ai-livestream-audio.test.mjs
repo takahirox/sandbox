@@ -24,6 +24,18 @@ function recordPcm(rate, pcm) {
   return segments;
 }
 
+function filteredNoise(duration, smoothing, rms) {
+  const noise = synthesize(SAMPLE_RATE, duration, [], 1);
+  let filtered = 0, energy = 0;
+  for (let i = 0; i < noise.length; i++) {
+    filtered = smoothing * filtered + (1 - smoothing) * noise[i];
+    noise[i] = filtered;
+    energy += filtered * filtered;
+  }
+  const scale = rms / Math.sqrt(energy / noise.length);
+  return noise.map(sample => sample * scale);
+}
+
 test('short quiet speech reaches recognition after its pause, with onset and tail PCM intact', async () => {
   const { pcm, segments } = record(SAMPLE_RATE, 2, [
     [0.36, 0.4, 0.0018], [0.4, 0.54, 0.005], [0.54, 0.58, 0.0018],
@@ -111,20 +123,10 @@ test('the noise estimate follows the room while quiet speech above it can still 
 for (const smoothing of [0.6, 0.9]) {
   test(`steady filtered noise (smoothing ${smoothing}) stays quiet and does not mask utterance endpoints`, () => {
     const duration = 20;
-    const noise = synthesize(SAMPLE_RATE, duration, [], 1);
-    let filtered = 0, energy = 0;
-    for (let i = 0; i < noise.length; i++) {
-      filtered = smoothing * filtered + (1 - smoothing) * noise[i];
-      noise[i] = filtered;
-      energy += filtered * filtered;
-    }
-    const scale = 0.006 / Math.sqrt(energy / noise.length);
+    const noise = filteredNoise(duration, smoothing, 0.006);
     const speech = synthesize(SAMPLE_RATE, duration, [[2, 2.4, 0.025], [11, 11.4, 0.025]]);
     const withLateNoise = speech.slice();
-    for (let i = 0; i < noise.length; i++) {
-      noise[i] *= scale;
-      speech[i] += noise[i];
-    }
+    for (let i = 0; i < noise.length; i++) speech[i] += noise[i];
 
     assert.deepEqual(recordPcm(SAMPLE_RATE, noise).map(bounds), [], 'Noise alone never submits');
     assert.deepEqual(recordPcm(SAMPLE_RATE, speech).map(bounds), [[1.8, 2.56, 3], [10.8, 11.56, 12]]);
@@ -168,7 +170,7 @@ test('steady mains hum is silent by itself and preserves endpoints in mixed spee
   }
 });
 
-test('one broadband transient does not mask the following quiet speech', () => {
+test('quiet recorded speech reaches recognition after a broadband or filtered noise burst', async () => {
   const wav = readFileSync(new URL('./fixtures/ai-livestream/en-quiet.wav', import.meta.url));
   let speech;
   for (let offset = 12; offset + 8 <= wav.length;) {
@@ -184,15 +186,36 @@ test('one broadband transient does not mask the following quiet speech', () => {
   const rms = Math.sqrt(speech.reduce((sum, sample) => sum + sample ** 2, 0) / speech.length);
   const quiet = new Float32Array(6 * SAMPLE_RATE);
   quiet.set(speech.map(sample => sample * 0.02 / rms), 0.7 * SAMPLE_RATE);
-  const baseline = recordPcm(SAMPLE_RATE, quiet).map(bounds);
+  const baseline = recordPcm(SAMPLE_RATE, quiet);
   assert.equal(baseline.length, 1);
-  assert.ok(baseline[0][2] <= 4.2, 'Quiet speech submits promptly after the recording ends');
+  const [clean] = baseline;
+  assert.equal(roundSeconds(clean.submitted), 4.144);
 
-  const burst = synthesize(SAMPLE_RATE, 0.02, [], 0.7);
-  for (const start of [0.5, 0.51]) {
-    const pcm = quiet.slice();
-    pcm.set(burst, start * SAMPLE_RATE);
-    assert.deepEqual(recordPcm(SAMPLE_RATE, pcm).map(bounds), baseline, `Burst at ${start} s`);
+  const received = [];
+  const infer = await createInference(async task => {
+    if (task === 'automatic-speech-recognition') return async (audio, options) => {
+      received.push({ audio, language: options.language });
+      return { text: '' };
+    };
+  }, { backends: { onnx: { wasm: {} } } }, () => {});
+  const bursts = [
+    ['broadband', synthesize(SAMPLE_RATE, 0.02, [], 0.7), [0.5, 0.51]],
+    ['filtered', filteredNoise(0.02, 0.6, 0.1), [0.3, 0.31]],
+  ];
+  for (const [type, burst, starts] of bursts) {
+    for (const start of starts) {
+      const pcm = quiet.slice();
+      pcm.set(burst, start * SAMPLE_RATE);
+      const segments = recordPcm(SAMPLE_RATE, pcm);
+      assert.deepEqual(segments.map(bounds), [bounds(clean)], `${type} burst at ${start} s`);
+      const [segment] = segments;
+      if (type === 'filtered') assert.deepEqual(segment.audio, clean.audio);
+      await infer(segment.audio, 'en');
+      const result = received.shift();
+      assert.equal(result?.audio, segment.audio);
+      assert.equal(result.language, 'english');
+      assert.equal(received.length, 0);
+    }
   }
 });
 

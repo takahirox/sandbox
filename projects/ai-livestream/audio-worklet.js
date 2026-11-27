@@ -138,9 +138,10 @@ class SpeechSegment extends AudioWorkletProcessor {
     const rough = differenceEnergy >= 0.5 * FRAME * power;
     const learnNoise = !voiced || rough || !hasPeriodicSignal(this.frame, mean);
     const candidate = learnNoise ? power : this.noisePower;
-    // A 20 ms broadband burst can span two frames. Require three consecutive
-    // elevated noise observations before broadband noise can raise the floor.
-    const sustained = broadband
+    // A 20 ms burst can span two frames. Confirm broadband noise and large
+    // jumps (over three times the voice-gate RMS) across three frames before
+    // raising the floor. Smooth background noise near the gate adapts faster.
+    const sustained = broadband || candidate > 3 ** 2 * threshold
       ? Math.min(candidate, this.previousNoisePower, this.olderNoisePower)
       : candidate;
     this.olderNoisePower = this.previousNoisePower;
