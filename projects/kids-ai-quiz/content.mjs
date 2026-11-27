@@ -1,120 +1,174 @@
-// Original, closed vocabulary. Text clues are checked against the answer rules in quiz.mjs.
-export const topics = [
-  {
-    id: 'animals', picture: '♪', forms: [
-      '{clue} なくのは？', '「{clue}」って なくのは だれ？', '{clue}！ だれの こえ？',
-      '「{clue}」と鳴く動物はどれですか？', '鳴き声「{clue}」に当てはまる動物を選びなさい。', '次のうち「{clue}」と鳴くのはどの動物でしょうか。',
-    ],
-    facts: [
-      ['dog', 'いぬ', '🐕', 'わんわん', 'pet'],
-      ['cat', 'ねこ', '🐈', 'にゃあにゃあ', 'pet'],
-      ['pig', 'ぶた', '🐖', 'ぶうぶう', 'barn'],
-      ['cow', 'うし', '🐄', 'もーもー', 'barn'],
-      ['duck', 'あひる', '🦆', 'があがあ', 'bird'],
-      ['sheep', 'ひつじ', '🐑', 'めえめえ', 'barn'],
-      ['rooster', 'にわとり', '🐓', 'こけこっこー', 'bird'],
-    ],
-  },
-  {
-    id: 'food', picture: '🍴', forms: [
-      '{clue}は どれ？', '{clue}。なんの たべもの？', 'どれかな？ {clue}。',
-      '「{clue}」に当てはまる食品はどれですか？', '次の説明に該当する食品を選びなさい。{clue}。', '「{clue}」とはどの食品を指すでしょうか。',
-    ],
-    facts: [
-      ['banana', 'ばなな', '🍌', 'かわが きいろくて ながい くだもの', 'fruit'],
-      ['apple', 'りんご', '🍎', 'きに なる しゃりしゃりの くだもの', 'fruit'],
-      ['rice-ball', 'おにぎり', '🍙', 'ごはんを ぎゅっと にぎった たべもの', 'savory'],
-      ['pizza', 'ぴざ', '🍕', 'ちーずを のせて やく まるい たべもの', 'savory'],
-      ['doughnut', 'どーなつ', '🍩', 'まんなかに あなが ある おかし', 'snack'],
-      ['strawberry', 'いちご', '🍓', 'あかくて つぶつぶの くだもの', 'fruit'],
-      ['corn', 'とうもろこし', '🌽', 'きいろい つぶが ならんだ やさい', 'savory'],
-    ],
-  },
-  {
-    id: 'vehicles', picture: '🛞', forms: [
-      '{clue}のは？', '{clue} のりものは どれ？', 'どれが {clue}？',
-      '「{clue}」乗り物はどれですか？', '次のうち「{clue}」乗り物を選びなさい。', '「{clue}」乗り物はどれでしょうか。',
-    ],
-    facts: [
-      ['train', 'でんしゃ', '🚃', 'せんろを はしる', 'road'],
-      ['plane', 'ひこうき', '✈️', 'つばさで そらを とぶ', 'travel'],
-      ['boat', 'ふね', '⛵', 'みずに うかんで すすむ', 'travel'],
-      ['bicycle', 'じてんしゃ', '🚲', 'ぺだるを こいで すすむ', 'road'],
-      ['bus', 'ばす', '🚌', 'まちの みちで たくさんの ひとを のせる', 'road'],
-      ['fire-engine', 'しょうぼうしゃ', '🚒', 'みちを はしって かじの ひを けしに いく', 'help'],
-      ['ambulance', 'きゅうきゅうしゃ', '🚑', 'けがを した ひとを びょういんへ はこぶ', 'help'],
-    ],
-  },
-  {
-    id: 'colors', forms: [
-      'おなじ いろは どれ？', 'おなじ いろを さがそう。', 'これと おなじ いろは？',
-      '同じ色の選択肢を選びなさい。', '見本と一致する色はどれですか？', '提示された色と同一のものはどれでしょうか。',
-    ],
-    facts: [
-      ['red', 'あか', 'red', '', 'warm'],
-      ['blue', 'あお', 'blue', '', 'cool'],
-      ['yellow', 'きいろ', 'yellow', '', 'warm'],
-      ['green', 'みどり', 'green', '', 'cool'],
-      ['purple', 'むらさき', 'purple', '', 'cool'],
-      ['orange', 'おれんじ', 'orange', '', 'warm'],
-      ['pink', 'ぴんく', 'pink', '', 'warm'],
-    ],
-  },
-  {
-    id: 'shapes', forms: [
-      'おなじ かたちは どれ？', 'おなじ かたちを さがそう。', 'これと おなじ かたちは？',
-      '同じ形の選択肢を選びなさい。', '見本と一致する図形はどれですか？', '提示された図形と同一のものはどれでしょうか。',
-    ],
-    facts: [
-      ['circle', 'まる', '●', '', 'round'],
-      ['triangle', 'さんかく', '▲', '', 'corner'],
-      ['square', 'しかく', '■', '', 'corner'],
-      ['star', 'ほし', '★', '', 'point'],
-      ['heart', 'はーと', '♥', '', 'point'],
-      ['diamond', 'ひしがた', '◆', '', 'corner'],
-      ['oval', 'だえん', 'oval', '', 'round'],
-    ],
-  },
-  {
-    id: 'counting', forms: [
-      'りんごは いくつ？', 'りんごは なんこ ある？', 'りんごを かぞえよう。',
-      'りんごの個数はいくつですか？', '提示されたりんごの個数を選びなさい。', '表示された果実の総数を求めなさい。',
-    ],
-    facts: Array.from({ length: 7 }, (_, index) => {
-      const number = String(index + 1);
-      return ['apples-' + number, number, '', '', index < 3 ? 'low' : 'high'];
-    }),
-  },
-  {
-    id: 'routines', picture: '☀️', forms: [
-      '{clue}は どれ？', '{clue}。どれかな？', 'どれかな？ {clue}。',
-      '「{clue}」に当てはまる物はどれですか？', '次の説明に該当する物を選びなさい。{clue}。', '「{clue}」とはどの物を指すでしょうか。',
-    ],
-    facts: [
-      ['toothbrush', 'はぶらし', '🪥', 'はを みがく どうぐ', 'wash'],
-      ['umbrella', 'かさ', '☂️', 'あめの ひに さす もの', 'out'],
-      ['spoon', 'すぷーん', '🥄', 'すーぷを すくう どうぐ', 'home'],
-      ['towel', 'たおる', '▰', 'ぬれた からだを ふく もの', 'wash'],
-      ['shoes', 'くつ', '👟', 'そとへ いくとき あしに はく もの', 'out'],
-      ['ball', 'ぼーる', '⚽', 'けると ころがる まるい もの', 'out'],
-      ['clock', 'とけい', '🕒', 'いまの じかんが わかる もの', 'home'],
-    ],
-  },
-].map(({ facts, ...topic }, topicIndex) => ({
-  ...topic,
-  facts: facts.map(([id, label, icon, clue, family]) => ({ id, label, icon, clue, family, topic: topicIndex })),
-}));
+// Each relation describes a closed set of contrasts. A group pairs an answer
+// with the subjects for which it is true. Only answers in that relation can
+// be offered, so a missing fact elsewhere does not become a distractor.
+const animals = {
+  dog: ['いぬ', '🐕'], cat: ['ねこ', '🐈'], pig: ['ぶた', '🐖'], cow: ['うし', '🐄'],
+  duck: ['あひる', '🦆'], sheep: ['ひつじ', '🐑'], rooster: ['おんどり', '🐓'],
+  rabbit: ['うさぎ', '🐇'], owl: ['ふくろう', '🦉'], sparrow: ['すずめ', '🐦'],
+  swallow: ['つばめ', '🐦'], chicken: ['にわとり', '🐔'], snake: ['へび', '🐍'],
+  goldfish: ['きんぎょ', '🐟'], salmon: ['しゃけ', '🐟'], shark: ['さめ', '🦈'],
+  dolphin: ['いるか', '🐬'], octopus: ['たこ', '🐙'], whale: ['くじら', '🐋'],
+  carp: ['こい', '🐟'], mole: ['もぐら'], worm: ['みみず', '🪱'],
+  caterpillar: ['あおむし', '🐛'], tadpole: ['おたまじゃくし'],
+};
+const vehicles = {
+  train: ['でんしゃ', '🚃'], bullet: ['しんかんせん', '🚅'], freight: ['かもつれっしゃ', '🚃'],
+  plane: ['ひこうき', '✈️'], helicopter: ['へりこぷたー', '🚁'], balloon: ['ききゅう'],
+  sailboat: ['よっと', '⛵'], ferry: ['ふぇりー', '⛴️'], canoe: ['かぬー', '🛶'],
+  bicycle: ['じてんしゃ', '🚲'], bus: ['ばす', '🚌'], taxi: ['たくしー', '🚕'],
+  fire: ['しょうぼうしゃ', '🚒'], ambulance: ['きゅうきゅうしゃ', '🚑'],
+  truck: ['ごみしゅうしゅうしゃ', '🚛'], patrol: ['ぱとかー', '🚓'],
+};
+const foods = {
+  apple: ['りんご', '🍎'], banana: ['ばなな', '🍌'], peach: ['もも', '🍑'],
+  grapes: ['ぶどう', '🍇'], pear: ['なし', '🍐'], orange: ['みかん', '🍊'],
+  carrot: ['にんじん', '🥕'], cabbage: ['きゃべつ', '🥬'], broccoli: ['ぶろっこりー', '🥦'],
+  cucumber: ['きゅうり', '🥒'], onion: ['たまねぎ', '🧅'], radish: ['だいこん'],
+  milk: ['ぎゅうにゅう', '🥛'], tea: ['おちゃ', '🍵'], water: ['おみず', '💧'],
+  tomatoJuice: ['とまとじゅーす', '🥤'], soy: ['だいず', '🫘'], rice: ['ごはん', '🍚'],
+  potato: ['じゃがいも', '🥔'], corn: ['とうもろこし', '🌽'], tomato: ['とまと', '🍅'],
+};
+const shapes = [
+  ['circle', 'まる', '●', 0], ['triangle', 'さんかく', '▲', 3], ['square', 'せいほうけい', '■', 4],
+  ['oval', 'だえん', 'oval', 0], ['rectangle', 'ちょうほうけい', '▬', 4],
+  ['pentagon', 'ごかくけい', '⬟', 5], ['hexagon', 'ろっかくけい', '⬢', 6],
+  ['heart', 'はーと', '♥'], ['star', 'ほし', '★'],
+];
+const colors = [
+  ['red', 'あか'], ['blue', 'あお'], ['yellow', 'きいろ'], ['green', 'みどり'],
+  ['purple', 'むらさき'], ['orange', 'おれんじ'], ['pink', 'ぴんく'],
+];
 
-export const facts = topics.flatMap(topic => topic.facts);
-export const starter = topics[0].facts[0];
+const entities = (catalog, keys) => keys.split(' ').map(key => [key, ...catalog[key]]);
+const clues = rows => rows.map(([key, answer, icon, text]) => [[key, answer, icon], [[key, text]]]);
+const groups = (catalog, rows) => rows.map(([key, label, icon, members]) =>
+  [[key, label, icon], entities(catalog, members)]);
+const keyedClues = (catalog, rows) => rows.map(([key, text]) => [[key, ...catalog[key]], [[key, text]]]);
 
-export function distractorPool(fact) {
-  const sameTopic = topics[fact.topic].facts;
-  const index = sameTopic.indexOf(fact);
-  const rotated = [...sameTopic.slice(index + 1), ...sameTopic.slice(0, index)];
-  // Prefer a related subgroup, or a nearby number in a counting question.
-  const distance = other => fact.topic === 5 ? Math.abs(fact.label - other.label) : Number(fact.family !== other.family);
-  const related = rotated.sort((a, b) => distance(a) - distance(b)).slice(0, 5);
-  const crossTopic = [1, 2].map(offset => topics[(fact.topic + offset) % topics.length].facts[index]);
-  return [...related, ...crossTopic, fact];
-}
+export const relations = [
+  ['animals', 'call', '{subject} なくのは？', '♪', keyedClues(animals, [
+    ['dog', 'わんわん'], ['cat', 'にゃあにゃあ'], ['pig', 'ぶうぶう'], ['cow', 'もーもー'],
+    ['duck', 'があがあ'], ['sheep', 'めえめえ'], ['rooster', 'こけこっこー'],
+  ])],
+  ['animals', 'coat', '{subject}の せなかを おおうのは？', '🔍', groups(animals, [
+    ['fur', 'け', '', 'dog cat sheep rabbit'],
+    ['feathers', 'はね', '', 'owl sparrow swallow chicken duck'],
+    ['scales', 'うろこ', '', 'goldfish salmon snake carp'],
+  ])],
+  ['animals', 'move', '{subject}は どうやって すすむ？', '🐾', groups(animals, [
+    ['fly', 'つばさで とぶ', '', 'swallow owl sparrow'],
+    ['swim', 'ひれで およぐ', '', 'salmon goldfish dolphin whale'],
+    ['crawl', 'からだを くねらせて はう', '', 'snake worm'],
+  ])],
+  ['animals', 'home', '{subject}が くらす ところは？', '🔍', groups(animals, [
+    ['ocean', 'うみ', '🌊', 'octopus dolphin whale'],
+    ['soil', 'つちの なか', '🟫', 'mole worm'],
+    ['pond', 'いけ', '🪷', 'tadpole carp'],
+    ['leaf', 'はっぱの うえ', '🍃', 'caterpillar'],
+  ])],
+  ['objects', 'use', '{subject}とき つかうのは？', '🧺', clues([
+    ['brush', 'はぶらし', '🪥', 'はを みがく'], ['umbrella', 'かさ', '☂️', 'あめを よける'],
+    ['spoon', 'すぷーん', '🥄', 'すーぷを すくう'], ['towel', 'たおる', '▰', 'ぬれた からだを ふく'],
+    ['scissors', 'はさみ', '✂️', 'かみを ちょきちょき きる'],
+    ['clock', 'とけい', '🕒', 'いまの じかんを しらべる'],
+    ['broom', 'ほうき', '🧹', 'ゆかの ごみを はく'],
+    ['pencil', 'えんぴつ', '✏️', 'あとで けせる じを かく'],
+    ['glue', 'のり', '', 'かみと かみを はりあわせる'],
+    ['comb', 'くし', '', 'かみのけを とかす'],
+    ['flashlight', 'かいちゅうでんとう', '🔦', 'くらい みちを てらす'],
+    ['thermometer', 'たいおんけい', '🌡️', 'からだの あつさを はかる'],
+  ])],
+  ['objects', 'wear', '{subject}に つけるのは？', '🧺', clues([
+    ['hat', 'ぼうし', '🧢', 'あたまの てっぺん'], ['shoes', 'くつ', '👟', 'あし'],
+    ['gloves', 'てぶくろ', '🧤', 'て'], ['scarf', 'まふらー', '🧣', 'くび'],
+    ['belt', 'べると', '', 'こし'], ['glasses', 'めがね', '👓', 'めの まえ'],
+  ])],
+  ['routines', 'next', '{subject}。なにを する？', '☀️', clues([
+    ['cold', 'うわぎを きる', '🧥', 'そとに でるよ。そとは さむいよ'],
+    ['dirt', 'てを あらう', '🧼', 'つちで てが よごれたよ'],
+    ['plant', 'みずを あげる', '🪴', 'うえきばちの つちが からからだよ'],
+    ['thirsty', 'みずを のむ', '💧', 'のどが かわいたよ'],
+    ['yawn', 'ふとんで ねる', '🛏️', 'よるだよ。ねむく なったよ'],
+    ['toy', 'おもちゃを かたづける', '🧸', 'あそび おわったよ。ゆかに おもちゃが あるよ'],
+    ['tissue', 'てぃっしゅを つかう', '🧻', 'はなみずが でてきたよ'],
+    ['paper', 'なまえを かく', '✏️', 'おえかきしたよ。だれの えか わかるように したいよ'],
+  ])],
+  ['places', 'place', '{subject}のは どこ？', '📍', clues([
+    ['library', 'としょかん', '📚', 'おうちで よむ ほんを かりる'],
+    ['station', 'えき', '🚉', 'でんしゃに のる'], ['pool', 'ぷーる', '🏊', 'みずぎで およぐ'],
+    ['park', 'こうえん', '🛝', 'そとの すべりだいで あそぶ'],
+    ['bakery', 'ぱんやさん', '🥖', 'やきたての ぱんを かう'],
+    ['zoo', 'どうぶつえん', '🦒', 'きりんや ぞうを みに いく'],
+    ['dentist', 'はいしゃさん', '🦷', 'むしばを みてもらう'],
+    ['cinema', 'えいがかん', '🎥', 'おおきな がめんで えいがを みる'],
+  ])],
+  ['food', 'kind', '{subject}は どの なかま？', '🍴', groups(foods, [
+    ['fruit', 'くだもの', '🍑', 'apple banana peach grapes pear orange'],
+    ['vegetable', 'やさい', '🥦', 'carrot cabbage broccoli cucumber onion radish'],
+    ['drink', 'のみもの', '🥛', 'milk tea water tomatoJuice'],
+  ])],
+  ['food', 'ingredient', '{subject}を つくる もとに なるのは？', '🍴', keyedClues(foods, [
+    ['rice', 'おにぎり'], ['milk', 'ばたー'], ['soy', 'とうふ'], ['potato', 'ぽてとちっぷす'],
+    ['corn', 'ぽっぷこーん'], ['tomato', 'とまとじゅーす'],
+  ])],
+  ['vehicles', 'travel', '{subject}は どこを すすむ？', '🛞', groups(vehicles, [
+    ['rail', 'せんろ', '🛤️', 'train bullet freight'],
+    ['air', 'そら', '☁️', 'plane helicopter balloon'],
+    ['water', 'みずの うえ', '🌊', 'sailboat ferry canoe'],
+    ['road', 'みち', '', 'bicycle bus taxi'],
+  ])],
+  ['vehicles', 'job', '{subject}のは どれ？', '🛞', keyedClues(vehicles, [
+    ['fire', 'かじの ひを けしに いく'], ['ambulance', 'けがを した ひとを びょういんへ はこぶ'],
+    ['bus', 'ばすていで ひとを のせる'], ['truck', 'まちの ごみを あつめて はこぶ'],
+    ['patrol', 'おまわりさんが のって まちを みまわる'], ['bicycle', 'ぺだるを こいで すすむ'],
+  ])],
+  ['shapes', 'shape', 'おなじ かたちは どれ？', '', shapes.map(([id, label, icon]) =>
+    [[id, label, icon, 'shape'], [[id, label, icon]]])],
+  ['shapes', 'corners', 'かどは いくつ？', '', [0, 3, 4, 5, 6].map(count =>
+    [[String(count), String(count), '', 'number'], shapes.filter(shape => shape[3] === count)])],
+  ['colors', 'color', 'おなじ いろは どれ？', '', colors.map(([id, label]) =>
+    [[id, label, id, 'swatch'], [[id, label, id]]])],
+];
+
+// Extra contrasts for the language model and its factual checker. Distinct
+// wrong options are chosen from the same verified contrast as the right one.
+export const modelRelations = [
+  ...relations,
+  ['animals', 'legs', '{subject}の あしは なんぼん？', '🐾', [
+    [['two', '2', '', 'number'], entities(animals, 'chicken owl duck sparrow')],
+    [['four', '4', '', 'number'], entities(animals, 'dog cat cow rabbit')],
+    [['six', '6', '', 'number'], [['ant', 'あり'], ['bee', 'はち'], ['beetle', 'かぶとむし']]],
+    [['eight', '8', '', 'number'], [['spider', 'くも']]],
+  ]],
+  ['objects', 'sound', '{subject}のは どれ？', '🎵', clues([
+    ['drum', 'たいこ', '🥁', 'たたいて どんどん なる'],
+    ['whistle', 'ふえ', '', 'ふくと ぴーっと なる'],
+    ['bell', 'すず', '🔔', 'ふると りんりん なる'],
+    ['piano', 'ぴあの', '🎹', 'しろと くろの けんばんを おす'],
+  ])],
+  ['routines', 'care', '{subject}。どうする？', '☀️', clues([
+    ['shoes', 'くつを ぬぐ', '👟', 'そとから かえって げんかんに いるよ'],
+    ['light', 'でんきを つける', '💡', 'おへやが くらくて よく みえないよ'],
+    ['pat', 'やさしく なでる', '🐈', 'ねこを びっくり させずに さわりたいよ'],
+    ['socks', 'せんたくに だす', '🧺', 'くつしたが どろんこだよ'],
+    ['wet', 'たおるで ふく', '', 'おふろから あがって からだが ぬれて いるよ'],
+  ])],
+  ['places', 'buy', '{subject}を かうのは どこ？', '📍', clues([
+    ['flower', 'はなやさん', '💐', 'はなたば'], ['book', 'ほんやさん', '📚', 'あたらしい えほん'],
+    ['fish', 'さかなやさん', '🐟', 'おさしみ'], ['shoe', 'くつやさん', '👟', 'うんどうぐつ'],
+    ['cake', 'けーきやさん', '🍰', 'おたんじょうびの けーき'],
+  ])],
+  ['food', 'part', '{subject}のは どれ？', '🍴', clues([
+    ['banana', 'ばなな', '🍌', 'かわを むくと なかが しろくて ながい'],
+    ['strawberry', 'いちご', '🍓', 'そとに ちいさな つぶが たくさん ある'],
+    ['melon', 'すいか', '🍉', 'みどりの しまの なかが あかい'],
+    ['grape', 'ぶどう', '🍇', 'ちいさな まるい つぶが ふさに なって いる'],
+    ['chestnut', 'くり', '🌰', 'とげとげの いがに はいって いる'],
+  ])],
+  ['vehicles', 'parts', '{subject}が あるのは どれ？', '🛞', clues([
+    ['bucket', 'しょべるかー', '🚜', 'つちを すくう ばけっと'],
+    ['ladder', 'はしごしゃ', '🚒', 'たかい ところに のぼる ながい はしご'],
+    ['sail', 'よっと', '⛵', 'かぜを うける ほ'],
+    ['rotor', 'へりこぷたー', '🚁', 'うえで ぐるぐる まわる はね'],
+  ])],
+];
