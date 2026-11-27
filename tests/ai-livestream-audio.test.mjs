@@ -96,11 +96,20 @@ test('continuous speech splits with bounded overlap and a quiet frame can finish
   assert.deepEqual(segments[1].audio.slice(-2560), segments[2].audio.slice(0, 2560));
 
   const { segments: pausedAtCap } = record(SAMPLE_RATE, 8, [[0.2, 5.8], [6.1, 6.8]]);
-  assert.deepEqual(pausedAtCap.map(bounds), [[0, 5.96, 6], [5.9, 6.96, 7.4]]);
+  assert.deepEqual(pausedAtCap.map(bounds), [[0, 5.96, 6], [5.84, 6.96, 7.4]]);
   const { segments: stoppedAtCap } = record(SAMPLE_RATE, 8, [[0, 6]]);
   assert.deepEqual(stoppedAtCap.map(bounds), [[0, 6, 6]], 'Overlap alone never triggers a second job');
   const { segments: shortRemainder } = record(SAMPLE_RATE, 8, [[0, 6.04]]);
   assert.deepEqual(shortRemainder.map(bounds), [[0, 6, 6], [5.84, 6.2, 6.64]]);
+});
+
+test('a pause spanning the cap preserves a short syllable within the same utterance', () => {
+  const { pcm, segments } = record(SAMPLE_RATE, 8, [[0, 5.8], [6.08, 6.18]]);
+  assert.deepEqual(segments.map(bounds), [[0, 5.96, 6], [5.84, 6.34, 6.784]]);
+  assert.deepEqual(segments[1].audio, pcm.slice(5.84 * SAMPLE_RATE, 6.34 * SAMPLE_RATE));
+
+  const { segments: afterEndpoint } = record(SAMPLE_RATE, 8, [[0, 5.8], [6.42, 6.52]]);
+  assert.deepEqual(afterEndpoint.map(bounds), [[0, 5.96, 6]]);
 });
 
 test('silence, DC, broadband noise and transients do not submit PCM', () => {
@@ -144,22 +153,22 @@ for (const smoothing of [0.6, 0.9]) {
 
 test('steady mains hum is silent by itself and preserves endpoints in mixed speech', () => {
   const duration = 13;
-  for (const frequency of [120, 100]) {
+  for (const frequency of [50, 60, 100, 120]) {
     const hum = synthesize(SAMPLE_RATE, duration, [], 0.0003);
-    const speech = synthesize(SAMPLE_RATE, duration, [[2.2, 2.8, 0.025], [8.4, 8.8, 0.025]]);
+    const speech = synthesize(SAMPLE_RATE, duration, [[2, 2.8, 0.025], [8.4, 8.8, 0.025]]);
     for (let i = 0; i < hum.length; i++) {
-      const phase = i / SAMPLE_RATE * 2 * Math.PI * frequency;
+      const phase = i / SAMPLE_RATE * 2 * Math.PI * frequency + 0.73;
       hum[i] += 0.006 * Math.sin(phase) + 0.0018 * Math.sin(2 * phase);
       speech[i] += hum[i];
     }
     assert.deepEqual(recordPcm(SAMPLE_RATE, hum).map(bounds), [], `${frequency} Hz hum alone`);
     assert.deepEqual(recordPcm(SAMPLE_RATE, speech).map(bounds), [
-      [2, 2.96, 3.4], [8.2, 8.96, 9.4],
+      [1.8, 2.96, 3.4], [8.2, 8.96, 9.4],
     ], `Speech over ${frequency} Hz hum`);
   }
 
   // These pitches also repeat at a mains period but have no mains fundamental.
-  for (const frequency of [200, 300, 360]) {
+  for (const frequency of [150, 180, 200, 300, 360]) {
     const pcm = new Float32Array(2 * SAMPLE_RATE);
     for (let i = 0.4 * SAMPLE_RATE; i < 0.8 * SAMPLE_RATE; i++) {
       pcm[i] = 0.006 * Math.sin(i / SAMPLE_RATE * 2 * Math.PI * frequency);

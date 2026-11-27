@@ -9,15 +9,47 @@ const MIN_VOICED_FRAMES = MIN_SEGMENT_SAMPLES / FRAME;
 const PITCH_STEP = 4;
 const MIN_PITCH_LAG = SAMPLE_RATE / 400;
 const MAX_PITCH_LAG = SAMPLE_RATE / 80;
+
+function cycle(length, harmonic = 1) {
+  return {
+    sine: Float32Array.from({ length }, (_, i) => Math.sin(2 * Math.PI * harmonic * i / length)),
+    cosine: Float32Array.from({ length }, (_, i) => Math.cos(2 * Math.PI * harmonic * i / length)),
+  };
+}
+
 const HUM_PERIODS = [100, 120].map(hz => {
   const lag = Math.round(SAMPLE_RATE / hz);
-  const length = Math.round(lag / PITCH_STEP);
-  return {
-    lag,
-    sine: Float32Array.from({ length }, (_, i) => Math.sin(2 * Math.PI * i / length)),
-    cosine: Float32Array.from({ length }, (_, i) => Math.cos(2 * Math.PI * i / length)),
-  };
+  return { lag, ...cycle(Math.round(lag / PITCH_STEP)) };
 });
+const LOW_HUM_CYCLES = [50, 60].map(hz => {
+  const length = Math.round(SAMPLE_RATE / (hz * PITCH_STEP));
+  return { fundamental: cycle(length), harmonic: cycle(length, 2) };
+});
+
+function hasLowMainsHum(frame) {
+  // At 50–60 Hz a frame holds only one complete cycle. Require the fundamental
+  // and its second harmonic to explain nearly all of that cycle's AC energy.
+  for (const { fundamental, harmonic } of LOW_HUM_CYCLES) {
+    const length = fundamental.sine.length;
+    let sum = 0, energy = 0;
+    let inPhase = 0, quadrature = 0, harmonicInPhase = 0, harmonicQuadrature = 0;
+    for (let i = 0; i < length; i++) {
+      const value = frame[i * PITCH_STEP];
+      sum += value;
+      energy += value * value;
+      inPhase += value * fundamental.cosine[i];
+      quadrature += value * fundamental.sine[i];
+      harmonicInPhase += value * harmonic.cosine[i];
+      harmonicQuadrature += value * harmonic.sine[i];
+    }
+    const scaledEnergy = length * energy - sum ** 2;
+    const fundamentalEnergy = 2 * (inPhase ** 2 + quadrature ** 2);
+    const harmonicEnergy = 2 * (harmonicInPhase ** 2 + harmonicQuadrature ** 2);
+    if (fundamentalEnergy > 0.5 * scaledEnergy &&
+        fundamentalEnergy + harmonicEnergy > 0.975 * scaledEnergy) return true;
+  }
+  return false;
+}
 
 function hasMainsHum(frame, power) {
   for (const { lag, sine, cosine } of HUM_PERIODS) {
@@ -37,7 +69,7 @@ function hasMainsHum(frame, power) {
     }
     if (inPhase ** 2 + quadrature ** 2 > 0.25 * sine.length ** 2 * power) return true;
   }
-  return false;
+  return hasLowMainsHum(frame);
 }
 
 function hasPeriodicSignal(frame, mean) {
@@ -192,9 +224,9 @@ class SpeechSegment extends AudioWorkletProcessor {
     }
     this.voicedFrames = 0;
     this.onset = 0;
-    // At the cap, split at the quiet tail if present. During sustained speech,
-    // carry a short overlap across the cut so decoding can recover cut syllables.
-    this.continuation = quiet < TAIL;
+    // A forced split keeps the utterance open until its normal endpoint. Carry
+    // a bounded overlap and let lastVoice point behind it if the pause is older.
+    this.continuation = quiet < END_PAUSE;
     if (this.continuation) {
       this.buffer.copyWithin(0, this.length - TAIL, this.length);
       this.length = TAIL;
