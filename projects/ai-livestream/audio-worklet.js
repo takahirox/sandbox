@@ -9,6 +9,36 @@ const MIN_VOICED_FRAMES = MIN_SEGMENT_SAMPLES / FRAME;
 const PITCH_STEP = 4;
 const MIN_PITCH_LAG = SAMPLE_RATE / 400;
 const MAX_PITCH_LAG = SAMPLE_RATE / 80;
+const HUM_PERIODS = [100, 120].map(hz => {
+  const lag = Math.round(SAMPLE_RATE / hz);
+  const length = Math.round(lag / PITCH_STEP);
+  return {
+    lag,
+    sine: Float32Array.from({ length }, (_, i) => Math.sin(2 * Math.PI * i / length)),
+    cosine: Float32Array.from({ length }, (_, i) => Math.cos(2 * Math.PI * i / length)),
+  };
+});
+
+function hasMainsHum(frame, power) {
+  for (const { lag, sine, cosine } of HUM_PERIODS) {
+    const count = FRAME - lag;
+    let periodError = 0;
+    for (let i = 0; i < count; i += PITCH_STEP) {
+      periodError += (frame[i] - frame[i + lag]) ** 2;
+    }
+    if (periodError >= 0.025 * Math.ceil(count / PITCH_STEP) * power) continue;
+
+    // Higher pitches can also repeat at a mains period. Project one cycle
+    // onto the fundamental and require it to account for about half the power.
+    let inPhase = 0, quadrature = 0;
+    for (let i = 0; i < sine.length; i++) {
+      inPhase += frame[i * PITCH_STEP] * cosine[i];
+      quadrature += frame[i * PITCH_STEP] * sine[i];
+    }
+    if (inPhase ** 2 + quadrature ** 2 > 0.25 * sine.length ** 2 * power) return true;
+  }
+  return false;
+}
 
 function hasPeriodicSignal(frame, mean) {
   // Use the same starting samples for each lag and skip three of every four
@@ -47,6 +77,8 @@ class SpeechSegment extends AudioWorkletProcessor {
     this.buffer = new Float32Array(MAX_SEGMENT_SAMPLES);
     this.length = 0;
     this.noisePower = 0.001 ** 2;
+    this.previousNoisePower = 0;
+    this.olderNoisePower = 0;
     this.onset = 0;
     this.voicedFrames = 0;
     this.lastVoice = 0;
@@ -95,20 +127,31 @@ class SpeechSegment extends AudioWorkletProcessor {
     // Remove DC from the power estimate. Adjacent samples in broadband noise
     // differ much more than samples in the lower-frequency part of speech.
     const mean = sum / FRAME;
-    const power = energy / FRAME - mean ** 2;
+    const power = Math.max(0, energy / FRAME - mean ** 2);
     const threshold = this.length
       ? Math.max(0.002 ** 2, 1.7 ** 2 * this.noisePower)
       : Math.max(0.003 ** 2, 2.5 ** 2 * this.noisePower);
-    const voiced = power >= threshold && differenceEnergy < 1.5 * FRAME * power;
+    const broadband = differenceEnergy >= 1.5 * FRAME * power;
+    const voiced = power >= threshold && !broadband && !hasMainsHum(this.frame, power);
     // Smooth background noise can clear the voice gate. Learn its level when
     // the frame lacks pitch repetition, without imposing a pitch gate on speech.
     const rough = differenceEnergy >= 0.5 * FRAME * power;
-    if (!voiced || rough || !hasPeriodicSignal(this.frame, mean)) {
+    const learnNoise = !voiced || rough || !hasPeriodicSignal(this.frame, mean);
+    const candidate = learnNoise ? power : this.noisePower;
+    // A 20 ms broadband burst can span two frames. Require three consecutive
+    // elevated noise observations before broadband noise can raise the floor.
+    const sustained = broadband
+      ? Math.min(candidate, this.previousNoisePower, this.olderNoisePower)
+      : candidate;
+    this.olderNoisePower = this.previousNoisePower;
+    this.previousNoisePower = candidate;
+    if (learnNoise) {
       // During speech, raise the floor more slowly for smooth frames so a
       // speech frame without a clear pitch has less effect on the endpoint.
       const rise = voiced && (rough || !this.length) ? 0.15 : 0.05;
-      this.noisePower += (Math.max(0, power) - this.noisePower) *
-        (power > this.noisePower ? rise : 0.01);
+      this.noisePower += candidate > this.noisePower
+        ? Math.max(0, sustained - this.noisePower) * rise
+        : (candidate - this.noisePower) * 0.01;
     }
 
     if (!this.length) {

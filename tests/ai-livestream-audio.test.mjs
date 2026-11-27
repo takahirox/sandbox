@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   SAMPLE_RATE, MIN_SEGMENT_SAMPLES, MAX_SEGMENT_SAMPLES,
@@ -138,6 +139,62 @@ for (const smoothing of [0.6, 0.9]) {
     assert.ok(first.submitted >= 3 && first.submitted < 3.2);
   });
 }
+
+test('steady mains hum is silent by itself and preserves endpoints in mixed speech', () => {
+  const duration = 13;
+  for (const frequency of [120, 100]) {
+    const hum = synthesize(SAMPLE_RATE, duration, [], 0.0003);
+    const speech = synthesize(SAMPLE_RATE, duration, [[2.2, 2.8, 0.025], [8.4, 8.8, 0.025]]);
+    for (let i = 0; i < hum.length; i++) {
+      const phase = i / SAMPLE_RATE * 2 * Math.PI * frequency;
+      hum[i] += 0.006 * Math.sin(phase) + 0.0018 * Math.sin(2 * phase);
+      speech[i] += hum[i];
+    }
+    assert.deepEqual(recordPcm(SAMPLE_RATE, hum).map(bounds), [], `${frequency} Hz hum alone`);
+    assert.deepEqual(recordPcm(SAMPLE_RATE, speech).map(bounds), [
+      [2, 2.96, 3.4], [8.2, 8.96, 9.4],
+    ], `Speech over ${frequency} Hz hum`);
+  }
+
+  // These pitches also repeat at a mains period but have no mains fundamental.
+  for (const frequency of [200, 300, 360]) {
+    const pcm = new Float32Array(2 * SAMPLE_RATE);
+    for (let i = 0.4 * SAMPLE_RATE; i < 0.8 * SAMPLE_RATE; i++) {
+      pcm[i] = 0.006 * Math.sin(i / SAMPLE_RATE * 2 * Math.PI * frequency);
+    }
+    assert.deepEqual(
+      recordPcm(SAMPLE_RATE, pcm).map(bounds), [[0.2, 0.96, 1.4]], `${frequency} Hz voice proxy`,
+    );
+  }
+});
+
+test('one broadband transient does not mask the following quiet speech', () => {
+  const wav = readFileSync(new URL('./fixtures/ai-livestream/en-quiet.wav', import.meta.url));
+  let speech;
+  for (let offset = 12; offset + 8 <= wav.length;) {
+    const size = wav.readUInt32LE(offset + 4);
+    if (wav.toString('ascii', offset, offset + 4) === 'data') {
+      speech = Float32Array.from({ length: size / 2 }, (_, i) =>
+        wav.readInt16LE(offset + 8 + 2 * i));
+      break;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  assert.ok(speech);
+  const rms = Math.sqrt(speech.reduce((sum, sample) => sum + sample ** 2, 0) / speech.length);
+  const quiet = new Float32Array(6 * SAMPLE_RATE);
+  quiet.set(speech.map(sample => sample * 0.02 / rms), 0.7 * SAMPLE_RATE);
+  const baseline = recordPcm(SAMPLE_RATE, quiet).map(bounds);
+  assert.equal(baseline.length, 1);
+  assert.ok(baseline[0][2] <= 4.2, 'Quiet speech submits promptly after the recording ends');
+
+  const burst = synthesize(SAMPLE_RATE, 0.02, [], 0.7);
+  for (const start of [0.5, 0.51]) {
+    const pcm = quiet.slice();
+    pcm.set(burst, start * SAMPLE_RATE);
+    assert.deepEqual(recordPcm(SAMPLE_RATE, pcm).map(bounds), baseline, `Burst at ${start} s`);
+  }
+});
 
 test('a stalled UI holds only one transferred segment and capture resumes on acknowledgement', () => {
   const messages = [];

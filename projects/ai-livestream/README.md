@@ -109,11 +109,15 @@ has a 90-second limit. A slow connection can require another attempt.
 ## Utterance endpointing
 
 The AudioWorklet uses 20 ms frames, DC-corrected energy and adjacent-sample
-differences to reject broadband noise. To learn smoother background noise, it
-checks frames that pass the energy and smoothness gates for repetition in the
-80–400 Hz pitch range. Frames without a normalized correlation of at least 0.6
-can raise the noise floor. The floor rises more slowly during speech for these
-smooth frames to limit the effect of syllables without a clear pitch.
+differences to reject broadband noise. A broadband frame can raise the noise
+floor only up to the lowest noise observation across the last three frames,
+so a 20 ms burst that straddles two frames cannot mask the next utterance.
+Among smooth frames, nearly exact repetition at 100 or 120 Hz with at least
+half the power at the fundamental identifies mains hum. Other smooth frames
+that pass the energy gate are checked for repetition in the 80–400 Hz pitch range.
+Frames without a normalized correlation of at least 0.6 can raise the noise
+floor. The floor rises more slowly during speech for these smooth frames to
+limit the effect of syllables without a clear pitch.
 
 Onset requires three consecutive voiced frames (60 ms) above roughly 2.5 times
 the noise RMS, with a minimum RMS of 0.003 in normalized PCM. During speech the
@@ -158,13 +162,17 @@ The audio tests also replay 20 seconds of steady filtered noise at RMS 0.006
 with two filter strengths. Noise alone submits no PCM. When the stronger
 filtered noise starts during speech, the submission delay falls from 5.4 s
 with the previous detector to 760 ms. The quiet-speech fixture reaches
-recognition in under two seconds.
+recognition in under two seconds. At RMS 0.0044, seeded 100 and 120 Hz hum
+alone submits no PCM, and both utterances mixed into the hum submit 600 ms
+after they end. A 20 ms broadband burst before the quiet English WAV yields
+the same segment boundaries and submission timing as the clean recording,
+including when the burst spans two frames.
 
 Across these patterns, the idle Worker would run ASR seven times before the
 change and eight times after it. Delivered PCM fell from 42 s to 22 s. On an
 arm64 Mac (Mac16,5, Node 26.12.1), a capture-only pass over 5,040 s of replayed 16 kHz input
-took 727 ms of process CPU time (712 ms wall time) for fixed windows and 354 ms
-(339 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
+took 739 ms of process CPU time (726 ms wall time) for fixed windows and 368 ms
+(353 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
 PCM buffers. The transfer, pending slot and active job each hold at most 375 KiB
 of PCM, excluding model and browser internals.
 
