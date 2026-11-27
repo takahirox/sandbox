@@ -129,3 +129,46 @@ export const relations = [
   ['colors', 'color', 'おなじ いろは どれ？', '', colors.map(([id, label]) =>
     [[id, label, id, 'swatch'], [[id, label, id]]])],
 ];
+
+// Extra contrasts for the language model and its factual checker. Distinct
+// wrong options are chosen from the same verified contrast as the right one.
+export const modelRelations = [
+  ...relations,
+  ['animals', 'legs', '{subject}の あしは なんぼん？', '🐾', [
+    [['two', '2', '', 'number'], entities(animals, 'chicken owl duck sparrow')],
+    [['four', '4', '', 'number'], entities(animals, 'dog cat cow rabbit')],
+    [['six', '6', '', 'number'], [['ant', 'あり'], ['bee', 'はち'], ['beetle', 'かぶとむし']]],
+    [['eight', '8', '', 'number'], [['spider', 'くも']]],
+  ]],
+  ['objects', 'sound', '{subject}のは どれ？', '🎵', clues([
+    ['drum', 'たいこ', '🥁', 'たたいて どんどん なる'],
+    ['whistle', 'ふえ', '', 'ふくと ぴーっと なる'],
+    ['bell', 'すず', '🔔', 'ふると りんりん なる'],
+    ['piano', 'ぴあの', '🎹', 'しろと くろの けんばんを おす'],
+  ])],
+  ['routines', 'care', '{subject}。どうする？', '☀️', clues([
+    ['shoes', 'くつを ぬぐ', '👟', 'そとから かえって げんかんに いるよ'],
+    ['light', 'でんきを つける', '💡', 'おへやが くらくて よく みえないよ'],
+    ['pat', 'やさしく なでる', '🐈', 'ねこを びっくり させずに さわりたいよ'],
+    ['socks', 'せんたくに だす', '🧺', 'くつしたが どろんこだよ'],
+    ['wet', 'たおるで ふく', '', 'おふろから あがって からだが ぬれて いるよ'],
+  ])],
+  ['places', 'buy', '{subject}を かうのは どこ？', '📍', clues([
+    ['flower', 'はなやさん', '💐', 'はなたば'], ['book', 'ほんやさん', '📚', 'あたらしい えほん'],
+    ['fish', 'さかなやさん', '🐟', 'おさしみ'], ['shoe', 'くつやさん', '👟', 'うんどうぐつ'],
+    ['cake', 'けーきやさん', '🍰', 'おたんじょうびの けーき'],
+  ])],
+  ['food', 'part', '{subject}のは どれ？', '🍴', clues([
+    ['banana', 'ばなな', '🍌', 'かわを むくと なかが しろくて ながい'],
+    ['strawberry', 'いちご', '🍓', 'そとに ちいさな つぶが たくさん ある'],
+    ['melon', 'すいか', '🍉', 'みどりの しまの なかが あかい'],
+    ['grape', 'ぶどう', '🍇', 'ちいさな まるい つぶが ふさに なって いる'],
+    ['chestnut', 'くり', '🌰', 'とげとげの いがに はいって いる'],
+  ])],
+  ['vehicles', 'parts', '{subject}が あるのは どれ？', '🛞', clues([
+    ['bucket', 'しょべるかー', '🚜', 'つちを すくう ばけっと'],
+    ['ladder', 'はしごしゃ', '🚒', 'たかい ところに のぼる ながい はしご'],
+    ['sail', 'よっと', '⛵', 'かぜを うける ほ'],
+    ['rotor', 'へりこぷたー', '🚁', 'うえで ぐるぐる まわる はね'],
+  ])],
+];

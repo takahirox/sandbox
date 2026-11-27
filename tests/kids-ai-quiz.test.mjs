@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { relations } from '../projects/kids-ai-quiz/content.mjs';
 import { createSession, historyKey, historyLimit, makeRound, puzzles } from '../projects/kids-ai-quiz/quiz.mjs';
-import { memoryStorage, seeded } from '../scripts/kids-ai-quiz/evaluate.mjs';
+import { memoryStorage, seeded, heldOut } from '../scripts/kids-ai-quiz/dataset.mjs';
+import { attempts, generateRound } from '../projects/kids-ai-quiz/generate.mjs';
+import { loadModel, modelURL } from '../projects/kids-ai-quiz/model.mjs';
+import { verifyRound } from '../projects/kids-ai-quiz/verify.mjs';
 
 const hiragana = /^[ぁ-ゖー0-9 、。！？]+$/u;
 const byKey = new Map(puzzles.map(puzzle => [puzzle.key, puzzle]));
@@ -138,4 +142,59 @@ test('solver errors, invalid proposals and inaccessible or damaged storage still
   }
   const session = createSession({ random: seeded(69), solve: () => ({ key: 'fabricated' }) });
   assert.ok(byKey.has(session.next().key));
+});
+
+test('semantic validation rejects malformed, ambiguous and incorrect proposals', () => {
+  const fact = ['animals', '-', 'あひるの あしは なんぼん？', '2', '6', '4'];
+  const addition = ['counting', 'みかん 2 + 3', 'あわせて なんこ？', '5', '4', '3'];
+  const position = ['positions', 'はな はっぱ みかん', 'まんなかは どれ？', '@2', '@1', '@3'];
+  const sequence = ['sequence', '3 4 5', 'おなじ ぶんずつ ふえるよ。つぎの かずは？', '6', '8', '3'];
+  assert.equal(verifyRound(['weather', ...addition.slice(1)]).key, 'add:2:3');
+  const rows = [[fact, '2'], [addition, '5'], [position, 'はっぱ'], [sequence, '6']];
+  for (const [row, expected] of rows) {
+    const item = verifyRound(row, seeded(68));
+    assert.equal(item.choices[item.correct].label, expected);
+    assert.equal(item.source, 'model');
+    assert.equal(verifyRound(row.slice(1)), null);
+    assert.equal(verifyRound([...row.slice(0, 4), row[3], row[5]]), null);
+    assert.equal(verifyRound([...row.slice(0, 3), row[4], row[3], row[5]]), null);
+  }
+  assert.equal(verifyRound(['counting', 'りんご 2 - 3', 'ばつの ものを とると、いくつ のこる？', '1', '2', '3']), null);
+  assert.equal(verifyRound(['positions', 'はな はな みかん', 'まんなかは どれ？', '@2', '@1', '@3']), null);
+  assert.equal(verifyRound(['sequence', '3 4 7', 'おなじ ぶんずつ ふえるよ。つぎの かずは？', '8', '6', '5']), null);
+  assert.equal(verifyRound([...fact.slice(0, 4), '9', '4']), null);
+  assert.equal(verifyRound([fact[0], fact[1], '<script>？', ...fact.slice(3)]), null);
+
+  let count = 0;
+  const model = { generate: () => (++count === 1 ? [] : fact) };
+  const recovered = generateRound(model, [], seeded(68));
+  assert.equal(recovered.attempts, 2);
+  assert.equal(recovered.invalid, 1);
+  assert.equal(recovered.item.key, 'legs:duck');
+  assert.deepEqual(generateRound(model, [recovered.item], seeded(68)), { item: null, attempts, invalid: 0 });
+  assert.deepEqual(generateRound({ generate: () => [] }, [], seeded(68)), { item: null, attempts, invalid: attempts });
+});
+
+test('the shipped weights generate varied verified questions including held-out problem instances', async () => {
+  assert.throws(() => loadModel(new ArrayBuffer(12)), /Unrecognized/);
+  const model = loadModel((await readFile(modelURL)).buffer);
+  assert.deepEqual(model.generate(seeded(68)), model.generate(seeded(68)));
+  const recent = [], keys = new Set(), topicsSeen = new Set();
+  let unseenTeacherInstance = false;
+  for (let i = 0; i < 288; i++) {
+    const { item } = generateRound(model, recent, seeded(68 + 997 * i));
+    assert.ok(item, 'exhausted attempts at round ' + i);
+    assert.equal(item.source, 'model');
+    assert.ok(item.correct >= 0 && item.correct < 3);
+    assert.equal(new Set(item.choices.map(choice => choice.label)).size, 3);
+    assert.ok(item.choices.every(choice => hiragana.test(choice.label)));
+    assert.ok(!recent.slice(-6).some(previous => previous.key === item.key));
+    keys.add(item.key);
+    topicsSeen.add(item.topic);
+    unseenTeacherInstance ||= heldOut(item.key);
+    recent.push(item);
+  }
+  assert.ok(keys.size >= 180);
+  assert.ok(topicsSeen.size >= 11);
+  assert.ok(unseenTeacherInstance);
 });

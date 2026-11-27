@@ -1,4 +1,5 @@
 import { createSession } from './quiz.mjs';
+import { modelSession } from './session.mjs';
 
 const [question, clue, illustration, answers, speak, next, feedback] =
   ['question', 'clue', 'illustration', 'answers', 'speak', 'next', 'feedback'].map(id => document.getElementById(id));
@@ -12,17 +13,41 @@ if (!capture) {
     // Play with in-memory history when browser storage is blocked.
   }
 }
-const session = capture ? null : createSession({ storage });
+const model = capture ? null : modelSession({ storage });
+let fallback;
 
-// A stable, inert gallery cover. Normal visits generate their first round.
-let item = session?.next() ?? {
+// A stable, inert gallery cover. The first normal round comes from the worker.
+let item = capture ? {
   topic: 'animals',
   question: 'わんわん なくのは？',
   clue: { icon: '♪' },
   choices: [{ label: 'ねこ', icon: '🐈' }, { label: 'いぬ', icon: '🐕' }, { label: 'ぶた', icon: '🐖' }],
   correct: 1,
-};
+} : null;
 let solved = false;
+let prepared;
+let revision = 0;
+
+async function showRound(focus) {
+  const current = ++revision;
+  next.disabled = true;
+  speak.disabled = true;
+  for (const choice of answers.children) choice.disabled = true;
+  const generated = await (prepared ?? model.generate());
+  if (current !== revision) return;
+  if (generated) item = generated;
+  else {
+    fallback ??= createSession({ storage });
+    item = { ...fallback.next(), source: 'fallback' };
+  }
+  model.remember(item);
+  feedback.textContent = '';
+  render();
+  next.disabled = false;
+  speak.disabled = false;
+  if (focus) question.focus({ preventScroll: true });
+  prepared = model.generate();
+}
 
 function art({ icon, kind, label }) {
   const node = document.createElement('span');
@@ -56,13 +81,18 @@ function render() {
   solved = false;
   game.removeAttribute('data-solved');
   game.dataset.topic = item.topic;
+  if (item.source) game.dataset.source = item.source;
   question.textContent = item.question;
   clue.textContent = item.clue.spoken ?? '';
-  const { icon, count, split } = item.clue;
+  const { icon, icons, values, count, split } = item.clue;
   if (split) {
     const plus = document.createElement('span');
     plus.textContent = '＋';
     illustration.replaceChildren(counters({ icon, count: split }), plus, counters({ icon, count: count - split }));
+  } else if (icons) {
+    illustration.replaceChildren(...icons.map(icon => art({ icon })));
+  } else if (values) {
+    illustration.replaceChildren(...values.map(label => art({ label, kind: 'number' })));
   } else {
     illustration.replaceChildren(count ? counters(item.clue) : art(item.clue));
   }
@@ -100,16 +130,11 @@ function answer(index, button) {
 }
 
 if (capture) game.inert = true;
-else {
-  next.disabled = false;
-  next.addEventListener('click', () => {
-    stopTalking();
-    item = session.next();
-    feedback.textContent = '';
-    render();
-    question.focus({ preventScroll: true });
-  });
-}
+else next.addEventListener('click', () => {
+  stopTalking();
+  feedback.textContent = '';
+  void showRound(true);
+});
 
 // Use on-device Japanese voices when the browser offers one.
 const speech = capture ? null : window.speechSynthesis;
@@ -130,7 +155,7 @@ if (speech?.getVoices && typeof SpeechSynthesisUtterance === 'function') {
   updateVoice();
   speech.addEventListener('voiceschanged', updateVoice);
   speak.addEventListener('click', () => {
-    if (!voice) return;
+    if (!voice || !item || speak.disabled) return;
     stopTalking();
     const description = item.clue.spoken ? item.clue.spoken + '。' : '';
     const labels = item.choices.map(choice => choice.label).join('、');
@@ -153,5 +178,18 @@ if (speech?.getVoices && typeof SpeechSynthesisUtterance === 'function') {
   });
 }
 
-window.addEventListener('pagehide', stopTalking);
-render();
+if (capture) render();
+else {
+  window.addEventListener('pagehide', () => {
+    stopTalking();
+    revision++;
+    prepared = undefined;
+    model.stop();
+  });
+  window.addEventListener('pageshow', event => {
+    if (!event.persisted) return;
+    if (next.disabled) void showRound(Boolean(item));
+    else prepared = model.generate();
+  });
+  void showRound(false);
+}

@@ -3,8 +3,9 @@ import { resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
-import { createSession, historyKey } from '../projects/kids-ai-quiz/quiz.mjs';
-import { memoryStorage, seeded } from '../scripts/kids-ai-quiz/evaluate.mjs';
+import { createSession } from '../projects/kids-ai-quiz/quiz.mjs';
+import { seeded } from '../scripts/kids-ai-quiz/dataset.mjs';
+import { modelHistoryKey } from '../projects/kids-ai-quiz/session.mjs';
 
 const project = '/sandbox/projects/kids-ai-quiz/';
 const choices = page => page.locator('#answers button');
@@ -24,7 +25,7 @@ after(async () => {
   await preview?.close();
 });
 
-async function open(t, { seed = 68, options, init, handleQuiz } = {}) {
+async function open(t, { seed = 68, options, init, handleModel, wait = true } = {}) {
   const context = await browser.newContext({ reducedMotion: 'reduce', ...options });
   const page = await context.newPage();
   const paths = [], unexpected = [];
@@ -34,7 +35,7 @@ async function open(t, { seed = 68, options, init, handleQuiz } = {}) {
     const url = new URL(request.url());
     if (url.origin === preview.origin && url.pathname.startsWith(project) && request.method() === 'GET') {
       paths.push(url.pathname);
-      if (handleQuiz && url.pathname.endsWith('/quiz.mjs')) return handleQuiz(route);
+      if (handleModel && url.pathname.endsWith('/quiz-gru-v1.bin')) return handleModel(route);
       return route.continue();
     }
     unexpected.push(request.method() + ' ' + url.origin);
@@ -54,7 +55,7 @@ async function open(t, { seed = 68, options, init, handleQuiz } = {}) {
   }, seed);
   if (init) await page.addInitScript(init);
   await page.goto(preview.origin + project);
-  await choices(page).first().waitFor();
+  if (wait) await choices(page).first().waitFor();
   return { context, page, paths };
 }
 
@@ -101,26 +102,61 @@ test('gallery keeps a stable inert view with no storage, speech or round-generat
     assert.deepEqual(await page.evaluate(() => window.calls), []);
     if (!i) await page.reload();
   }
-  assert.ok(!paths.some(path => /wasm|worker/.test(path)));
+  assert.ok(!paths.some(path => /wasm|worker|\.bin$/.test(path)));
 });
 
-test('fresh visits and repeated reloads start with varied, enabled rounds', async t => {
+test('real workers generate the opener on fresh visits and avoid repeats on seeded reloads', async t => {
   const openers = new Set();
   for (const seed of [68, 73, 79, 82, 88]) {
-    const { page } = await open(t, { seed });
-    const storage = memoryStorage();
+    const { page, paths } = await open(t, { seed });
     for (let load = 0; load < 3; load++) {
-      const expected = createSession({ random: seeded(seed), storage }).next();
-      await assertRound(page, expected);
-      const keys = JSON.parse(await page.evaluate(key => localStorage.getItem(key), historyKey));
-      assert.deepEqual(keys, JSON.parse(storage.getItem()));
+      assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+      const keys = await page.evaluate(key => JSON.parse(localStorage.getItem(key)).map(row => row[0]), modelHistoryKey);
       assert.equal(new Set(keys).size, load + 1);
-      assert.equal(await page.locator('#answers button:enabled').count(), 3);
-      if (load === 0) openers.add(expected.key);
+      assert.equal(await choices(page).count(), 3);
+      await assertFits(page);
+      if (load === 0) openers.add(keys[0]);
       if (load < 2) await page.reload();
+      await choices(page).first().waitFor();
     }
+    assert.ok(paths.some(path => path.endsWith('/model-worker.mjs')));
+    assert.ok(paths.some(path => path.endsWith('/quiz-gru-v1.bin')));
   }
   assert.ok(openers.size >= 4);
+});
+
+test('real model rounds stay playable on repeated mobile advances', async t => {
+  const { page, context } = await open(t, {
+    seed: 74, options: { viewport: { width: 360, height: 640 }, isMobile: true, hasTouch: true },
+  });
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  for (let i = 0; i < 12; i++) {
+    assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+    assert.equal(await choices(page).count(), 3);
+    assert.equal(new Set(await labels(page).allTextContents()).size, 3);
+    await assertFits(page);
+    if (i === 0) {
+      // Exactly one displayed choice is marked correct, while wrong answers
+      // remain retryable and the winning choice moves focus to Next.
+      let successes = 0;
+      for (const button of await choices(page).all()) {
+        await button.tap();
+        if (await status(page).textContent() === 'せいかい！') {
+          successes++;
+          break;
+        }
+        assert.equal(await status(page).textContent(), 'もういちど えらんでね。');
+      }
+      assert.equal(successes, 1);
+      assert.equal(await page.locator('#answers button:disabled').count(), 3);
+      assert.equal(await next(page).evaluate(node => node === document.activeElement), true);
+    }
+    if (i === 5) await page.setViewportSize({ width: 740, height: 360 });
+    await next(page).tap();
+    await page.locator('#answers button:enabled').first().waitFor();
+    assert.equal(await heading(page).evaluate(node => node === document.activeElement), true);
+  }
 });
 
 test('touch and keyboard stay responsive on phone viewports with no workers, WASM, storage or speech', async t => {
@@ -183,28 +219,68 @@ test('touch and keyboard stay responsive on phone viewports with no workers, WAS
   assert.equal(topics.size, 10);
   assert.deepEqual(picturedTasks, new Set(['addition', 'subtraction', 'comparison']));
   assert.equal(await status(page).textContent(), '');
-  assert.ok(!paths.some(path => /wasm|worker/.test(path)));
+  assert.ok(!paths.some(path => /wasm|worker|\.bin$/.test(path)));
 });
 
-test('a rejected solver proposal falls back on the same click, with no pending round to cancel', async t => {
+test('unreadable model weights fall back and the next visit can recover', async t => {
+  let corrupt = true;
   const { page } = await open(t, {
-    handleQuiz: async route => {
-      const response = await route.fetch();
-      const source = (await response.text()).replace('function choosePuzzle(candidates, recentGroups, random) {',
-        'function choosePuzzle(candidates, recentGroups, random) { return null;');
-      await route.fulfill({ response, body: source });
+    handleModel: route => corrupt ? route.fulfill({ body: 'truncated weights' }) : route.continue(),
+  });
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+  const first = await heading(page).textContent();
+  await next(page).click();
+  await page.locator('#answers button:enabled').first().waitFor();
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+  assert.notEqual(await heading(page).textContent(), first);
+  corrupt = false;
+  await page.reload();
+  await page.locator('#answers button:enabled').first().waitFor();
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+});
+
+test('a stalled model fetch times out into playable fallback', async t => {
+  let held;
+  const { page } = await open(t, {
+    handleModel: route => { held = route; },
+  });
+  await held.abort().catch(() => {});
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+  const first = await heading(page).textContent();
+  await next(page).click();
+  await page.locator('#answers button:enabled').first().waitFor();
+  assert.notEqual(await heading(page).textContent(), first);
+});
+
+test('pagehide cancels an in-flight opener and page restore starts a fresh worker', async t => {
+  let held, notify;
+  const started = new Promise(resolve => { notify = resolve; });
+  const { page } = await open(t, {
+    wait: false,
+    init: () => {
+      const RealWorker = Worker;
+      window.terminated = 0;
+      window.Worker = class extends RealWorker {
+        terminate() { window.terminated++; super.terminate(); }
+      };
+    },
+    handleModel: route => {
+      if (held) return route.continue();
+      held = route;
+      notify();
     },
   });
-  const { next: fallback } = createSession({ random: seeded(68), solve: () => null });
-  await assertRound(page, fallback());
-  for (let i = 0; i < 4; i++) {
-    const enabled = await next(page).evaluate(node => {
-      node.click();
-      return document.querySelectorAll('#answers button:enabled').length;
-    });
-    assert.equal(enabled, 3);
-    await assertRound(page, fallback());
-  }
+  await started;
+  assert.equal(await choices(page).count(), 0);
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  await held.abort().catch(() => {});
+  await page.locator('#answers button:enabled').first().waitFor();
+  assert.equal(await page.evaluate(() => window.terminated), 1);
+  assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+  assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).length, modelHistoryKey), 1);
 });
 
 test('read-aloud tracks the current round and cancels immediately on advance and pagehide', async t => {
@@ -230,16 +306,22 @@ test('read-aloud tracks the current round and cancels immediately on advance and
     speechSynthesis.dispatchEvent(new Event('voiceschanged'));
   });
   assert.deepEqual(await page.evaluate(() => window.spoken), []);
-  const session = createSession({ random: seeded(68) });
-  const rounds = [session.next(), session.next()];
+  const visibleRound = async () => ({
+    question: await heading(page).textContent(),
+    clue: await page.locator('#clue').textContent(),
+    choices: await labels(page).allTextContents(),
+  });
+  const first = await visibleRound();
   await speak.click();
   await next(page).click();
+  await page.locator('#answers button:enabled').first().waitFor();
+  const second = await visibleRound();
   assert.equal(await page.evaluate(() => window.cancelled), 1);
   await speak.click();
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
   assert.equal(await page.evaluate(() => window.cancelled), 2);
-  assert.deepEqual(await page.evaluate(() => window.spoken), rounds.map(round => ({
-    text: [round.question, round.clue.spoken && round.clue.spoken + '。', round.choices.map(choice => choice.label).join('、')]
+  assert.deepEqual(await page.evaluate(() => window.spoken), [first, second].map(round => ({
+    text: [round.question, round.clue && round.clue + '。', round.choices.join('、')]
       .filter(Boolean).join(' '),
     lang: 'ja-JP',
     local: true,

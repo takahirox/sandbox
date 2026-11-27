@@ -271,3 +271,17 @@ h1:focus { outline: none; }
   .answer { transition: none; }
   .answer[data-result="correct"] .art { animation: none; }
 }
+
+[data-topic="positions"] .illustration, [data-topic="sequence"] .illustration {
+  width: 180px;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 6px;
+}
+:is([data-topic="positions"], [data-topic="sequence"]) .illustration > .art {
+  font-size: clamp(1.6rem, 5vw, 2.3rem);
+}
+
+@media (max-height: 450px) and (min-width: 560px) {
+  :is([data-topic="positions"], [data-topic="sequence"]) .illustration { flex-basis: 180px; }
+}
