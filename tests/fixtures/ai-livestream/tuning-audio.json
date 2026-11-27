@@ -1,6 +1,0 @@
-[
-  {"file":"ja-shirt.wav","language":"ja","text":"ベランダに洗濯物を干してたら、シャツだけ風で裏返っちゃった。","topic":"シャツ|洗濯|裏返","confirmation":true},
-  {"file":"ja-bath.wav","language":"ja","text":"駅前の銭湯に久しぶりに行った。風呂上がりの牛乳が冷たかった。","topic":"銭湯|風呂|牛乳","confirmation":true},
-  {"file":"ja-carp.wav","language":"ja","text":"公園で池の鯉に餌をあげた。水がばしゃばしゃって跳ねた。","topic":"鯉|餌|池|水","confirmation":true},
-  {"file":"ja-sharpener.wav","language":"ja","text":"昨日買った手回しの鉛筆削り、思ったより静かで気に入った。","topic":"鉛筆|静か|手回し","confirmation":true}
-]
