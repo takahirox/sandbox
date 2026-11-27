@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import vm from 'node:vm';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
 import { replayTuningMode, scoreTuningMode } from '../scripts/score_livestream_tuning.mjs';
@@ -17,8 +16,9 @@ import {
   inspectComment,
   messagesFor,
   meaningfulSpeech,
-  MAX_COMMENT_LENGTH, WINDOW_SAMPLES,
+  MAX_COMMENT_LENGTH,
 } from '../projects/ai-livestream/config.mjs';
+import { MAX_SEGMENT_SAMPLES } from '../projects/ai-livestream/audio-format.mjs';
 import { localPipeline } from '../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
 import { VirtualAudience, speechInterest, AUDIENCE_LIMITS } from '../projects/ai-livestream/audience.mjs';
@@ -105,8 +105,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   const env = { backends: { onnx: { wasm: {} } } };
   const signals = [];
   const infer = await createInference(pipeline, env, () => {}, { random: () => 0, onEngagement: value => signals.push(value) });
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.1);
-  assert.deepEqual(await infer(new Float32Array(WINDOW_SAMPLES), 'ja', 0), {
+  const audio = new Float32Array(MAX_SEGMENT_SAMPLES).fill(0.1);
+  assert.deepEqual(await infer(new Float32Array(MAX_SEGMENT_SAMPLES), 'ja', 0), {
     comment: '',
   });
   assert.equal(calls.length, 0, 'Silence never reaches either model');
@@ -368,7 +368,7 @@ const materialReferences = [
 ];
 
 test('queued replies are withheld for camera questions and retained for material references in either language', async () => {
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.02);
+  const audio = new Float32Array(MAX_SEGMENT_SAMPLES).fill(0.02);
   const cases = [
     ...visualRequests.flatMap(fixture => fixture.requests.map(nextSpeech => ({ ...fixture, nextSpeech, withhold: true }))),
     ...materialReferences.map(fixture => ({ ...fixture, nextSpeech: fixture.reference, withhold: false })),
@@ -532,48 +532,6 @@ test('recorded bilingual model replies remain eligible when they echo speech', a
   }
 });
 
-test('audio worklet bounds, downsampling, voice gating, and transfer', async () => {
-  const source = await readFile(
-    new URL('../projects/ai-livestream/audio-worklet.js', import.meta.url),
-    'utf8',
-  );
-  for (const rate of [16000, 48000]) {
-    let Processor;
-    const sent = [];
-    const sandbox = {
-      sampleRate: rate,
-      Float32Array,
-      AudioWorkletProcessor: class {
-        constructor() {
-          this.port = {
-            postMessage: (audio, transfer) => { if (audio instanceof Float32Array) sent.push({ audio, transfer }); },
-          };
-        }
-      },
-      registerProcessor: (_, ctor) => {
-        Processor = ctor;
-      },
-    };
-    vm.runInNewContext(source, sandbox);
-    const processor = new Processor();
-    for (let i = 0; i < (rate * 12) / 128; i++)
-      processor.process([[new Float32Array(128)]]);
-    assert.equal(sent.length, 0, 'No speech from silent microphone');
-    for (let i = 0; i < (rate * 12) / 128; i++)
-      processor.process([[new Float32Array(128).fill(0.1)]]);
-    assert.equal(sent.length, 1, 'At most one audio message waits for the UI');
-    processor.port.onmessage({ data: 'ack' });
-    for (let i = 0; i < (rate * 6) / 128; i++)
-      processor.process([[new Float32Array(128).fill(0.1)]]);
-    assert.equal(sent.length, 2, 'Acknowledgement permits the next window');
-    for (const { audio, transfer } of sent) {
-      assert.equal(audio.length, WINDOW_SAMPLES);
-      assert.equal(transfer[0], audio.buffer);
-    }
-    assert.ok(processor.position < WINDOW_SAMPLES);
-  }
-});
-
 test(
   'browser lifecycle, privacy, layout and failure recovery with fake media only',
   { timeout: 90000 },
@@ -653,6 +611,9 @@ test(
           } else if (data.type === 'audio') {
             fixture.audio = data;
             fixture.jobs = (fixture.jobs || 0) + 1;
+            fixture.lastSubmission = performance.now();
+          } else if (data.type === 'superseded') {
+            fixture.superseded = (fixture.superseded || 0) + 1;
           }
         }
         terminate() {
@@ -687,6 +648,9 @@ test(
         constructor() {
           this.port = { postMessage() {}, close() {} };
           fixture.node = this;
+          fixture.segment = peak => this.port.onmessage({
+            data: { type: 'segment', audio: new Float32Array(6400).fill(peak) },
+          });
         }
         connect() {}
         disconnect() {
@@ -835,7 +799,7 @@ test(
     // Three minutes of recognized, interesting speech with every chat reply skipped.
     for (let i = 0; i < 30; i++) {
       await page.evaluate(() => {
-        fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
+        fixture.segment(0.1);
         fixture.workers[0].onmessage({ data: { type: 'engagement', interest: 0.9 } });
         fixture.workers[0].onmessage({ data: { type: 'result', comment: '' } });
       });
@@ -865,24 +829,36 @@ test(
       1,
     );
     await page.evaluate(() => {
-      fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
-      fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) });
+      fixture.segment(0.1);
+      fixture.segment(0.1);
     });
-    assert.equal(await page.evaluate(() => fixture.audio.type), 'audio', 'Six-second window jitter does not discard fresh audio');
+    assert.equal(await page.evaluate(() => fixture.audio.type), 'audio', 'Idle worker receives short audio immediately');
     assert.equal(await page.evaluate(() => fixture.audio.language), 'en');
-    await page.evaluate(() => fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.2) }));
+    await page.evaluate(() => fixture.segment(0.2));
     assert.equal(
       await page.evaluate(() => fixture.jobs),
       1,
       'Busy Worker keeps only one active inference',
     );
+    assert.equal(await page.evaluate(() => fixture.superseded), 1);
     await page.clock.runFor(30000);
     await page.evaluate(() => fixture.workers[0].onmessage({
       data: { type: 'result', comment: 'Nice!' },
     }));
     assert.match(await page.locator('.comment').innerText(), /Nice!$/);
-    assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Only the latest pending window is submitted');
+    assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Only the latest pending segment is submitted');
     assert.ok(Math.abs(await page.evaluate(() => fixture.audio.audio[0]) - 0.2) < 0.001);
+    const previousSubmission = await page.evaluate(() => {
+      fixture.workers[0].onmessage({ data: { type: 'result', comment: '' } });
+      fixture.segment(0.3);
+      fixture.segment(0.4);
+      return fixture.lastSubmission;
+    });
+    assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Rapid endpoints share one cooldown slot');
+    await page.clock.runFor(2100);
+    assert.equal(await page.evaluate(() => fixture.jobs), 3, 'The slot drains even when speech stops');
+    assert.equal(await page.evaluate(() => Math.abs(fixture.audio.audio[0] - 0.4) < 0.001), true);
+    assert.ok(await page.evaluate(() => fixture.lastSubmission) - previousSubmission >= 2000);
     for (let i = 0; i < 65; i++)
       await page.evaluate(
         (i) =>
@@ -896,6 +872,13 @@ test(
     await assertMinimalUI();
     await page.locator('#like').click();
     await page.locator('#subscribe').click();
+    await page.clock.runFor(2000);
+    const jobsBeforeEnd = await page.evaluate(() => {
+      fixture.segment(0.5);
+      fixture.workers[0].onmessage({ data: { type: 'result', comment: '' } });
+      fixture.segment(0.6);
+      return fixture.jobs;
+    });
     await page.locator('#start').click();
     assert.equal(
       await page.evaluate(() =>
@@ -930,6 +913,7 @@ test(
     );
     await assertStoppedUI();
     await page.clock.runFor(60000);
+    assert.equal(await page.evaluate(() => fixture.jobs), jobsBeforeEnd, 'End cancels the pending cooldown');
     assert.equal(await page.locator('#like-count').innerText(), '1');
     assert.equal(await page.locator('#subscriber-count').textContent(), '1');
     assert.equal(await page.locator('#like').getAttribute('aria-pressed'), 'true');
@@ -955,7 +939,7 @@ test(
     await page.evaluate(() => { fixture.mode = ''; });
     await page.locator('#start').click();
     await page.waitForFunction(() => document.getElementById('status').textContent === '' && !document.getElementById('viewer-count').hidden);
-    await page.evaluate(() => fixture.node.port.onmessage({ data: new Float32Array(96000).fill(0.1) }));
+    await page.evaluate(() => fixture.segment(0.1));
     await page.clock.runFor(90000);
     assert.match(await page.locator('#status').innerText(), /taking too long/);
     await assertStoppedUI();
@@ -1087,6 +1071,7 @@ test(
     let reply = 'おお！';
     let reject = false;
     let fail = false;
+    let expectCapturedAudio = true;
     page.on('console', message => {
       if (message.text().startsWith('fixture-model ')) models.push(message.text().slice(14));
     });
@@ -1153,7 +1138,11 @@ test(
         body: `
       export const env = { backends: { onnx: { wasm: {} } } };
       export async function pipeline(task) {
-        if (task === 'automatic-speech-recognition') return async () => ({text: ${JSON.stringify(speech)}});
+        if (task === 'automatic-speech-recognition') return async audio => {
+          if (${expectCapturedAudio} && (audio.length < 10000 || audio.length > 14000))
+            throw Error('Expected one short 16 kHz segment');
+          return {text: ${JSON.stringify(speech)}};
+        };
         const generate = async () => [{generated_text: 'コーヒー、いい香りですね！'}];
         generate.tokenizer = {apply_chat_template: () => 'fixture prompt'};
         return generate;
@@ -1174,7 +1163,27 @@ test(
         window.fakeStream = await getMedia(options);
         return fakeStream;
       };
+      // Use the real audio graph with deterministic PCM in place of the fake
+      // device's platform-dependent tone. The app still owns both device tracks.
+      AudioContext.prototype.createMediaStreamSource = function () {
+        const input = this.createGain();
+        input.gain.value = 0;
+        const voice = this.createOscillator();
+        voice.frequency.value = 200;
+        voice.connect(input);
+        voice.start();
+        window.speak = () => {
+          const start = this.currentTime + 0.25;
+          input.gain.setValueAtTime(0.08, start);
+          input.gain.setValueAtTime(0, start + 0.4);
+        };
+        return input;
+      };
     });
+    const speak = async () => {
+      await page.waitForFunction(() => window.speak && document.getElementById('status').textContent === '');
+      await page.evaluate(() => window.speak());
+    };
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
     assert.deepEqual(
       remote,
@@ -1182,7 +1191,8 @@ test(
       'Inert preview does not import even the fixture runtime',
     );
     await page.locator('#start').click();
-    await page.locator('.comment').waitFor({ timeout: 15000 });
+    await speak();
+    await page.locator('.comment').waitFor({ timeout: 5000 });
     assert.match(await page.locator('.comment').innerText(), /おお!$/);
     assert.deepEqual(models, [TUNED_MODEL_ID]);
     assert.deepEqual(overlayRequests, ['livestream.gguf']);
@@ -1201,6 +1211,7 @@ test(
     reject = true;
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline&debug=1');
     await page.locator('#start').click();
+    await speak();
     await page.waitForFunction(() => {
       const text = document.getElementById('debug').textContent;
       return text && JSON.parse(text).counts.format === 1;
@@ -1220,20 +1231,22 @@ test(
     reply = 'すごい！';
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline');
     await page.locator('#start').click();
+    await speak();
     await page.locator('.comment').waitFor({ timeout: 15000 });
     assert.match(await page.locator('.comment').innerText(), /すごい!$/);
     await page.locator('#start').click();
     fail = true;
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
     await page.locator('#start').click();
+    await speak();
     await page.waitForFunction(() => document.getElementById('status').textContent.includes('trouble keeping up'),
       null, { timeout: 15000 });
     assert.equal(await page.evaluate(() => fakeStream.getTracks().every(track => track.readyState === 'ended')), true);
     assert.equal(await page.locator('#camera').evaluate(video => video.srcObject), null);
 
-    fail = reject = false;
-    // Give each real Worker one synthetic window to exercise both model routes
-    // without waiting for a device capture window for every case.
+    fail = reject = expectCapturedAudio = false;
+    // Give each real Worker one synthetic segment to exercise both model routes
+    // without waiting for capture for every case.
     const cases = [
       ...cameraColorQuestions,
       ...visualRequests.flatMap(({ language, requests, claim, speech, question }) => [
@@ -1263,7 +1276,7 @@ test(
             };
             worker.onerror = event => { worker.terminate(); reject(Error(event.message)); };
             worker.postMessage({ type: 'init', model, debug: true });
-          }), { model, language, samples: WINDOW_SAMPLES });
+          }), { model, language, samples: MAX_SEGMENT_SAMPLES });
         assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model}: ${speech}`);
         assert.ok(events.includes(withhold ? 'visual' : 'output_accepted'), speech);
       }
@@ -1383,7 +1396,7 @@ test('slow inference releases a short reaction after recognizing a newer window'
   assert.ok(reasons.includes('awaiting_context'));
 });
 
-test('held replies wait at most two windows and respect expiry and language changes', async t => {
+test('held replies wait at most two segments and respect expiry and language changes', async t => {
   for (const outcome of ['different_speech', 'expired', 'language_changed']) {
     await t.test(outcome, async () => {
       let speech = 'I brewed fresh coffee.', reply = 'I see!';
@@ -1407,7 +1420,7 @@ test('held replies wait at most two windows and respect expiry and language chan
         clock: () => time, isSuperseded: () => superseded,
         onDiagnostic: reason => reasons.push(reason),
       });
-      const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
+      const audio = new Float32Array(MAX_SEGMENT_SAMPLES).fill(0.03);
       assert.equal((await infer(audio, 'en')).comment, '');
       time = 40000; superseded = false;
       speech = 'The coffee aroma is sweeter now.';
@@ -1415,7 +1428,7 @@ test('held replies wait at most two windows and respect expiry and language chan
       await asrStarted.promise;
       superseded = true;
       validating.resolve({ text: speech });
-      assert.equal((await pending).comment, '', 'No publication while a newer voiced window awaits recognition');
+      assert.equal((await pending).comment, '', 'No publication while a newer voiced segment awaits recognition');
       assert.equal(generations, 1, 'One held candidate; no extra inference while awaiting context');
       assert.equal(reasons.filter(reason => reason === 'awaiting_context').length, 2);
       assert.ok(!reasons.includes('output_accepted'));
@@ -1431,20 +1444,25 @@ test('held replies wait at most two windows and respect expiry and language chan
   }
 });
 
-test('continuous six-second audio windows do not starve replies when ASR exceeds the capture interval', async t => {
+test('variable-length segments do not starve replies during slow ASR and generation', async t => {
   for (const asrMs of [2000, 7000]) {
     await t.test(`${asrMs}ms ASR and 30000ms generation`, async () => {
-      let time = 0, nextCapture = 6000, superseded = false, generations = 0, recognitions = 0;
-      let pending = { text: 'I brewed coffee with a ceramic dripper.' }, speech;
+      const intervals = [2200, 4800, 3400, 6000];
+      const samples = [4800, 48000, 16000, MAX_SEGMENT_SAMPLES];
+      let time = 0, nextCapture = intervals[0], captures = 0;
+      let superseded = false, generations = 0, recognitions = 0;
+      let pending = { text: 'I brewed coffee with a ceramic dripper.', audio: new Float32Array(6400).fill(0.03) };
+      let speech;
       const accepted = [], reasons = [];
       const advance = ms => {
         const end = time + ms;
         while (nextCapture <= end) {
-          // Match the UI's single replaceable pending window; audio keeps arriving
-          // during both generation and every validation, rather than draining ASR.
-          pending = { text: `I brewed coffee with roast number ${nextCapture / 6000}.` };
+          // Match the UI's single replaceable slot as speech keeps arriving
+          // during generation and validation.
+          pending = { text: `I brewed coffee with roast number ${++captures}.`,
+            audio: new Float32Array(samples[captures % samples.length]).fill(0.03) };
           superseded = true;
-          nextCapture += 6000;
+          nextCapture += intervals[captures % intervals.length];
         }
         time = end;
       };
@@ -1465,10 +1483,10 @@ test('continuous six-second audio windows do not starve replies when ASR exceeds
         clock: () => time, isSuperseded: () => superseded,
         onDiagnostic: reason => reasons.push(reason),
       });
-      const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
       while (time < 180000) {
         if (!pending) advance(nextCapture - time);
-        speech = pending.text;
+        const { text, audio } = pending;
+        speech = text;
         pending = null;
         superseded = false;
         const result = await infer(audio, 'en');

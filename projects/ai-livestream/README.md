@@ -42,26 +42,23 @@ has a 90-second limit. A slow connection can require another attempt.
   devices, import the AI runtime, download weights, or run inference. Gallery
   screenshots render the same inert illustration and empty chat.
 - Only explicit Go live requests camera and mic. The video element is locally muted.
-  An AudioWorklet averages microphone samples to mono 16 kHz with a fixed six-second
-  window (96,000 float samples). Windows with under 350 ms of sufficiently loud
-  audio are dropped; a second energy gate runs before recognition. Acknowledgements
-  allow at most one audio message to wait on the UI thread, even if it stalls.
+  Once models are ready, an AudioWorklet converts microphone samples to mono
+  16 kHz PCM. It closes a voiced segment after 600 ms of quiet and caps continuous
+  segments at six seconds. Acknowledgements allow at most one audio message to
+  wait on the UI thread. See [the capture comparison](#utterance-endpointing).
 - One dedicated module Worker runs ASR followed by language generation. There is
-  one job at a time and one replaceable latest audio window while busy; no growing
-  queue. Six-second windows use a 5.5-second submission guard (allowing scheduling jitter), with an eight-second
-  minimum between comment opportunities, at most 96
-  transcription tokens and 64 generated tokens. Audio arriving while loading
-  is discarded; busy audio replaces the pending window. This bounds resources and
-  prioritizes recent speech over backlog. There are no random opportunity skips or
-  viewer-dependent inference rates. A first meaningful window can generate immediately;
-  six-second windows typically yield one opportunity every twelve seconds.
+  one job at a time and one replaceable latest segment. The first segment goes
+  through immediately. A two-second minimum between ASR job starts limits rapid
+  pauses, with a timer to submit the latest pending audio once the Worker and
+  cooldown are clear. Comment opportunities remain at least eight seconds apart,
+  with at most 96 transcription tokens and 64 generated tokens.
   If newer audio arrives during inference, the Worker can hold one reply for
-  up to two recognition windows within the original 90-second deadline. It
-  clears held replies on silence or failed recognition and discards them on a
-  language change or a request to observe the camera. End cancels pending work.
+  up to two recognition segments within the original 90-second deadline.
+  Silence or failed recognition clears held replies. A language change or a
+  request to observe the camera also discards them. End cancels pending work.
 - Transcription is supplied as quoted context to Qwen, which generates the actual
   comment; there is no canned comment roulette. Reasoning mode is disabled. A
-  rolling prompt context uses at most 400 characters from three speech windows
+  rolling prompt context uses at most 400 characters from three speech segments
   for 24 seconds and resets on language changes. Four viewer voices rotate between
   questions, casual reactions, preferences and noticing changes. Sampling uses
   temperature 0.7, top-p 0.9, repetition penalty 1.15 and frequency/presence
@@ -109,6 +106,64 @@ has a 90-second limit. A slow connection can require another attempt.
   Worker (including in-flight inference/downloads), closes AudioContext and stops
   every media track. Late permission responses are stopped immediately.
 
+## Utterance endpointing
+
+The AudioWorklet uses 20 ms frames, DC-corrected energy and adjacent-sample
+differences to reject broadband noise. A noise floor estimated from rejected
+frames raises the thresholds in a noisy room. Onset requires three consecutive
+voiced frames (60 ms) above roughly 2.5 times the noise RMS, with a minimum RMS
+of 0.003 in normalized PCM. During speech the gate drops to 1.7 times the noise
+RMS, with a minimum of 0.002. An utterance needs at least 120 ms of voiced
+frames. It starts with up to 200 ms of pre-roll and keeps 160 ms of trailing PCM
+after a 600 ms pause. At the six-second cap it splits at the quiet tail when
+available, or carries 160 ms of overlap into the next segment. A continuation
+needs fresh voiced audio before it can be submitted.
+
+WebRTC VAD supports 20 ms frames at 16 kHz and uses a sub-band classifier.
+Kaldi's decoder endpoint rules include a 500 ms pause with high recognition
+confidence and a 1000 ms pause with weaker confidence.
+[WebRTC frame format](https://webrtc.googlesource.com/src/webrtc/%2B/f54860e9ef0b68e182a01edc994626d21961bc4b/common_audio/vad/include/webrtc_vad.h),
+[WebRTC classifier](https://webrtc.googlesource.com/src/%2B/d3cf0476b4c7923b6c0b8d25ce85769f6686b794/webrtc/common_audio/vad/vad_core.c),
+[Kaldi endpoint rules](https://kaldi-asr.org/doc/online-endpoint_8h_source.html).
+
+The worklet uses 600 ms without a running decoder, which preserves the 380 ms
+internal pause in the fixture. Energy-based detection
+has a small CPU and memory footprint. Music, other speakers, and loud tonal
+backgrounds can still trigger it, and speech close to the noise floor can be
+missed. Shorter pauses would respond sooner at the cost of more splits and calls.
+
+From the repository root, run the comparison against the pre-#66 Git revision
+(`dbf8bde`). The replay assumes an idle ASR Worker and reports submission time
+at the end of the render quantum. All times are in seconds. Each entry lists
+the PCM interval, submission time, and delay since the last voiced input
+in that segment. A zero delay during continuous speech marks a cut in speech.
+
+```sh
+node tests/fixtures/ai-livestream/capture.mjs --compare
+```
+
+| Synthetic input | Fixed windows | Utterance endpointing | Calls and PCM delivered, old → new |
+| --- | --- | --- | --- |
+| Short voice at 0.40–0.54 | No submission | 0.20–0.70 at 1.144 (+0.604) | 0 calls / 0 s → 1 / 0.50 s |
+| Voice at 0.80–1.42 and 1.80–2.36 | 0–6 at 6 (+3.64) | 0.60–2.52 at 2.96 (+0.60) | 1 / 6 s → 1 / 1.92 s |
+| Voice across the old boundary at 5.52–6.44, then 7.70–8.60 and 10–11 | 0–6 at 6 (+0), 6–12 at 12 (+1.00) | 5.32–6.60 at 7.04, 7.50–8.76 at 9.20, 9.80–11.16 at 11.60 (+0.60 each) | 2 / 12 s → 3 / 3.90 s |
+| Continuous voice at 0.40–15.40 | 0–6 at 6 (+0), 6–12 at 12 (+0), 12–18 at 18 (+2.60) | 0.20–6.20 at 6.20 (+0), 6.04–12.04 at 12.04 (+0), 11.88–15.56 at 16 (+0.60) | 3 / 18 s → 3 / 15.68 s |
+| Seeded broadband noise at 0–6.40 | 0–6 at 6 | No submission | 1 / 6 s → 0 / 0 s |
+
+Across these patterns, the idle Worker would run ASR seven times before the
+change and eight times after it. Delivered PCM fell from 42 s to 22 s. On an
+arm64 Mac (Mac16,5, Node 24.22.3), a capture-only pass over 5,040 s of replayed 16 kHz input
+took 698 ms of process CPU time (687 ms wall time) for fixed windows and 326 ms
+(312 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
+PCM buffers. The transfer, pending slot and active job each hold at most 375 KiB
+of PCM, excluding model and browser internals.
+
+The pinned Transformers.js Whisper feature extractor pads short inputs,
+so delivered PCM duration alone cannot predict ASR cost.
+These measurements cover synthetic capture and submission timing. Transcription
+accuracy and phone performance were unmeasured.
+[Transformers.js Whisper feature extractor](https://github.com/huggingface/transformers.js/blob/3.8.1/src/models/whisper/feature_extraction_whisper.js).
+
 ## Pinned dependencies and licenses
 
 | Asset | Exact version/revision | Download | License/source |
@@ -137,7 +192,7 @@ From the repository root (Node 22+, Python 3.9+):
 ```sh
 npm ci --prefix workers/persistent-counter
 npm exec --prefix workers/persistent-counter -- playwright install chromium
-node --test tests/ai-livestream.test.mjs
+node --test tests/ai-livestream.test.mjs tests/ai-livestream-audio.test.mjs
 python3 -m unittest discover -s tests -v
 python3 scripts/build_site.py
 node --test tests/gallery.test.mjs tests/pokemon-coin-flip.test.cjs tests/walk-to-hospital.test.mjs
@@ -148,7 +203,8 @@ It checks the adapter format and default/rollback routing, seeded Japanese/Engli
 audience trajectories, silence/decline, count caps,
 reactions without chat, manual-choice independence, rolling context/voice selection,
 resource cleanup, permission races/errors, unavailable GPU, failed model
-downloads, silence, language/context transfer, cadence, bounded history, short
+downloads, pause timing, PCM bounds, silence, language/context transfer, cadence,
+slow-worker and cooldown backpressure, bounded history, short
 reactions on both model routes, and protocol, safety and privacy handling. It checks
 video-first desktop/mobile layout, keyboard focus, reduced motion and network
 inactivity. DOM checks reject removed filler copy and technical badges in every
@@ -170,8 +226,9 @@ The smoke test uses no camera or microphone. See fixture provenance in
 `tests/fixtures/ai-livestream/README.md`. This is intentionally excluded from ordinary
 CI to avoid hardware requirements and repeated large downloads. `?debug=1` shows
 only ephemeral numeric counters, last ASR/generation timings, seconds since the last
-visible comment, and exact model/backend identity. It traces VAD silence/backpressure,
-audio submissions/pending windows, ASR errors/accepted recognition, cadence/repeated
+visible comment, and exact model/backend identity. It traces delivered audio
+segments, worklet drops reported with the next segment, Worker submissions and
+pending audio, ASR errors/accepted recognition, cadence/repeated
 speech, generation errors, categorized output rejection, queued replies, Worker
 results, UI insertion/discards and engagement ticks. A closed event vocabulary
 rejects arbitrary strings. No audio, transcripts, prompts, runtime exceptions or

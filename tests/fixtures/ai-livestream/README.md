@@ -16,8 +16,13 @@ say -v Kyoko -r 190 --file-format=WAVE --data-format=LEI16@16000 -o ja-discovery
 ```
 
 `topics.json` contains the exact speech, language, topic patterns and activity
-categories. Tests use the first six seconds, matching the production audio window.
+categories. Model tests use the first six seconds, the current segment cap.
 The quiet fixtures are real speech; silence tests use zero-filled audio.
+
+`capture.mjs` generates deterministic synthetic PCM patterns for the production
+AudioWorklet tests. Run it with `--compare` to replay the patterns through the
+previous fixed-window worklet and the current endpointing worklet. The launch
+command and results are in the [livestream capture comparison](../../../projects/ai-livestream/README.md#utterance-endpointing).
 
 `baseline/` snapshots `config.mjs` and `inference.mjs` from repository commit
 `fdacade` (before issue #50). These are evaluation-only, never shipped in the demo.

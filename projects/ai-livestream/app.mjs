@@ -1,7 +1,9 @@
 import { VirtualAudience } from './audience.mjs';
-import { MAX_COMMENT_LENGTH, MIN_AUDIO_INTERVAL, VOICES, modelChoice } from './config.mjs';
+import { MAX_COMMENT_LENGTH, VOICES, modelChoice } from './config.mjs';
+import { SAMPLE_RATE } from './audio-format.mjs';
 import { Diagnostics } from './diagnostics.mjs';
 
+const MIN_ASR_START_INTERVAL = 2000;
 const $ = (id) => document.getElementById(id);
 const start = $('start'),
   status = $('status'),
@@ -49,6 +51,7 @@ function stop(message = 'Camera & mic off.', error = false) {
   if (session) {
     clearTimer(session);
     clearInterval(session.audienceTimer);
+    clearTimeout(session.audioTimer);
     session.worker?.terminate();
     session.pending = null;
     session.node?.disconnect();
@@ -104,15 +107,30 @@ function addComment(text, voice = 0) {
 
 async function begin() {
   const session = { busy: false, ready: false, lastAudio: -Infinity, pending: null,
-    diagnostics: debug ? new Diagnostics(model) : null };
+    audioTimer: null, diagnostics: debug ? new Diagnostics(model) : null };
   const record = (event, value) => session.diagnostics?.record(event, value);
   const renderDebug = () => {
     if (!debug || active !== session) return;
     $('debug').hidden = false;
     $('debug').textContent = session.diagnostics.summary();
   };
-  const submit = audio => {
-    session.lastAudio = performance.now();
+  const submitPending = () => {
+    if (active !== session || session.busy || !session.pending) return;
+    const now = performance.now();
+    const delay = MIN_ASR_START_INTERVAL - (now - session.lastAudio);
+    if (delay > 0) {
+      session.audioTimer ??= setTimeout(() => {
+        session.audioTimer = null;
+        submitPending();
+        renderDebug();
+      }, delay);
+      return;
+    }
+    clearTimeout(session.audioTimer);
+    session.audioTimer = null;
+    const audio = session.pending;
+    session.pending = null;
+    session.lastAudio = now;
     session.busy = true;
     record('audio_submitted');
     deadline(session, 90000, 'This device is taking too long. Try starting again.');
@@ -180,16 +198,18 @@ async function begin() {
     if (active !== session) return;
     $('player').classList.add('has-camera');
     report(`Loading… First download: about ${downloadSize}.`);
-    session.context = new AudioContext({ sampleRate: 16000 });
+    session.context = new AudioContext({ sampleRate: SAMPLE_RATE });
     await session.context.resume();
     if (active !== session) return;
     await session.context.audioWorklet.addModule('./audio-worklet.js');
     if (active !== session) return;
-    session.node = new AudioWorkletNode(session.context, 'speech-window');
+    session.node = new AudioWorkletNode(session.context, 'speech-segment', {
+      channelCount: 1,
+      channelCountMode: 'explicit',
+    });
     session.source = session.context.createMediaStreamSource(stream);
     session.sink = session.context.createGain();
     session.sink.gain.value = 0;
-    session.source.connect(session.node);
     session.node.connect(session.sink);
     session.sink.connect(session.context.destination);
     session.worker = new Worker(new URL('./ai-worker.mjs', import.meta.url), {
@@ -212,6 +232,7 @@ async function begin() {
         if (session.ready) return;
         clearTimer(session);
         session.ready = true;
+        session.source.connect(session.node);
         audience.start(performance.now());
         renderAudience();
         session.audienceTimer = setInterval(() => {
@@ -232,11 +253,7 @@ async function begin() {
         session.busy = false;
         record('worker_result');
         if (data.comment) record(addComment(data.comment, data.voice) ? 'ui_comment' : 'ui_discard');
-        if (session.pending) {
-          const audio = session.pending;
-          session.pending = null;
-          submit(audio);
-        }
+        submitPending();
       } else if (data.type === 'error') {
         stop(
           data.code === 'load'
@@ -247,25 +264,20 @@ async function begin() {
       }
       renderDebug();
     };
-    session.node.port.onmessage = ({ data: audio }) => {
-      if (active !== session) return;
-      if (audio?.type === 'window') {
-        record('audio_windows');
-        record(audio.reason);
-        renderDebug();
-        return;
-      }
+    session.node.port.onmessage = ({ data }) => {
+      if (active !== session || data?.type !== 'segment') return;
       session.node.port.postMessage('ack');
-      if (!session.ready || !(audio instanceof Float32Array)) return;
-      if (session.busy) {
-        // One replaceable latest window, never a growing queue or catch-up burst.
-        session.pending = audio;
+      if (!session.ready || !(data.audio instanceof Float32Array)) return;
+      record('audio_segments');
+      if (data.dropped > 0) record('vad_busy', data.dropped);
+      if (session.busy && !session.pending)
         session.worker.postMessage({ type: 'superseded' });
+      // Keep the latest even during a cooldown, which drains without further audio.
+      session.pending = data.audio;
+      submitPending();
+      if (session.pending)
         record('audio_pending');
-        return;
-      }
-      if (performance.now() - session.lastAudio < MIN_AUDIO_INTERVAL) return;
-      submit(audio);
+      renderDebug();
     };
     deadline(
       session,
