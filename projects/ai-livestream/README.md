@@ -72,8 +72,9 @@ has a 90-second limit. A slow connection can require another attempt.
   even when they share no words with the transcript. Output handling removes
   reasoning and control tokens, honors empty output and `SKIP`, and bounds
   plain-text comments to 110 characters. Local safeguards cover unsafe content,
-  contact details, links and claims about the live image. The AI never receives
-  camera frames.
+  contact details, links and some claims about the live image. Camera frames stay
+  in the local preview. Fictional comments can still include invented visual
+  observations.
 - Audience scoring uses only recognized words, questions, detail, invitations and
   a small bounded audio RMS contribution. It does not infer emotions or understand
   video. Each score is posted before chat generation. Skipped/filtered replies
