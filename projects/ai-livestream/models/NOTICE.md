@@ -1,15 +1,12 @@
-# Qwen3 0.6B livestream adaptation
+# Qwen3 0.6B livestream adapter
 
-The shipped normalization weights are modified Qwen3 0.6B weights, originally
-copyright 2024 Alibaba Cloud, licensed under [Apache 2.0](./LICENSE).
+The browser loads a task-specific LoRA adapter over the Japanese-adapted
+Qwen3 0.6B WBD Q8_0 model. The model and adapter use [Apache 2.0](./LICENSE).
 
-- [Original model and tokenizer](https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca)
-- [Pinned MLC q4f16_1 conversion used for the frozen matrices and browser tokenizer](https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_1-MLC/tree/8c14ce481d4c692769976ad52afea453a102df19)
-- [Browser tensor manifest](./resolve/362c654633a66e61/tensor-cache.json) and
-  [trained FP16 weights](./resolve/362c654633a66e61/norms.bin)
+- [Original Qwen3 model and tokenizer](https://huggingface.co/Qwen/Qwen3-0.6B/tree/c1899de289a04d12100db370d81485cdf75e47ca)
+- [Frozen Q8_0 GGUF weights](https://huggingface.co/webbigdata/Qwen3-0.6B_WBD/tree/789a31e3011376f1c5f1ace071ba81f39ed20b5a)
+- [Trained GGUF adapter](./resolve/e3866302664199c2/livestream.gguf)
 - [Training source, dataset and reproduction instructions](https://github.com/takahirox/sandbox/tree/main/scripts/livestream-training)
 
-The manifest references the original quantized shards by immutable URL and
-loads the modified tensors from the local overlay. The app uses the pinned
-upstream chat configuration and tokenizer. The local binary's SHA-256 is
-`362c654633a66e61409e09a4e24dc9de32228d5418546342c838991ba046a237`.
+The 919,968-byte adapter has SHA-256
+`e3866302664199c20d0c4b35fee826b06562ebb9782fd46059e35ea0de1d2192`.

@@ -46,12 +46,20 @@ function quality(rows, reviewed) {
 for (const mode of report.modes) {
   const reviewed = ratings[mode.mode];
   const audio = mode.audio.map(row => ({ ...row, id: row.file }));
-  const heldOut = mode.text.map(({ id, turns }) => ({
-    id, withhold: holdout.find(row => row.id === id).withhold, ...turns.at(-1),
-  }));
+  const heldOut = mode.text.map(({ id, turns }) => {
+    const { language, withhold, confirmation } = holdout.find(row => row.id === id);
+    return { id, language, withhold, confirmation, ...turns.at(-1) };
+  });
+  const subset = (rows, annotations) => quality(
+    rows, Object.fromEntries(rows.filter(row => row.comment).map(({ id }) => [id, annotations[id]])),
+  );
   console.log(JSON.stringify({
     mode: mode.mode,
     audio: quality(audio, reviewed.audio),
     heldOut: quality(heldOut, reviewed.heldOut),
+    japaneseAudio: subset(audio.filter(row => row.language === 'ja' && !row.confirmation), reviewed.audio),
+    japaneseConfirmationAudio: subset(audio.filter(row => row.confirmation), reviewed.audio),
+    japaneseHeldOut: subset(heldOut.filter(row => row.language === 'ja' && !row.confirmation), reviewed.heldOut),
+    japaneseConfirmation: subset(heldOut.filter(row => row.confirmation), reviewed.heldOut),
   }, null, 2));
 }

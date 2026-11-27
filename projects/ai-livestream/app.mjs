@@ -8,7 +8,7 @@ const start = $('start'),
   video = $('camera');
 const debug = new URLSearchParams(location.search).get('debug') === '1';
 const model = modelChoice(location.search);
-const downloadSize = model === 'baseline' ? '1.1 GB' : '460 MB';
+const downloadSize = model === 'baseline' ? '1.1 GB' : '755 MB';
 $('download-size').textContent = downloadSize;
 const audience = new VirtualAudience();
 const manual = { like: false, subscribe: false };

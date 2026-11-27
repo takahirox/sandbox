@@ -10,6 +10,7 @@ const events = new Set(`audio_windows vad_silence vad_busy audio_submitted audio
   ui_comment ui_discard engagement_tick`.split(/\s+/));
 export class Diagnostics {
   constructor(model = 'tuned') {
+    this.backend = model === 'baseline' ? 'WebLLM 0.2.85' : 'wllama 4.0.0';
     this.model = model === 'baseline' ? LLM.id : TUNED_MODEL_ID;
     this.counts = {};
     this.timings = {};
@@ -23,7 +24,7 @@ export class Diagnostics {
   }
   summary(now = performance.now()) {
     return JSON.stringify({ asr: `${ASR.id} / q8 WASM`,
-      model: `${this.model} / WebLLM 0.2.85 WebGPU`,
+      model: `${this.model} / ${this.backend} WebGPU`,
       counts: this.counts, timings: this.timings,
       secondsSinceComment: this.lastComment === null ? null : Math.floor((now - this.lastComment) / 1000) });
   }

@@ -1,9 +1,6 @@
 // Opt-in only. Report contents only for explicitly supplied synthetic fixtures.
-import {
-  CHAT_RUNTIME, isAssetRequest, LLM, MODEL_LIBRARY, RUNTIME, SMALL_LLM,
-  SMALL_MODEL_LIBRARY,
-} from '../../../projects/ai-livestream/config.mjs';
-import { localPipeline } from '../../../projects/ai-livestream/text-model.mjs';
+import { isAssetRequest, RUNTIME } from '../../../projects/ai-livestream/config.mjs';
+import { selectPipeline } from '../../../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../../../projects/ai-livestream/inference.mjs';
 
 const fetchAsset = fetch.bind(globalThis);
@@ -19,14 +16,8 @@ self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'init') {
       const started = performance.now();
-      const [{ pipeline, env }, { CreateMLCEngine }] = await Promise.all([
-        import(RUNTIME), import(CHAT_RUNTIME),
-      ]);
-      const small = data.model !== 'baseline';
-      const local = localPipeline(pipeline, CreateMLCEngine, {
-        seed: 42, tuned: data.model === 'tuned',
-        model: small ? SMALL_LLM : LLM, library: small ? SMALL_MODEL_LIBRARY : MODEL_LIBRARY,
-      });
+      const { pipeline, env } = await import(RUNTIME);
+      const local = await selectPipeline(pipeline, data.model, { seed: 42 });
       const assets = {};
       infer = await createInference(async (task, id, options) => {
         const model = await local(task, id, {

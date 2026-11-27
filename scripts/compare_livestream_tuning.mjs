@@ -5,15 +5,17 @@ import { createHash } from 'node:crypto';
 import { cpus, platform, totalmem } from 'node:os';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from './capture_screenshots.mjs';
-import { LLM, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_LIBRARY, TUNED_MODEL_URL } from '../projects/ai-livestream/config.mjs';
+import { LLM, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_FILES, TUNED_ADAPTER_URL } from '../projects/ai-livestream/config.mjs';
 
 const root = new URL('../', import.meta.url);
 const fixtureDir = new URL('tests/fixtures/ai-livestream/', root);
 const readJSON = async path => JSON.parse(await readFile(path, 'utf8'));
-const [speech, heldOutBytes] = await Promise.all([
+const [originalSpeech, confirmationSpeech, heldOutBytes] = await Promise.all([
   readJSON(new URL('topics.json', fixtureDir)),
+  readJSON(new URL('tuning-audio.json', fixtureDir)),
   readFile(new URL('tuning-holdout.json', fixtureDir)),
 ]);
+const speech = [...originalSpeech, ...confirmationSpeech];
 const heldOut = JSON.parse(heldOutBytes);
 const [variant, output] = process.argv.slice(2);
 const modes = variant && variant !== 'all' ? [variant] : ['baseline', 'tuned', 'small'];
@@ -63,7 +65,8 @@ async function run(mode) {
     const page = await browser.newPage({ permissions: ['camera'] });
     const requests = [];
     page.on('request', request => {
-      requests.push({ url: request.url(), method: request.method(), body: request.postData() });
+      requests.push({ url: request.url(), method: request.method(), body: request.postData(),
+        redirectedFrom: request.redirectedFrom()?.url() });
     });
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
     const gpu = await page.evaluate(async () => {
@@ -145,7 +148,8 @@ async function run(mode) {
     const text = [];
     for (const [index, fixture] of speech.entries()) {
       const result = await feed(await samples(fixture.file), fixture.language, index * 120000);
-      audio.push({ file: fixture.file, language: fixture.language, expected: fixture.text, ...result });
+      audio.push({ file: fixture.file, language: fixture.language, expected: fixture.text,
+        ...(fixture.confirmation ? { confirmation: true } : {}), ...result });
     }
     const voiced = Array(96000).fill(0.02);
     for (const [index, fixture] of heldOut.entries()) {
@@ -160,41 +164,41 @@ async function run(mode) {
     console.log(`${mode}: warm load`);
     const warm = await load();
     const cameraDuringWarm = await frames();
-    const selected = mode === 'baseline' ? LLM : SMALL_LLM;
-    const modelURL = `https://huggingface.co/${selected.id}/resolve/${selected.revision}/`;
-    const baseManifestText = await (await fetch(modelURL + 'tensor-cache.json')).text();
-    const baseManifest = JSON.parse(baseManifestText);
-    const overlayManifest = mode === 'tuned'
-      ? (await readFile(new URL('tensor-cache.json', TUNED_MODEL_URL))).byteLength : 0;
+    const baseline = mode === 'baseline';
+    const selected = baseline ? LLM : SMALL_LLM;
     const assets = {
       asr: Object.values(cold.assets).reduce((total, size) => total + size, 0),
-      textShards: baseManifest.records.reduce((total, shard) => total + shard.nbytes, 0),
-      textOverlay: mode === 'tuned' ? (await readFile(new URL('norms.bin', TUNED_MODEL_URL))).byteLength : 0,
-      textTokenizer: 11422654,
-      modelLibrary: mode === 'baseline' ? 5566554 : 5535989,
-      textConfig: (await (await fetch(modelURL + 'mlc-chat-config.json')).arrayBuffer()).byteLength,
-      textManifest: overlayManifest || Buffer.byteLength(baseManifestText),
     };
-    // Requests from the harness are restricted to fixtures, static site files and public assets.
+    if (baseline) {
+      const modelURL = `https://huggingface.co/${selected.id}/resolve/${selected.revision}/`;
+      const manifestText = await (await fetch(modelURL + 'tensor-cache.json')).text();
+      const manifest = JSON.parse(manifestText);
+      Object.assign(assets, {
+        textShards: manifest.records.reduce((total, shard) => total + shard.nbytes, 0),
+        textTokenizer: 11422654,
+        modelLibrary: 5566554,
+        textConfig: (await (await fetch(modelURL + 'mlc-chat-config.json')).arrayBuffer()).byteLength,
+        textManifest: Buffer.byteLength(manifestText),
+      });
+    } else {
+      assets.textShards = 325085216 + 314362336; // Both pinned GGUF shards include model metadata.
+      if (mode === 'tuned')
+        assets.textAdapter = (await readFile(new URL(TUNED_ADAPTER_URL))).byteLength;
+    }
     for (const request of requests) {
       const url = new URL(request.url);
-      if (request.method !== 'GET' || request.body !== null ||
-          !(url.origin === server.origin || url.href === (mode === 'baseline' ? MODEL_LIBRARY : SMALL_MODEL_LIBRARY) ||
+      const shardHead = request.method === 'HEAD' && (SMALL_MODEL_FILES.includes(url.href) ||
+        (url.hostname.endsWith('.hf.co') && SMALL_MODEL_FILES.includes(request.redirectedFrom)));
+      if ((request.method !== 'GET' && !shardHead) || request.body !== null ||
+          !(url.origin === server.origin || url.href === MODEL_LIBRARY ||
             url.hostname === 'cdn.jsdelivr.net' || url.hostname === 'huggingface.co' || url.hostname.endsWith('.hf.co')))
-        throw Error('Unexpected browser traffic');
+        throw Error('Unexpected browser traffic ' + request.method + ' ' + url.origin);
     }
-    const overlay = new URL(TUNED_MODEL_URL).pathname.split('/').at(-2);
-    const overlayFiles = await page.evaluate(async version => {
-      const cache = await caches.open('webllm/model');
-      const files = [];
-      for (const name of ['norms.bin', 'tensor-cache.json']) {
-        if (await cache.match(new URL('models/resolve/' + version + '/' + name, location.href)))
-          files.push(name);
-      }
-      return files;
-    }, overlay);
-    if (overlayFiles.length !== (mode === 'tuned' ? 2 : 0))
-      throw Error('Unexpected trained artifact requests');
+    const [, overlay, adapter] = new URL(TUNED_ADAPTER_URL).pathname.split('/').slice(-3);
+    const adapterRequests = requests.filter(({ url }) => url ===
+      `${server.origin}/sandbox/projects/ai-livestream/models/resolve/${overlay}/${adapter}`).length;
+    if (adapterRequests !== (mode === 'tuned' ? 2 : 0))
+      throw Error('Unexpected trained adapter requests');
     const runtimeURLs = new Set(requests.filter(request =>
       request.url.startsWith('https://cdn.jsdelivr.net/npm/')).map(request => request.url));
     const runtimeAssets = Object.fromEntries(await Promise.all([...runtimeURLs].map(async url => {
@@ -207,8 +211,8 @@ async function run(mode) {
     })));
     return { mode, browser: browser.version(), gpu, assets,
       baseRevision: selected.revision,
-      ...(mode === 'tuned' ? { overlay, overlayFiles } : {}),
-      assetBytes: Object.values(assets).reduce((total, size) => total + size, 0),
+      ...(mode === 'tuned' ? { overlay, adapter } : {}),
+      assetBytes: [...Object.values(assets), ...Object.values(runtimeAssets)].reduce((total, size) => total + size, 0),
       runtimeAssets,
       coldLoadMs: cold.loadMs, warmLoadMs: warm.loadMs, peakBrowserRssMiB: peakKiB / 1024,
       cameraIdle, cameraDuringCold, cameraDuringJobs, cameraDuringWarm, audio, text };

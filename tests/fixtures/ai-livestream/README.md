@@ -51,3 +51,11 @@ revised prompt via `--mlc-stronger --issue52`. Production remains 1.7B. The repo
 `comment` fields are measured outputs; `finalComment` / `finalReason` replay the
 final reference/echo filters over the recorded raw output. See the model evaluation
 for the two recurring Japanese ASR detail errors and model-size trade-off.
+
+For Issue #62, `tuning-holdout.json` includes the original transcript scenarios
+and eight additional Japanese scenarios. `tuning-audio.json` lists four
+additional Japanese WAVs generated with Kyoko at the settings above. These
+WAVs contain no user recordings and were excluded along with the transcript
+fixtures from training and teacher generation. The raw browser turns,
+separate quality ratings, and reproduction steps are in the
+[tuning evaluation](../../../projects/ai-livestream/TUNING-EVALUATION.md).

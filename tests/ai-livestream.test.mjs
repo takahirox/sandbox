@@ -8,7 +8,8 @@ import { previewServer } from '../scripts/capture_screenshots.mjs';
 import {
   ASR,
   LLM,
-  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_LIBRARY, TUNED_MODEL_ID, TUNED_MODEL_URL,
+  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY, SMALL_CHAT_RUNTIME, SMALL_MODEL_FILES, SMALL_MODEL_LIBRARY,
+  TUNED_MODEL_ID, TUNED_ADAPTER_URL,
   WASM,
   isAssetRequest,
   modelChoice,
@@ -181,6 +182,8 @@ test('comment safety, bounded prompts, and hallucinated caption filtering', () =
   assert.equal(cleanComment('<b>猫かわいい！</b>', [], 'ja'), '猫かわいい!');
   assert.equal(cleanComment('コーヒーはおいしいね', [], 'en'), '');
   assert.equal(cleanComment('Coffee tastes good', [], 'ja'), '');
+  assert.equal(cleanComment('5円で猫見지難しに進む?', [], 'ja'), '');
+  assert.equal(cleanComment('USBのケーブル、どれにしたの？', [], 'ja'), 'USBのケーブル、どれにしたの?');
   assert.equal(meaningfulSpeech('ご視聴ありがとうございました。'), false);
   assert.equal(meaningfulSpeech('   '), false);
   assert.equal(meaningfulSpeech('今日は猫と遊びました'), true);
@@ -261,7 +264,7 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
 });
 
 test('Worker fetch policy allows only pinned public assets and rejects inference or writes', () => {
-  for (const model of [ASR, LLM, SMALL_LLM])
+  for (const model of [ASR, LLM])
     assert.equal(
       isAssetRequest(
         new URL(
@@ -273,7 +276,7 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
   for (const path of [
     RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
     WASM + 'ort-wasm-simd-threaded.jsep.wasm',
-    SMALL_MODEL_LIBRARY, new URL('norms.bin', TUNED_MODEL_URL),
+    SMALL_CHAT_RUNTIME, SMALL_MODEL_LIBRARY, TUNED_ADAPTER_URL, ...SMALL_MODEL_FILES,
     'https://cas-bridge.xethub.hf.co/public-asset',
   ])
     assert.equal(isAssetRequest(new URL(path)), true);
@@ -284,65 +287,44 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
     'https://example.com/upload',
     MODEL_LIBRARY.replace('00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0', 'main'),
     MODEL_LIBRARY + '?speech=coffee',
-    new URL('norms.bin?speech=coffee', TUNED_MODEL_URL),
+    TUNED_ADAPTER_URL + '?speech=coffee', SMALL_MODEL_FILES[0] + '?speech=coffee',
     'https://cdn.jsdelivr.net/npm/unpinned/file.js',
   ])
     assert.equal(isAssetRequest(new URL(path)), false);
   assert.equal(isAssetRequest(new URL(RUNTIME), 'POST'), false);
+  for (const file of SMALL_MODEL_FILES) {
+    assert.equal(isAssetRequest(new URL(file), 'HEAD'), true);
+    assert.equal(isAssetRequest(new URL(file), 'POST'), false);
+  }
+  assert.equal(isAssetRequest(new URL(TUNED_ADAPTER_URL), 'HEAD'), false);
 });
 
-test('the shipped overlay contains 113 finite learned tensors and preserves the pinned q4 shards', async () => {
+test('the shipped GGUF is the pinned compact LoRA adapter and the baseline remains selectable', async () => {
   assert.equal(modelChoice(''), 'tuned');
   assert.equal(modelChoice('?model=baseline&debug=1'), 'baseline');
   assert.equal(modelChoice('?model=https://example.com/weights'), 'tuned');
-  const [manifest, norms] = await Promise.all([
-    readFile(new URL('tensor-cache.json', TUNED_MODEL_URL), 'utf8').then(JSON.parse),
-    readFile(new URL('norms.bin', TUNED_MODEL_URL)),
-  ]);
-  const digest = createHash('sha256').update(norms).digest('hex');
-  assert.equal(digest, '362c654633a66e61409e09a4e24dc9de32228d5418546342c838991ba046a237');
-  assert.ok(TUNED_MODEL_URL.endsWith(digest.slice(0, 16) + '/'));
-  const { records } = manifest;
-  const local = records.pop();
-  const base = 'https://huggingface.co/' + SMALL_LLM.id + '/resolve/' + SMALL_LLM.revision + '/';
-  assert.equal(records.length, 9);
-  assert.equal(records.reduce((sum, shard) => sum + shard.nbytes, 0), 335372288);
-  for (const [index, shard] of records.entries())
-    assert.equal(shard.dataPath, base + 'params_shard_' + index + '.bin');
-  const names = [...records, local].flatMap(shard => shard.records.map(record => record.name));
-  assert.equal(new Set(names).size, manifest.metadata.ParamSize);
-  assert.equal(names.length, manifest.metadata.ParamSize);
-  assert.equal(local.dataPath, 'norms.bin');
-  assert.equal(local.nbytes, 131072);
-  assert.equal(local.records.length, 113);
-  assert.equal(norms.byteLength, local.nbytes);
-  assert.equal(createHash('md5').update(norms).digest('hex'), local.md5sum);
-  let offset = 0;
-  for (const record of local.records) {
-    assert.match(record.name, /norm\.weight$/);
-    assert.equal(record.dtype, 'float16');
-    assert.equal(record.byteOffset, offset);
-    assert.equal(record.nbytes, record.shape[0] * 2);
-    for (let i = offset; i < offset + record.nbytes; i += 2) {
-      assert.notEqual(norms.readUInt16LE(i) & 0x7c00, 0x7c00, 'Finite FP16 value');
-    }
-    offset += record.nbytes;
-  }
-  assert.equal(offset, norms.byteLength);
+  const adapter = await readFile(new URL(TUNED_ADAPTER_URL));
+  const digest = createHash('sha256').update(adapter).digest('hex');
+  assert.equal(digest, 'e3866302664199c20d0c4b35fee826b06562ebb9782fd46059e35ea0de1d2192');
+  assert.ok(TUNED_ADAPTER_URL.endsWith(digest.slice(0, 16) + '/livestream.gguf'));
+  assert.equal(adapter.toString('ascii', 0, 4), 'GGUF');
+  assert.equal(adapter.readBigUInt64LE(8), 32n);
+  assert.ok(adapter.length < 1024 * 1024);
 });
 
 test('recorded baseline and tuned outputs replay the same guards on held-out speech', async () => {
   const fixtures = new URL('./fixtures/ai-livestream/', import.meta.url);
   const training = new URL('../scripts/livestream-training/train.jsonl', import.meta.url);
   const loadFixture = name => readFile(new URL(name, fixtures), 'utf8').then(JSON.parse);
-  const [holdout, benchmark, train] = await Promise.all([
+  const [holdout, benchmark, ratings, train] = await Promise.all([
     loadFixture('tuning-holdout.json'),
     loadFixture('tuning-benchmark.json'),
+    loadFixture('tuning-ratings.json'),
     readFile(training, 'utf8').then(text => text.trim().split('\n').map(JSON.parse)),
   ]);
   const trainingSpeech = new Set(train.flatMap(row => [row.speech, row.earlier]).filter(Boolean));
-  assert.equal(train.length, 128);
-  assert.equal(train.filter(row => row.language === 'ja').length, 76);
+  assert.equal(train.length, 384);
+  assert.equal(train.filter(row => row.language === 'ja').length, 332);
   assert.ok(holdout.flatMap(fixture => fixture.turns).every(turn => !trainingSpeech.has(turn)));
   assert.deepEqual(benchmark.modes.map(mode => mode.mode), ['baseline', 'tuned', 'small']);
   const voiced = new Float32Array(WINDOW_SAMPLES).fill(0.02);
@@ -386,6 +368,17 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
       }
     }
   }
+  const tuned = benchmark.modes.find(mode => mode.mode === 'tuned');
+  const usefulJapanese = (rows, reviewed) => rows.filter(({ id, comment }) =>
+    comment && reviewed[id]?.comment === comment && reviewed[id].flags.includes('R') &&
+    reviewed[id].flags.includes('N') && !reviewed[id].flags.includes('F'));
+  const japaneseAudio = tuned.audio.filter(row => row.language === 'ja')
+    .map(row => ({ ...row, id: row.file }));
+  const japaneseText = tuned.text.filter(({ id }) =>
+    holdout.some(fixture => fixture.id === id && fixture.language === 'ja' && !fixture.withhold))
+    .map(({ id, turns }) => ({ id, ...turns.at(-1) }));
+  assert.ok(usefulJapanese(japaneseAudio, ratings.tuned.audio).length >= 1);
+  assert.ok(usefulJapanese(japaneseText, ratings.tuned.heldOut).length >= 3);
 });
 
 test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
@@ -995,7 +988,6 @@ test(
     const modelURL = model =>
       'https://huggingface.co/' + model.id + '/resolve/' + model.revision + '/';
     const baselineURL = modelURL(LLM);
-    const smallMetadata = ['mlc-chat-config.json', 'tokenizer.json'].map(name => modelURL(SMALL_LLM) + name);
     let reject = false;
     let fail = false;
     page.on('console', message => {
@@ -1010,26 +1002,35 @@ test(
       assert.equal(route.request().method(), 'GET');
       assert.equal(route.request().postData(), null);
       remote.push(route.request().url());
-      if (smallMetadata.includes(route.request().url())) return route.fulfill({
-        contentType: 'application/json',
-        body: '{"fixture":true}',
+      if (route.request().url() === SMALL_CHAT_RUNTIME) return route.fulfill({
+        contentType: 'text/javascript',
+        body: `
+          export class Wllama {
+            constructor({default: wasm}) {
+              if (wasm !== ${JSON.stringify(SMALL_MODEL_LIBRARY)}) throw Error('Wrong WASM pin');
+            }
+            async loadModelFromUrl(url, {n_ctx, lora_adapters}) {
+              if (url !== ${JSON.stringify(SMALL_MODEL_FILES[0])} || n_ctx !== 1536)
+                throw Error('Wrong small model or context');
+              const header = await lora_adapters[0]?.blob.slice(0, 4).text();
+              if (header !== 'GGUF') throw Error('Missing LoRA adapter');
+              console.log('fixture-model ' + ${JSON.stringify(TUNED_MODEL_ID)});
+            }
+            async createChatCompletion({cache_prompt, chat_template_kwargs}) {
+              if (cache_prompt || chat_template_kwargs.enable_thinking) throw Error('Unbounded chat');
+              if (${fail}) throw Error('Transcript-bearing error');
+              return {choices:[{message:{content:'コーヒー、いい香りですね！'}}]};
+            }
+          }
+        `,
       });
       if (route.request().url() === CHAT_RUNTIME) return route.fulfill({
         contentType: 'text/javascript',
         body: `
           export async function CreateMLCEngine(id, {appConfig}) {
             const [{model, model_lib}] = appConfig.model_list;
-            if (id === ${JSON.stringify(TUNED_MODEL_ID)}) {
-              for (const [namespace, name] of [['webllm/config', 'mlc-chat-config.json'], ['webllm/model', 'tokenizer.json']]) {
-                const metadata = await (await caches.open(namespace)).match(new URL(name, model));
-                if (!(await metadata?.json())?.fixture) throw Error('Missing metadata alias');
-              }
-              if (model_lib !== ${JSON.stringify(SMALL_MODEL_LIBRARY)}) throw Error('Wrong compiled library');
-              const manifest = await (await fetch(new URL('tensor-cache.json', model))).json();
-              const norms = await (await fetch(new URL(manifest.records.at(-1).dataPath, model))).arrayBuffer();
-              if (norms.byteLength !== 131072) throw Error('Missing learned weights');
-            } else if (model !== ${JSON.stringify(baselineURL)} ||
-                       model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
+            if (model !== ${JSON.stringify(baselineURL)} ||
+                model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
             console.log('fixture-model ' + id);
             return { async resetChat() {}, chat: { completions: { async create() {
               if (${fail}) throw Error('Transcript-bearing error');
@@ -1076,10 +1077,10 @@ test(
     await page.locator('.comment').waitFor({ timeout: 15000 });
     assert.match(await page.locator('.comment').innerText(), /コーヒー/);
     assert.deepEqual(models, [TUNED_MODEL_ID]);
-    assert.deepEqual(overlayRequests, ['tensor-cache.json', 'norms.bin']);
+    assert.deepEqual(overlayRequests, ['livestream.gguf']);
     assert.deepEqual(
       remote.sort(),
-      [RUNTIME, CHAT_RUNTIME, ...smallMetadata].sort(),
+      [RUNTIME, SMALL_CHAT_RUNTIME].sort(),
       'Only the explicitly mocked local runtimes are requested',
     );
     await page.locator('#start').click();
@@ -1099,7 +1100,7 @@ test(
     const diagnostics = JSON.parse(await page.locator('#debug').innerText());
     assert.match(diagnostics.model, /Qwen3-1\.7B/);
     assert.deepEqual(models, [TUNED_MODEL_ID, LLM.id.split('/').at(-1)]);
-    assert.deepEqual(overlayRequests, ['tensor-cache.json', 'norms.bin']);
+    assert.deepEqual(overlayRequests, ['livestream.gguf']);
     assert.equal(diagnostics.counts.transcription_accepted, 1);
     assert.equal(diagnostics.counts.generation_attempt, 1);
     assert.equal(diagnostics.counts.worker_result, 1);
@@ -1413,7 +1414,10 @@ test('fresh and held replies resolve ordinary continuations against bounded rece
         reply = fixture.reply;
         assert.equal((await infer(audio, fixture.language)).comment,
           ['fresh', 'held'].includes(mode) ? fixture.reply : '');
-        if (mode === 'fresh') assert.match(prompts.at(-1).at(-1).content, /earlier/);
+        if (mode === 'fresh') {
+          const fields = JSON.parse(prompts.at(-1).at(-1).content);
+          assert.equal(fields[fixture.language === 'ja' ? '前の話' : 'earlier'], fixture.first);
+        }
         if (mode === 'held') assert.equal(prompts.length, 1, 'Publish held reply without regenerating');
         if (['shift', 'expired', 'intervening_subject'].includes(mode)) assert.ok(reasons.includes('topic'));
       });
