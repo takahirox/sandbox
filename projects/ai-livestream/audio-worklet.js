@@ -75,8 +75,13 @@ class SpeechSegment extends AudioWorkletProcessor {
       ? Math.max(0.002 ** 2, 1.7 ** 2 * this.noisePower)
       : Math.max(0.003 ** 2, 2.5 ** 2 * this.noisePower);
     const voiced = power >= threshold && differenceEnergy < 1.5 * FRAME * power;
-    if (!voiced) this.noisePower += (Math.max(0, power) - this.noisePower) *
-      (power > this.noisePower ? 0.05 : 0.01);
+    // Filtered noise can clear the voice gate while the floor is still low.
+    // Learn it quickly so those frames stop counting toward speech onset or hold.
+    if (!voiced || differenceEnergy >= 0.5 * FRAME * power) {
+      const rise = voiced ? 0.15 : 0.05;
+      this.noisePower += (Math.max(0, power) - this.noisePower) *
+        (power > this.noisePower ? rise : 0.01);
+    }
 
     if (!this.length) {
       this.onset = voiced ? this.onset + 1 : 0;
