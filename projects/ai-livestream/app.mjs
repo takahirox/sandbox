@@ -1,5 +1,5 @@
 import { VirtualAudience } from './audience.mjs';
-import { MIN_AUDIO_INTERVAL, VOICES } from './config.mjs';
+import { MIN_AUDIO_INTERVAL, VOICES, modelChoice } from './config.mjs';
 import { Diagnostics } from './diagnostics.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -7,6 +7,9 @@ const start = $('start'),
   status = $('status'),
   video = $('camera');
 const debug = new URLSearchParams(location.search).get('debug') === '1';
+const model = modelChoice(location.search);
+const downloadSize = model === 'baseline' ? '1.1 GB' : '460 MB';
+$('download-size').textContent = downloadSize;
 const audience = new VirtualAudience();
 const manual = { like: false, subscribe: false };
 const numbers = new Intl.NumberFormat('en-US');
@@ -101,7 +104,7 @@ function addComment(text, voice = 0) {
 
 async function begin() {
   const session = { busy: false, ready: false, lastAudio: -Infinity, pending: null,
-    diagnostics: debug ? new Diagnostics() : null };
+    diagnostics: debug ? new Diagnostics(model) : null };
   const record = (event, value) => session.diagnostics?.record(event, value);
   const renderDebug = () => {
     if (!debug || active !== session) return;
@@ -176,7 +179,7 @@ async function begin() {
     await video.play();
     if (active !== session) return;
     $('player').classList.add('has-camera');
-    report('Loading… First download: about 1.1 GB.');
+    report(`Loading… First download: about ${downloadSize}.`);
     session.context = new AudioContext({ sampleRate: 16000 });
     await session.context.resume();
     if (active !== session) return;
@@ -269,7 +272,7 @@ async function begin() {
       300000,
       'Loading took too long. Check your connection and try again.',
     );
-    session.worker.postMessage({ type: 'init', debug });
+    session.worker.postMessage({ type: 'init', debug, model });
   } catch (error) {
     if (active !== session) return;
     const messages = {

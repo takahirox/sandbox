@@ -11,15 +11,25 @@ export const LLM = {
   id: 'mlc-ai/Qwen3-1.7B-q4f16_1-MLC',
   revision: '80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc',
 };
+export const SMALL_LLM = {
+  id: 'mlc-ai/Qwen3-0.6B-q4f16_1-MLC',
+  revision: '8c14ce481d4c692769976ad52afea453a102df19',
+};
 export const CHAT_RUNTIME = 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.85/lib/index.js';
 export const MODEL_LIBRARY = 'https://raw.githubusercontent.com/mlc-ai/binary-mlc-llm-libs/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0/web-llm-models/v0_2_84/base/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm';
+export const SMALL_MODEL_LIBRARY = MODEL_LIBRARY.replace('Qwen3-1.7B-', 'Qwen3-0.6B-');
+export const TUNED_MODEL_URL = new URL('./models/resolve/362c654633a66e61/', import.meta.url).href;
+export const TUNED_MODEL_ID = 'Qwen3-0.6B-Livestream-q4f16_1';
 export const SAMPLE_RATE = 16000;
 export const WINDOW_SAMPLES = SAMPLE_RATE * 6;
 export const MIN_COMMENT_INTERVAL = 8000;
 export const MIN_AUDIO_INTERVAL = 5500;
 
 export function isAssetRequest(url, method = 'GET') {
-  if (method !== 'GET' || url.protocol !== 'https:') return false;
+  if (method !== 'GET') return false;
+  if (['tensor-cache.json', 'norms.bin'].some(name => url.href === new URL(name, TUNED_MODEL_URL).href))
+    return true;
+  if (url.protocol !== 'https:') return false;
   if (url.hostname === 'cdn.jsdelivr.net')
     return (
       url.href === CHAT_RUNTIME ||
@@ -28,14 +38,18 @@ export function isAssetRequest(url, method = 'GET') {
         '/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/',
       )
     );
-  if (url.href === MODEL_LIBRARY) return true;
+  if (url.href === MODEL_LIBRARY || url.href === SMALL_MODEL_LIBRARY) return true;
   if (url.hostname === 'huggingface.co')
     return (
-      [ASR, LLM].some((model) =>
+      [ASR, LLM, SMALL_LLM].some((model) =>
         url.pathname.startsWith(`/${model.id}/resolve/${model.revision}/`),
       ) && !url.search
     );
   return url.hostname.endsWith('.hf.co'); // Signed asset delivery redirects, not an inference API.
+}
+
+export function modelChoice(search) {
+  return new URLSearchParams(search).get('model') === 'baseline' ? 'baseline' : 'tuned';
 }
 
 export const VOICES = [
@@ -177,7 +191,7 @@ export function inspectComment(value, recent = [], language = 'en') {
   if (
     /^(?:that(?:'s| is)|so|very|really)?\s*(?:nice|great|cool|awesome|interesting|amazing|good)(?:\s+(?:stream|story|stuff|job))?[!. ]*$/i.test(text) ||
     /^(?:いいね|すごい|素晴らしい|楽しそう|なるほど)[!！。 ]*$/u.test(text) ||
-    /\b(?:you look|your face|your outfit|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see you)\b|顔|髪型|笑顔|映像が|画面に/i.test(text) ||
+    /\b(?:you look|your face|your outfit|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see (?:you|your (?:face|hair|eyes|shirt|clothes|outfit)))\b|顔|髪型|笑顔|映像が|画面に/i.test(text) ||
     /^(?:a (?:friend|viewer|streamer) |the streamer |配信者[はが])/i.test(text)
   ) return { comment: '', reason: 'generic_or_visual' };
   // Small models sometimes continue after their first complete comment.

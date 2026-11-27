@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
@@ -7,9 +8,10 @@ import { previewServer } from '../scripts/capture_screenshots.mjs';
 import {
   ASR,
   LLM,
-  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
+  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY, SMALL_LLM, SMALL_MODEL_LIBRARY, TUNED_MODEL_ID, TUNED_MODEL_URL,
   WASM,
   isAssetRequest,
+  modelChoice,
   cleanComment,
   sharesTopic,
   echoesSpeech,
@@ -259,7 +261,7 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
 });
 
 test('Worker fetch policy allows only pinned public assets and rejects inference or writes', () => {
-  for (const model of [ASR, LLM])
+  for (const model of [ASR, LLM, SMALL_LLM])
     assert.equal(
       isAssetRequest(
         new URL(
@@ -271,7 +273,7 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
   for (const path of [
     RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
     WASM + 'ort-wasm-simd-threaded.jsep.wasm',
-    CHAT_RUNTIME, MODEL_LIBRARY,
+    SMALL_MODEL_LIBRARY, new URL('norms.bin', TUNED_MODEL_URL),
     'https://cas-bridge.xethub.hf.co/public-asset',
   ])
     assert.equal(isAssetRequest(new URL(path)), true);
@@ -282,10 +284,108 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
     'https://example.com/upload',
     MODEL_LIBRARY.replace('00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0', 'main'),
     MODEL_LIBRARY + '?speech=coffee',
+    new URL('norms.bin?speech=coffee', TUNED_MODEL_URL),
     'https://cdn.jsdelivr.net/npm/unpinned/file.js',
   ])
     assert.equal(isAssetRequest(new URL(path)), false);
   assert.equal(isAssetRequest(new URL(RUNTIME), 'POST'), false);
+});
+
+test('the shipped overlay contains 113 finite learned tensors and preserves the pinned q4 shards', async () => {
+  assert.equal(modelChoice(''), 'tuned');
+  assert.equal(modelChoice('?model=baseline&debug=1'), 'baseline');
+  assert.equal(modelChoice('?model=https://example.com/weights'), 'tuned');
+  const [manifest, norms] = await Promise.all([
+    readFile(new URL('tensor-cache.json', TUNED_MODEL_URL), 'utf8').then(JSON.parse),
+    readFile(new URL('norms.bin', TUNED_MODEL_URL)),
+  ]);
+  const digest = createHash('sha256').update(norms).digest('hex');
+  assert.equal(digest, '362c654633a66e61409e09a4e24dc9de32228d5418546342c838991ba046a237');
+  assert.ok(TUNED_MODEL_URL.endsWith(digest.slice(0, 16) + '/'));
+  const { records } = manifest;
+  const local = records.pop();
+  const base = 'https://huggingface.co/' + SMALL_LLM.id + '/resolve/' + SMALL_LLM.revision + '/';
+  assert.equal(records.length, 9);
+  assert.equal(records.reduce((sum, shard) => sum + shard.nbytes, 0), 335372288);
+  for (const [index, shard] of records.entries())
+    assert.equal(shard.dataPath, base + 'params_shard_' + index + '.bin');
+  const names = [...records, local].flatMap(shard => shard.records.map(record => record.name));
+  assert.equal(new Set(names).size, manifest.metadata.ParamSize);
+  assert.equal(names.length, manifest.metadata.ParamSize);
+  assert.equal(local.dataPath, 'norms.bin');
+  assert.equal(local.nbytes, 131072);
+  assert.equal(local.records.length, 113);
+  assert.equal(norms.byteLength, local.nbytes);
+  assert.equal(createHash('md5').update(norms).digest('hex'), local.md5sum);
+  let offset = 0;
+  for (const record of local.records) {
+    assert.match(record.name, /norm\.weight$/);
+    assert.equal(record.dtype, 'float16');
+    assert.equal(record.byteOffset, offset);
+    assert.equal(record.nbytes, record.shape[0] * 2);
+    for (let i = offset; i < offset + record.nbytes; i += 2) {
+      assert.notEqual(norms.readUInt16LE(i) & 0x7c00, 0x7c00, 'Finite FP16 value');
+    }
+    offset += record.nbytes;
+  }
+  assert.equal(offset, norms.byteLength);
+});
+
+test('recorded baseline and tuned outputs replay the same guards on held-out speech', async () => {
+  const fixtures = new URL('./fixtures/ai-livestream/', import.meta.url);
+  const training = new URL('../scripts/livestream-training/train.jsonl', import.meta.url);
+  const loadFixture = name => readFile(new URL(name, fixtures), 'utf8').then(JSON.parse);
+  const [holdout, benchmark, train] = await Promise.all([
+    loadFixture('tuning-holdout.json'),
+    loadFixture('tuning-benchmark.json'),
+    readFile(training, 'utf8').then(text => text.trim().split('\n').map(JSON.parse)),
+  ]);
+  const trainingSpeech = new Set(train.flatMap(row => [row.speech, row.earlier]).filter(Boolean));
+  assert.equal(train.length, 128);
+  assert.equal(train.filter(row => row.language === 'ja').length, 76);
+  assert.ok(holdout.flatMap(fixture => fixture.turns).every(turn => !trainingSpeech.has(turn)));
+  assert.deepEqual(benchmark.modes.map(mode => mode.mode), ['baseline', 'tuned', 'small']);
+  const voiced = new Float32Array(WINDOW_SAMPLES).fill(0.02);
+  const silence = new Float32Array(WINDOW_SAMPLES);
+  for (const mode of benchmark.modes) {
+    let measurement;
+    const pipeline = async task => {
+      if (task === 'automatic-speech-recognition')
+        return async () => ({ text: measurement.transcript });
+      const generate = async () => [{ generated_text: measurement.raw }];
+      generate.tokenizer = { apply_chat_template: messages => messages };
+      return generate;
+    };
+    let events = [];
+    const infer = await createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {}, {
+      onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
+    });
+    const replay = async (row, language, now, audio) => {
+      measurement = row;
+      events = [];
+      const output = await infer(audio, language, now);
+      assert.equal(output.comment, row.comment, mode.mode);
+      assert.deepEqual(events, row.events, mode.mode);
+      if (output.comment) {
+        assert.doesNotMatch(output.comment, /\r|\n|<think>|SKIP/i);
+        assert.ok(output.comment.length <= (language === 'ja' ? 55 : 110));
+      }
+    };
+    for (const [index, row] of mode.audio.entries())
+      await replay(row, row.language, index * 120000, voiced);
+    assert.equal(mode.text.length, holdout.length);
+    for (const [index, fixture] of holdout.entries()) {
+      const record = mode.text[index];
+      assert.equal(record.id, fixture.id);
+      assert.equal(record.turns.length, fixture.turns.length);
+      for (const [turn, transcript] of fixture.turns.entries()) {
+        const row = record.turns[turn];
+        assert.equal(row.transcript ?? null, transcript);
+        await replay(row, fixture.language, (mode.audio.length + index) * 120000 + turn * 12000,
+          transcript === null ? silence : voiced);
+      }
+    }
+  }
 });
 
 test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
@@ -868,7 +968,7 @@ test(
     await page.goto(url + '?debug=1');
     await page.locator('#start').click();
     await page.locator('#debug').waitFor({ state: 'visible' });
-    assert.match(await page.locator('#debug').innerText(), /Qwen3-1.7B-q4f16_1-MLC/);
+    assert.match(await page.locator('#debug').innerText(), /Qwen3-0.6B-Livestream/);
     assert.match(await page.locator('#debug').innerText(), /WebGPU/);
     await page.locator('#start').click();
     await context.close();
@@ -877,7 +977,7 @@ test(
 
 test(
   'real audio worklet and production Worker connect automatically using fake devices and a fixture runtime',
-  { timeout: 25000 },
+  { timeout: 45000 },
   async (t) => {
     const server = await previewServer(new URL('..', import.meta.url).pathname);
     t.after(() => server.close());
@@ -891,15 +991,52 @@ test(
     const page = await browser.newPage({
       permissions: ['camera', 'microphone'],
     });
-    const errors = [],
-      remote = [];
+    const errors = [], remote = [], models = [], overlayRequests = [];
+    const modelURL = model =>
+      'https://huggingface.co/' + model.id + '/resolve/' + model.revision + '/';
+    const baselineURL = modelURL(LLM);
+    const smallMetadata = ['mlc-chat-config.json', 'tokenizer.json'].map(name => modelURL(SMALL_LLM) + name);
     let reject = false;
+    let fail = false;
+    page.on('console', message => {
+      if (message.text().startsWith('fixture-model ')) models.push(message.text().slice(14));
+    });
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname.includes('/models/resolve/')) overlayRequests.push(url.pathname.split('/').at(-1));
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('https://**/*', (route) => {
+      assert.equal(route.request().method(), 'GET');
+      assert.equal(route.request().postData(), null);
       remote.push(route.request().url());
+      if (smallMetadata.includes(route.request().url())) return route.fulfill({
+        contentType: 'application/json',
+        body: '{"fixture":true}',
+      });
       if (route.request().url() === CHAT_RUNTIME) return route.fulfill({
         contentType: 'text/javascript',
-        body: `export async function CreateMLCEngine() { return { async resetChat() {}, chat: { completions: { create: async () => ({choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]}) } } }; }`,
+        body: `
+          export async function CreateMLCEngine(id, {appConfig}) {
+            const [{model, model_lib}] = appConfig.model_list;
+            if (id === ${JSON.stringify(TUNED_MODEL_ID)}) {
+              for (const [namespace, name] of [['webllm/config', 'mlc-chat-config.json'], ['webllm/model', 'tokenizer.json']]) {
+                const metadata = await (await caches.open(namespace)).match(new URL(name, model));
+                if (!(await metadata?.json())?.fixture) throw Error('Missing metadata alias');
+              }
+              if (model_lib !== ${JSON.stringify(SMALL_MODEL_LIBRARY)}) throw Error('Wrong compiled library');
+              const manifest = await (await fetch(new URL('tensor-cache.json', model))).json();
+              const norms = await (await fetch(new URL(manifest.records.at(-1).dataPath, model))).arrayBuffer();
+              if (norms.byteLength !== 131072) throw Error('Missing learned weights');
+            } else if (model !== ${JSON.stringify(baselineURL)} ||
+                       model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
+            console.log('fixture-model ' + id);
+            return { async resetChat() {}, chat: { completions: { async create() {
+              if (${fail}) throw Error('Transcript-bearing error');
+              return {choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]};
+            } } } };
+          }
+        `,
       });
       if (route.request().url() !== RUNTIME) return route.abort();
       return route.fulfill({
@@ -938,9 +1075,11 @@ test(
     await page.locator('#start').click();
     await page.locator('.comment').waitFor({ timeout: 15000 });
     assert.match(await page.locator('.comment').innerText(), /コーヒー/);
+    assert.deepEqual(models, [TUNED_MODEL_ID]);
+    assert.deepEqual(overlayRequests, ['tensor-cache.json', 'norms.bin']);
     assert.deepEqual(
       remote.sort(),
-      [RUNTIME, CHAT_RUNTIME].sort(),
+      [RUNTIME, CHAT_RUNTIME, ...smallMetadata].sort(),
       'Only the explicitly mocked local runtimes are requested',
     );
     await page.locator('#start').click();
@@ -951,13 +1090,16 @@ test(
       true,
     );
     reject = true;
-    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?debug=1');
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline&debug=1');
     await page.locator('#start').click();
     await page.waitForFunction(() => {
       const text = document.getElementById('debug').textContent;
       return text && JSON.parse(text).counts.format === 1;
     }, null, { timeout: 15000 });
     const diagnostics = JSON.parse(await page.locator('#debug').innerText());
+    assert.match(diagnostics.model, /Qwen3-1\.7B/);
+    assert.deepEqual(models, [TUNED_MODEL_ID, LLM.id.split('/').at(-1)]);
+    assert.deepEqual(overlayRequests, ['tensor-cache.json', 'norms.bin']);
     assert.equal(diagnostics.counts.transcription_accepted, 1);
     assert.equal(diagnostics.counts.generation_attempt, 1);
     assert.equal(diagnostics.counts.worker_result, 1);
@@ -965,6 +1107,13 @@ test(
     assert.doesNotMatch(JSON.stringify(diagnostics), /コーヒー|SKIP|prompt|SECRET/);
     await page.locator('#start').click();
     assert.equal(await page.locator('#debug').textContent(), '');
+    fail = true;
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent.includes('trouble keeping up'),
+      null, { timeout: 15000 });
+    assert.equal(await page.evaluate(() => fakeStream.getTracks().every(track => track.readyState === 'ended')), true);
+    assert.equal(await page.locator('#camera').evaluate(video => video.srcObject), null);
     assert.deepEqual(errors, []);
   },
 );
@@ -1029,7 +1178,7 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   assert.equal((await run()).comment, '', 'Repeated model reply is suppressed');
   for (const [value, reason] of [
     ['SKIP', 'format'], ['You are ugly.', 'safety'], ['Call my phone number 1234567890.', 'safety'],
-    ['I can see you drinking coffee.', 'generic_or_visual'], ['You look happy.', 'generic_or_visual'],
+    ['I can see you drinking coffee.', 'generic_or_visual'], ['I see your shirt.', 'generic_or_visual'], ['You look happy.', 'generic_or_visual'],
     ['コーヒーが好き', 'language'], ['Tomatoes are lovely!', 'topic'],
     ['<think>SECRET</think> coffee', 'reasoning'], ['x'.repeat(111), 'length'],
   ]) {

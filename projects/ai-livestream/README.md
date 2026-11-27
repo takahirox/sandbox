@@ -23,10 +23,13 @@ model fallback is deliberately omitted because its latency would make this demo
 unusable on many devices. Mobile layout is supported; mobile inference depends
 on the device and available GPU memory.
 
-Expect about **1.1 GB** on first use, plus temporary inference memory (allow roughly
-4–6 GB of free memory during loading). Actual speed and memory depend on the
-GPU, CPU, browser and device. Japanese recognition with Base can miss words, particularly with noise,
-quiet speech, or partial sentences. Select the spoken language before starting.
+The experimental default is **Qwen3 0.6B tuned for short viewer comments**.
+Expect about **460 MB** on first use, plus temporary inference memory. Append
+`?model=baseline` to use the original 1.7B generator (about 1.1 GB) on the
+same recognition and comment pipeline. Actual speed and memory depend on the
+GPU, CPU, browser and device. The [tuning evaluation](./TUNING-EVALUATION.md)
+reports desktop browser results and mobile feasibility limits. Japanese recognition
+with Base can miss words, particularly with noise, quiet speech, or partial sentences. Select the spoken language before starting.
 Downloads stop with End; completed model assets can be reused from browser cache.
 Failed downloads, lost devices, GPU/runtime errors and slow operations end cleanly
 and leave Go live available. Loading has a five-minute limit and each inference job
@@ -114,16 +117,18 @@ has a 90-second limit. A slow connection can require another attempt.
 | ONNX Runtime Web, matching bundled runtime's WASM | `1.22.0-dev.20250409-89f8206ba4` | Tens of MB runtime/WASM | MIT; [Microsoft](https://github.com/microsoft/onnxruntime) |
 | [Xenova/whisper-base](https://huggingface.co/Xenova/whisper-base/tree/64da57285918e20ea79ea5c88eed7197933abaa8), multilingual, q8 | `64da57285918e20ea79ea5c88eed7197933abaa8` | 76.9 MB encoder + merged decoder, plus tokenizer/config | Conversion repository Apache-2.0; [original Whisper](https://github.com/openai/whisper) MIT |
 | WebLLM browser ESM | `0.2.85` | 6.6 MB JS | Apache-2.0; [MLC](https://github.com/mlc-ai/web-llm/tree/v0.2.85) |
+| [mlc-ai/Qwen3-0.6B-q4f16_1-MLC](https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_1-MLC/tree/8c14ce481d4c692769976ad52afea453a102df19) and [trained weights](./models/NOTICE.md) | `8c14ce481d4c692769976ad52afea453a102df19`, overlay `362c654633a66e61` | 335.4 MB weight shards, 11.4 MB tokenizer/config, 0.19 MB adaptation and manifest | Apache-2.0 |
+| MLC compiled WebGPU model library, `v0_2_84/base/Qwen3-0.6B-q4f16_1_cs1k-webgpu.wasm` | `00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0` | 5.5 MB | Apache-2.0; [MLC binary libraries](https://github.com/mlc-ai/binary-mlc-llm-libs/tree/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0) |
 | [mlc-ai/Qwen3-1.7B-q4f16_1-MLC](https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/tree/80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc) | `80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc` | 968.0 MB weight shards + 11.4 MB tokenizer/config | [Original Qwen](https://huggingface.co/Qwen/Qwen3-1.7B), Apache-2.0 |
 | MLC compiled WebGPU model library, `v0_2_84/base/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm` | `00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0` | 5.6 MB | Apache-2.0; [MLC binary libraries](https://github.com/mlc-ai/binary-mlc-llm-libs/tree/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0) |
 
 Sizes are decimal MB, approximate, excluding browser overhead. Models are fetched
 from immutable revision paths; runtime and WASM use exact jsDelivr npm versions.
-WebLLM's chat-completion method runs inside the Worker, not through an HTTP API.
-It has one pinned model entry, a 1,536-token context, 256-token prefill chunks and
-no thinking output. Its conversation/KV state is reset before each comment; only
-the bounded quoted context is supplied again. No model files or third-party runtime
-code are vendored in this project. See
+WebLLM's chat-completion method runs inside the Worker. Each session loads one
+pinned model with a 1,536-token context, 256-token prefill chunks and thinking
+disabled. Its conversation/KV state resets before each comment. The static site
+ships the small trained normalization overlay and its manifest, with frozen
+matrix weights and runtime code fetched from their pinned upstream revisions. See
 [`config.mjs`](./config.mjs) for the authoritative pins. The illustration is original CSS.
 
 ## Validation
@@ -140,7 +145,8 @@ node --test tests/gallery.test.mjs tests/pokemon-coin-flip.test.cjs tests/walk-t
 ```
 
 The normal suite uses fake media devices, mocked AI and synthesized audio buffers.
-It checks seeded Japanese/English audience trajectories, silence/decline, count caps,
+It checks the overlay format and default/rollback routing, seeded Japanese/English
+audience trajectories, silence/decline, count caps,
 reactions without chat, manual-choice independence, rolling context/voice selection,
 resource cleanup, permission races/errors, unavailable GPU, failed model
 downloads, silence, language/context transfer, cadence, bounded history, filtering,
@@ -156,6 +162,7 @@ For the opt-in bounded **real-model** test on a WebGPU-capable machine:
 LOCAL_AI_SMOKE=1 node --test tests/ai-livestream-model.test.mjs
 ```
 
+Set `LOCAL_AI_MODEL=baseline` to run the same smoke test with the 1.7B model.
 This downloads the pinned ASR/WebLLM assets and passes synthetic Japanese/English WAV fixtures
 through the same ASR/generator implementation in a browser Worker. It asserts
 recognized topics, short topical generated comments, and GET-only asset traffic;

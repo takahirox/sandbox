@@ -8,7 +8,7 @@ import { speechInterest } from './audience.mjs';
 // Shared by the actual Worker and fixture evaluation. No user content in diagnostics.
 export async function createInference(pipeline, env, progress, {
   onEngagement = () => {}, onDiagnostic = () => {},
-  isSuperseded = () => false, clock = () => performance.now(),
+  isSuperseded = () => false, clock = () => performance.now(), failOnGenerationError = false,
 } = {}) {
   env.allowLocalModels = false;
   env.useBrowserCache = true;
@@ -132,7 +132,10 @@ export async function createInference(pipeline, env, progress, {
       });
       const generated = results[0]?.generated_text;
       raw = Array.isArray(generated) ? generated.at(-1)?.content : generated;
-    } catch { return finish('generation_error', { interest }); }
+    } catch (error) {
+      if (failOnGenerationError) throw error;
+      return finish('generation_error', { interest });
+    }
     onDiagnostic('generation_ms', Math.max(0, clock() - generationStarted));
     const inspected = inspectComment(raw || '', recent, language);
     if (!inspected.comment) return finish(inspected.reason, { interest });

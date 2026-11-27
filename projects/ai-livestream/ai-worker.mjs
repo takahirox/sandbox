@@ -25,7 +25,8 @@ self.onmessage = async ({ data }) => {
       const [{ pipeline, env }, { CreateMLCEngine }] = await Promise.all([
         import(RUNTIME), import(CHAT_RUNTIME),
       ]);
-      infer = await createInference(localPipeline(pipeline, CreateMLCEngine), env, (stage, event) => {
+      const models = localPipeline(pipeline, CreateMLCEngine, { tuned: data.model !== 'baseline' });
+      infer = await createInference(models, env, (stage, event) => {
         if (['initiate', 'progress', 'done'].includes(event.status))
           self.postMessage({
             type: 'progress',
@@ -33,6 +34,7 @@ self.onmessage = async ({ data }) => {
             progress: event.progress,
           });
       }, { onEngagement: interest => self.postMessage({ type: 'engagement', interest }),
+        failOnGenerationError: true,
         isSuperseded: () => superseded,
         onDiagnostic: (event, value) => {
           if (debug) self.postMessage({ type: 'diagnostic', event, value });

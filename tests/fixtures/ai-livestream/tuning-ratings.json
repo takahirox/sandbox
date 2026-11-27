@@ -1,0 +1,196 @@
+{
+  "baseline": {
+    "audio": {
+      "japanese.wav": {
+        "comment": "今日は何で猫を買ったの?",
+        "flags": "RNF"
+      },
+      "english.wav": {
+        "comment": "What's your favorite coffee drink?",
+        "flags": "RN"
+      },
+      "en-discovery.wav": {
+        "comment": "Why does coffee taste better when it's colder?",
+        "flags": "RNF"
+      },
+      "en-quiet.wav": {
+        "comment": "You sure you'll be back soon?",
+        "flags": "RN"
+      }
+    },
+    "heldOut": {
+      "ja-mochi": {
+        "comment": "フライパンの調子が良かったね。",
+        "flags": "F"
+      },
+      "en-observatory": {
+        "comment": "Did the moon come out before you stayed until then?",
+        "flags": "R"
+      },
+      "en-shelf": {
+        "comment": "Did you use wood or metal for the bookshelf?",
+        "flags": "RN"
+      },
+      "en-lentils": {
+        "comment": "Did the lentils get softer?",
+        "flags": "RN"
+      },
+      "en-visual": {
+        "comment": "What brand are those glasses?",
+        "flags": "N"
+      },
+      "ja-secret": {
+        "comment": "チャットに書いてほしい",
+        "flags": ""
+      },
+      "en-transcription": {
+        "comment": "What did you mean by \"moving stair\"?",
+        "flags": "N"
+      },
+      "ja-letter": {
+        "comment": "切手を貼る前に確認してほしい。",
+        "flags": "R"
+      },
+      "en-oranges": {
+        "comment": "What's your favorite orange variety?",
+        "flags": "RN"
+      },
+      "en-print": {
+        "comment": "Are you using a special paper for invitations?",
+        "flags": "RN"
+      },
+      "en-suitcase": {
+        "comment": "What made you decide to drag the suitcase?",
+        "flags": "RN"
+      }
+    }
+  },
+  "tuned": {
+    "audio": {
+      "japanese.wav": {
+        "comment": "5円で猫見지難しに進む?",
+        "flags": "F"
+      },
+      "english.wav": {
+        "comment": "A fresh cup sounds delightful.",
+        "flags": "RN"
+      },
+      "ja-discovery.wav": {
+        "comment": "コーヒー苦みだと手間違って少ないよね",
+        "flags": ""
+      },
+      "en-discovery.wav": {
+        "comment": "I'd try lowering the temperature to get a brew.",
+        "flags": "R"
+      },
+      "ja-quiet.wav": {
+        "comment": "お茶道、どのように来たり?",
+        "flags": "F"
+      },
+      "en-quiet.wav": {
+        "comment": "A little break every tea is nice.",
+        "flags": "R"
+      }
+    },
+    "heldOut": {
+      "ja-mochi": {
+        "comment": "パンで焼めたのは味覚派",
+        "flags": ""
+      },
+      "en-observatory": {
+        "comment": "That cloud of moon must have been out.",
+        "flags": ""
+      },
+      "ja-flute": {
+        "comment": "低い音は途中の違いだな",
+        "flags": "R"
+      },
+      "en-shelf": {
+        "comment": "What bookshelf were you getting?",
+        "flags": "R"
+      },
+      "ja-plaza": {
+        "comment": "座れる広で夏も春の陽が照らえるよね",
+        "flags": "F"
+      },
+      "en-lentils": {
+        "comment": "Lentils are tough when they simmer—maybe it's worth it.",
+        "flags": "R"
+      },
+      "en-transcription": {
+        "comment": "Morning stars are often like moving staircases.",
+        "flags": "F"
+      },
+      "ja-letter": {
+        "comment": "封筒の向きはできたって好みだね",
+        "flags": "R"
+      },
+      "en-oranges": {
+        "comment": "Or maybe tart oranges are your favorite fruit.",
+        "flags": "RN"
+      },
+      "en-print": {
+        "comment": "What paper are you printing on?",
+        "flags": "RN"
+      }
+    }
+  },
+  "small": {
+    "audio": {
+      "japanese.wav": {
+        "comment": "猫がとても可愛いことを伝えた。",
+        "flags": "R"
+      },
+      "english.wav": {
+        "comment": "Which coffee?",
+        "flags": "RN"
+      },
+      "ja-discovery.wav": {
+        "comment": "その理由は、コーヒーの苦みが減るかのように。",
+        "flags": "R"
+      },
+      "en-discovery.wav": {
+        "comment": "What else can you try to fix?",
+        "flags": "N"
+      },
+      "en-quiet.wav": {
+        "comment": "Which tea would you like?",
+        "flags": "N"
+      }
+    },
+    "heldOut": {
+      "ja-mochi": {
+        "comment": "その端のパリッリーパン!",
+        "flags": "R"
+      },
+      "ja-flute": {
+        "comment": "ギターの弦を降調して練習しただけ。",
+        "flags": "F"
+      },
+      "ja-unclear": {
+        "comment": "何を指しているのか?",
+        "flags": "N"
+      },
+      "en-visual": {
+        "comment": "Which glasses are you wearing?",
+        "flags": "N"
+      },
+      "ja-letter": {
+        "comment": "その封筒の向きが間違えなかったことにした。",
+        "flags": "RF"
+      },
+      "en-oranges": {
+        "comment": "Which fruit juice did you make?",
+        "flags": "RNF"
+      },
+      "ja-hill": {
+        "comment": "その坂は、朝の散歩でよく下りるんだ。",
+        "flags": "RNF"
+      },
+      "en-suitcase": {
+        "comment": "Which suitcase did you pack?",
+        "flags": "RN"
+      }
+    }
+  }
+}
