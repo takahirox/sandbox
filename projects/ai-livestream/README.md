@@ -115,8 +115,10 @@ noise observation across the last three frames. This limits the effect of a
 20 ms burst even when it straddles two frames. Smoother noise closer to the
 voice gate can update the floor immediately.
 Among smooth frames, nearly exact repetition at 100 or 120 Hz with at least
-half the power at the fundamental identifies mains hum. Other smooth frames
-that pass the energy gate are checked for repetition in the 80–400 Hz pitch range.
+half the power at the fundamental identifies mains hum. At 50 or 60 Hz, a
+single cycle is checked for at least half its power at the fundamental and
+97.5% across the fundamental and second harmonic. Other smooth frames that
+pass the energy gate are checked for repetition in the 80–400 Hz pitch range.
 Frames without a normalized correlation of at least 0.6 can raise the noise
 floor. The floor rises more slowly during speech for these smooth frames to
 limit the effect of syllables without a clear pitch.
@@ -126,8 +128,9 @@ the noise RMS, with a minimum RMS of 0.003 in normalized PCM. During speech the
 gate drops to 1.7 times the noise RMS, with a minimum of 0.002. An utterance
 needs at least 120 ms of voiced frames. It starts with up to 200 ms of pre-roll
 and keeps 160 ms of trailing PCM after a 600 ms pause. At the six-second cap it
-splits at the quiet tail when available, or carries 160 ms of overlap into the
-next segment. A continuation needs fresh voiced audio before it can be submitted.
+trims any excess quiet tail and carries 160 ms of overlap into the next
+segment if the 600 ms pause has yet to elapse. A continuation needs fresh voiced
+audio before it can be submitted.
 
 WebRTC VAD supports 20 ms frames at 16 kHz and uses a sub-band classifier.
 Kaldi's decoder endpoint rules include a 500 ms pause with high recognition
@@ -164,17 +167,19 @@ The audio tests also replay 20 seconds of steady filtered noise at RMS 0.006
 with two filter strengths. Noise alone submits no PCM. When the stronger
 filtered noise starts during speech, the submission delay falls from 5.4 s
 with the previous detector to 760 ms. The quiet-speech fixture reaches
-recognition in under two seconds. At RMS 0.0044, seeded 100 and 120 Hz hum
-alone submits no PCM, and both utterances mixed into the hum submit 600 ms
-after they end. Broadband and filtered 20 ms bursts before the quiet English
-WAV yield the same segment boundaries as the clean recording and reach the
-fixture recognizer at 4.144 s, including when a burst spans two frames.
+recognition in under two seconds. At about RMS 0.0044, seeded 50, 60, 100 and
+120 Hz hum alone submits no PCM, and utterances mixed into each hum submit
+600 ms after they end. A 100 ms syllable after a 280 ms pause across the cap
+is submitted in the continuation at 6.784 s. Broadband and filtered 20 ms
+bursts before the quiet English WAV yield the same segment boundaries as the
+clean recording and reach the fixture recognizer at 4.144 s, including when a
+burst spans two frames.
 
 Across these patterns, the idle Worker would run ASR seven times before the
 change and eight times after it. Delivered PCM fell from 42 s to 22 s. On an
 arm64 Mac (Mac16,5, Node 26.12.1), a capture-only pass over 5,040 s of replayed 16 kHz input
-took 739 ms of process CPU time (726 ms wall time) for fixed windows and 368 ms
-(353 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
+took 757 ms of process CPU time (742 ms wall time) for fixed windows and 391 ms
+(374 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
 PCM buffers. The transfer, pending slot and active job each hold at most 375 KiB
 of PCM, excluding model and browser internals.
 
