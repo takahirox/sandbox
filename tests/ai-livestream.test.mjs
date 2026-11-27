@@ -340,6 +340,7 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
     };
     let events = [];
     const infer = await createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {}, {
+      model: mode.mode,
       onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
     });
     const replay = async (row, language, now, audio) => {
@@ -379,6 +380,22 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
     .map(({ id, turns }) => ({ id, ...turns.at(-1) }));
   assert.ok(usefulJapanese(japaneseAudio, ratings.tuned.audio).length >= 1);
   assert.ok(usefulJapanese(japaneseText, ratings.tuned.heldOut).length >= 3);
+});
+
+test('the Japanese rollback prompt keeps the shipped example and recent replies', () => {
+  const speech = 'コーヒーの香りが好きです。';
+  const context = '豆を挽きました。';
+  const recent = ['前のコメント', '豆が気になる', 'いい香りだね', 'どの豆にしたの？'];
+  const options = { context, recent, voice: 1 };
+  const baseline = messagesFor(speech, 'ja', { ...options, model: 'baseline' });
+  assert.deepEqual(baseline.map(message => message.role), ['system', 'user', 'assistant', 'user']);
+  assert.match(baseline[0].content, /speechへの感想か質問.*具体的な一点に気軽に反応/);
+  assert.deepEqual(JSON.parse(baseline[3].content), {
+    speech, earlier: context, avoid_repeating: recent.slice(-3),
+  });
+  const tuned = messagesFor(speech, 'ja', { ...options, model: 'tuned' });
+  assert.deepEqual(tuned, messagesFor(speech, 'ja', { ...options, model: 'small' }));
+  assert.deepEqual(JSON.parse(tuned[1].content), { 前の話: context, 発言: speech });
 });
 
 test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
@@ -1016,8 +1033,10 @@ test(
               if (header !== 'GGUF') throw Error('Missing LoRA adapter');
               console.log('fixture-model ' + ${JSON.stringify(TUNED_MODEL_ID)});
             }
-            async createChatCompletion({cache_prompt, chat_template_kwargs}) {
+            async createChatCompletion({messages, cache_prompt, chat_template_kwargs}) {
               if (cache_prompt || chat_template_kwargs.enable_thinking) throw Error('Unbounded chat');
+              if (messages.length !== 2 || JSON.parse(messages[1].content).発言 !== '今日はコーヒーを飲みます。')
+                throw Error('Wrong tuned Japanese prompt');
               if (${fail}) throw Error('Transcript-bearing error');
               return {choices:[{message:{content:'コーヒー、いい香りですね！'}}]};
             }
@@ -1032,7 +1051,11 @@ test(
             if (model !== ${JSON.stringify(baselineURL)} ||
                 model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
             console.log('fixture-model ' + id);
-            return { async resetChat() {}, chat: { completions: { async create() {
+            return { async resetChat() {}, chat: { completions: { async create({messages}) {
+              if (messages.length !== 4 || JSON.parse(messages[1].content).speech !== 'ギターの弦を替えてみた。' ||
+                  messages[2].content !== 'どの弦にしたの？' ||
+                  JSON.parse(messages[3].content).speech !== '今日はコーヒーを飲みます。')
+                throw Error('Wrong rollback Japanese prompt');
               if (${fail}) throw Error('Transcript-bearing error');
               return {choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]};
             } } } };

@@ -9,6 +9,7 @@ import { speechInterest } from './audience.mjs';
 export async function createInference(pipeline, env, progress, {
   onEngagement = () => {}, onDiagnostic = () => {},
   isSuperseded = () => false, clock = () => performance.now(), failOnGenerationError = false,
+  model,
 } = {}) {
   env.allowLocalModels = false;
   env.useBrowserCache = true;
@@ -122,7 +123,7 @@ export async function createInference(pipeline, env, progress, {
     let raw;
     try {
       const prompt = generator.tokenizer.apply_chat_template(
-        messagesFor(text, language, { context: previous, recent, voice: speaker }),
+        messagesFor(text, language, { context: previous, recent, voice: speaker, model }),
         { tokenize: false, add_generation_prompt: true, enable_thinking: false },
       );
       const results = await generator(prompt, {

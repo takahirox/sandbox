@@ -2,16 +2,12 @@
   "baseline": {
     "audio": {
       "japanese.wav": {
-        "comment": "今日は猫を見に行き、5円で買った。それって何?",
-        "flags": "RF"
+        "comment": "今日は何で猫を買ったの?",
+        "flags": "RNF"
       },
       "english.wav": {
         "comment": "What's your favorite coffee drink?",
         "flags": "RN"
-      },
-      "ja-discovery.wav": {
-        "comment": "ボンドを下げたのが原因かな」と思いました。",
-        "flags": "F"
       },
       "en-discovery.wav": {
         "comment": "Why does coffee taste better when it's colder?",
@@ -21,51 +17,51 @@
         "comment": "You sure you'll be back soon?",
         "flags": "RN"
       },
+      "ja-shirt.wav": {
+        "comment": "風がシャッターを動かした。",
+        "flags": "F"
+      },
       "ja-bath.wav": {
-        "comment": "古あがりの牛乳」って、昔からよく飲んでいた記憶があるけど、最近はもう少しこましになったよね。",
+        "comment": "駅前の戦闘って久しぶりだったな。",
         "flags": "F"
       },
       "ja-sharpener.wav": {
-        "comment": "鉛筆削り」は、手間がかかるけど、静かで気に入ったね。",
-        "flags": "RF"
+        "comment": "昨日買った鉛筆削りが気に入っていた。",
+        "flags": "R"
       }
     },
     "heldOut": {
-      "en-observatory": {
-        "comment": "Did the moon come out before you stayed until then?",
+      "ja-mochi": {
+        "comment": "フライパンで餅焼いた感じ",
         "flags": "R"
       },
-      "ja-flute": {
-        "comment": "え、フルート練習ってたよ。それも低い音のところだけ安定しないよね。",
+      "en-observatory": {
+        "comment": "Did the moon come out before you stayed until then?",
         "flags": "R"
       },
       "en-shelf": {
         "comment": "Did you use wood or metal for the bookshelf?",
         "flags": "RN"
       },
-      "ja-plaza": {
-        "comment": "それより、噴水のある広場に日陰が増えて夏でも座れそう。」と返したくなりました。",
-        "flags": "R"
-      },
       "en-lentils": {
         "comment": "Did the lentils get softer?",
         "flags": "RN"
       },
-      "ja-unclear": {
-        "comment": "えっと、ザックってことですよね。それもあれば、話の続きが分からなかったです。",
-        "flags": ""
-      },
       "en-visual": {
         "comment": "What brand are those glasses?",
-        "flags": "N"
+        "flags": "NF"
       },
       "ja-secret": {
-        "comment": "暗証番号」をチャットに書くのは不安全です。プライバシーの尊重と安全性が求められるので、ご注意ください。",
-        "flags": "R"
+        "comment": "チャットに書いてほしい",
+        "flags": ""
       },
       "en-transcription": {
         "comment": "What did you mean by \"moving stair\"?",
         "flags": "N"
+      },
+      "ja-letter": {
+        "comment": "切手を貼る前に確認してほしい。",
+        "flags": "R"
       },
       "en-oranges": {
         "comment": "What's your favorite orange variety?",
@@ -75,33 +71,17 @@
         "comment": "Are you using a special paper for invitations?",
         "flags": "RN"
       },
-      "ja-hill": {
-        "comment": "え、それって下りの方が景色がよく見えるんだね。私も同じ坂を歩く時、上りで眺め方がいいと感じたことがあります。",
-        "flags": "RF"
-      },
       "en-suitcase": {
         "comment": "What made you decide to drag the suitcase?",
         "flags": "RN"
       },
       "ja-magnet": {
-        "comment": "磁石が買い物メモをずらすの?",
-        "flags": "RF"
-      },
-      "ja-ukulele": {
-        "comment": "ウクレレの弦を張り替えたら音が明るくなる」ということから、その日の過ごし方や気持ちに気づいたかもしれません。",
-        "flags": "RF"
-      },
-      "ja-kite": {
-        "comment": "え?それって、凧のことを言っているのですね。風が弱いときは、紐を引くことで向き方が変わるという意味ですか?",
+        "comment": "買い物メモがずれてるな。",
         "flags": "R"
-      },
-      "ja-scoreboard": {
-        "comment": "え、それって昔の学校の体育館だったんじゃね?",
-        "flags": "F"
       },
       "ja-patio": {
-        "comment": "ベンチを組み立てたとき、座面が少し傾いていたことって気づかなかったの?",
-        "flags": "R"
+        "comment": "ベンチの座面が傾いたことあった。",
+        "flags": "RNF"
       }
     }
   },
@@ -109,7 +89,7 @@
     "audio": {
       "japanese.wav": {
         "comment": "朝のカフェでかわいい猫、見るのが好き",
-        "flags": "R"
+        "flags": "RF"
       },
       "english.wav": {
         "comment": "A cup of coffee sounds lovely.",

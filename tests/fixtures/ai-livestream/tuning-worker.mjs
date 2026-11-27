@@ -38,7 +38,7 @@ self.onmessage = async ({ data }) => {
         };
         wrapped.tokenizer = model.tokenizer;
         return wrapped;
-      }, env, () => {}, { failOnGenerationError: true, onDiagnostic: (event, value) => {
+      }, env, () => {}, { model: data.model, failOnGenerationError: true, onDiagnostic: (event, value) => {
         if (Number.isFinite(value)) observations[event] = value;
         else (observations.events ??= []).push(event);
       } });

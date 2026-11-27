@@ -31,7 +31,8 @@ self.onmessage = async ({ data }) => {
             stage,
             progress: event.progress,
           });
-      }, { onEngagement: interest => self.postMessage({ type: 'engagement', interest }),
+      }, { model: data.model,
+        onEngagement: interest => self.postMessage({ type: 'engagement', interest }),
         failOnGenerationError: true,
         isSuperseded: () => superseded,
         onDiagnostic: (event, value) => {
