@@ -6,6 +6,30 @@ const PRE_ROLL = SAMPLE_RATE * 0.2 + (ONSET_FRAMES - 1) * FRAME;
 const END_PAUSE = SAMPLE_RATE * 0.6;
 const TAIL = SAMPLE_RATE * 0.16;
 const MIN_VOICED_FRAMES = MIN_SEGMENT_SAMPLES / FRAME;
+const PITCH_STEP = 4;
+const MIN_PITCH_LAG = SAMPLE_RATE / 400;
+const MAX_PITCH_LAG = SAMPLE_RATE / 80;
+
+function hasPeriodicSignal(frame, mean) {
+  // Use the same starting samples for each lag and skip three of every four
+  // samples. This checks for repetition in the 80–400 Hz pitch range.
+  const count = FRAME - MAX_PITCH_LAG;
+  let energy = 0;
+  for (let i = 0; i < count; i += PITCH_STEP) {
+    const value = frame[i] - mean;
+    energy += value * value;
+  }
+  for (let lag = MIN_PITCH_LAG; lag <= MAX_PITCH_LAG; lag += PITCH_STEP) {
+    let correlation = 0, lagEnergy = 0;
+    for (let i = 0; i < count; i += PITCH_STEP) {
+      const shifted = frame[i + lag] - mean;
+      correlation += (frame[i] - mean) * shifted;
+      lagEnergy += shifted * shifted;
+    }
+    if (correlation > 0 && correlation ** 2 >= 0.6 ** 2 * energy * lagEnergy) return true;
+  }
+  return false;
+}
 
 // All capture state stays on the audio thread, with one transferable message in flight.
 class SpeechSegment extends AudioWorkletProcessor {
@@ -70,15 +94,19 @@ class SpeechSegment extends AudioWorkletProcessor {
     }
     // Remove DC from the power estimate. Adjacent samples in broadband noise
     // differ much more than samples in the lower-frequency part of speech.
-    const power = energy / FRAME - (sum / FRAME) ** 2;
+    const mean = sum / FRAME;
+    const power = energy / FRAME - mean ** 2;
     const threshold = this.length
       ? Math.max(0.002 ** 2, 1.7 ** 2 * this.noisePower)
       : Math.max(0.003 ** 2, 2.5 ** 2 * this.noisePower);
     const voiced = power >= threshold && differenceEnergy < 1.5 * FRAME * power;
-    // Filtered noise can clear the voice gate while the floor is still low.
-    // Learn it quickly so those frames stop counting toward speech onset or hold.
-    if (!voiced || differenceEnergy >= 0.5 * FRAME * power) {
-      const rise = voiced ? 0.15 : 0.05;
+    // Smooth background noise can clear the voice gate. Learn its level when
+    // the frame lacks pitch repetition, without imposing a pitch gate on speech.
+    const rough = differenceEnergy >= 0.5 * FRAME * power;
+    if (!voiced || rough || !hasPeriodicSignal(this.frame, mean)) {
+      // During speech, raise the floor more slowly for smooth frames so a
+      // speech frame without a clear pitch has less effect on the endpoint.
+      const rise = voiced && (rough || !this.length) ? 0.15 : 0.05;
       this.noisePower += (Math.max(0, power) - this.noisePower) *
         (power > this.noisePower ? rise : 0.01);
     }
