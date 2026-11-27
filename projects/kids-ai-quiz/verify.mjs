@@ -10,83 +10,99 @@ export const counters = new Map([
   ['ほん', '📕'], ['ぼうし', '🧢'], ['さくらんぼ', '🍒'], ['ぶどう', '🍇'], ['ふね', '⛵'],
 ]);
 
-export const countPrompts = {
-  count: ['いくつ ある？', 'ぜんぶで なんこ？'],
-  add: ['あわせて なんこ？', 'ぜんぶで いくつ？'],
-  take: ['ばつの ものを とると、いくつ のこる？', 'ばつの ものを へらすと、のこりは なんこ？'],
-};
-export const positionPrompts = [
-  ['ひだりの はしは どれ？', 'いちばん ひだりに あるのは？'],
-  ['まんなかは どれ？', 'まんなかに あるのは？'],
-  ['みぎの はしは どれ？', 'いちばん みぎに あるのは？'],
-];
-export const sequencePrompts = [
-  'おなじ ぶんずつ へるよ。つぎの かずは？',
-  'おなじ ぶんずつ ふえるよ。つぎの かずは？',
-];
-export const comparePrompts = [['いちばん すくないのは？', 'どれが いちばん すくない？'],
-  ['いちばん おおいのは？', 'どれが いちばん おおい？']];
-
-export function factPrompts(family, wording, name) {
-  const question = wording.replace('{subject}', name);
-  if (question.endsWith('のは？')) return [question, question.replace(/のは？$/, 'のは どれ？')];
-  if (question.endsWith('のは どれ？')) return [question, question.replace(/のは どれ？$/, 'のは？')];
-  if (family === 'shape') return [question, 'この かたちと おなじなのは？'];
-  if (family === 'color') return [question, 'この いろと おなじなのは？'];
-  if (family === 'corners') return [question, 'かどは なんこ ある？'];
-  return [question];
+// Parse the relation and then look up its subject independently.
+function factPattern(family, wording) {
+  if (family === 'shape') return /^(?:おなじ かたちは どれ|この かたちと おなじなのは(?: どれ)?)？$/u;
+  if (family === 'color') return /^(?:おなじ いろは どれ|この いろと おなじなのは(?: どれ)?)？$/u;
+  if (family === 'corners') return /^かどは (?:いくつ|なんこ)(?: ある)?？$/u;
+  const body = wording.replace('{subject}', '(.+)')
+    .replace(/のは(?: どれ)?？$/, 'のは(?: どれ)?？')
+    .replace(/(?:なにを する|どうする)？$/, '(?:なにを する|どうする)？');
+  return new RegExp('^' + body + '$', 'u');
 }
 
-const facts = new Map();
-for (const [topic, family, wording, icon, groups] of modelRelations) {
+const contrasts = modelRelations.map(([topic, family, wording, icon, groups]) => {
+  const pattern = factPattern(family, wording);
   const options = new Map(groups.map(([[, label, symbol, kind]]) => [label, { label, icon: symbol, kind }]));
-  for (const [[answerId, answer], subjects] of groups) {
-    for (const [id, name, symbol] of subjects) {
-      for (const question of factPrompts(family, wording, name)) {
-        const clue = icon ? '-' : name;
-        const key = family + ':' + id;
-        const group = family + ':' + (subjects.length > 1 ? answerId : 'any');
-        const lookup = [clue, question].join('\n');
-        if (facts.has(lookup)) throw new Error('Ambiguous quiz contrast: ' + lookup);
-        facts.set(lookup, {
-          key, group, answer, options,
-          clue: icon ? { icon } : { icon: symbol, spoken: name, kind: topic === 'colors' ? 'swatch' : 'shape' },
-        });
-      }
+  const subjects = new Map();
+  for (const [[answerId, answer], members] of groups) {
+    for (const [id, name, symbol] of members) {
+      if (subjects.has(name)) throw new Error('Ambiguous quiz contrast: ' + family + ':' + name);
+      subjects.set(name, {
+        key: family + ':' + id, group: family + ':' + (members.length > 1 ? answerId : 'any'), answer,
+        clue: icon ? { icon } : { icon: symbol, spoken: name, kind: topic === 'colors' ? 'swatch' : 'shape' },
+      });
     }
   }
+  return { pattern, icon, subjects, options };
+});
+
+function factual(picture, question, labels) {
+  let result = null;
+  for (const { pattern, icon, subjects, options } of contrasts) {
+    if (Boolean(icon) !== (picture === '-')) continue;
+    const match = pattern.exec(question);
+    const fact = match && subjects.get(icon ? match[1] : picture);
+    if (!fact) continue;
+    if (result) return null;
+    result = { ...fact, choices: labels.map(label => options.get(label)) };
+  }
+  return result;
 }
 
 const number = value => /^[0-9]$/.test(value);
 const numberChoice = label => ({ label, kind: 'number' });
+const totalQuestion = /^(?:([ぁ-ゖー]+) は |(あわせて|ぜんぶで) )?(?:いくつ|なんこ)(?: ある)?？$/u;
+const takeQuestion = /^ばつの ものを (?:とる|へらす)と、(?:いくつ のこる|のこりは なんこ)？$/u;
+const compareQuestion = /^(どれが )?いちばん (すくない|おおい)(のは)?？$/u;
+const positionQuestions = [
+  /^(?:ひだりの はしは どれ|いちばん ひだりに あるのは(?: どれ)?)？$/u,
+  /^まんなか(?:は どれ|に あるのは(?: どれ)?)？$/u,
+  /^(?:みぎの はしは どれ|いちばん みぎに あるのは(?: どれ)?)？$/u,
+];
+const sequenceQuestion = /^おなじ ぶんずつ (へる|ふえる)よ。つぎの かずは(?: なに)?？$/u;
 
 function counting(picture, question, labels) {
-  const [name, a, operator, b, extra] = picture.split(' ');
+  const expression = /^([^ ]+) ([1-9])(?: ([-+]) (?:([^ ]+) )?([1-9]))?$/u.exec(picture);
+  if (!expression || !labels.every(number)) return null;
+  const [, name, a, operator, other, b] = expression;
   const icon = counters.get(name);
-  if (!icon || !/^[1-9]$/.test(a) || !labels.every(number) || extra !== undefined) return null;
-  if (b !== undefined && !/^[1-9]$/.test(b)) return null;
+  const secondIcon = other ? counters.get(other) : icon;
+  if (!icon || !secondIcon) return null;
   const first = Number(a), second = Number(b);
-  const rule = operator === undefined ? 'count' : operator === '+' ? 'add' : operator === '-' ? 'take' : null;
-  if (!rule || !countPrompts[rule].includes(question)) return null;
+  const total = totalQuestion.exec(question);
+  const selected = total?.[1];
+  const rule = operator === '-' ? 'take' : operator === '+' ? 'add' : 'count';
+  if (rule === 'take') {
+    if (!takeQuestion.test(question) || (other && other !== name)) return null;
+  } else if (!total || (total[2] === 'あわせて' && rule !== 'add')) return null;
+  if (selected && (rule !== 'add' || !other || name === other || (selected !== name && selected !== other))) return null;
   const count = rule === 'add' ? first + second : first;
   const crossed = rule === 'take' ? second : 0;
-  if (!Number.isInteger(count - crossed) || count > 9 || crossed > first || (operator && b === undefined)) return null;
+  if (count > 9 || crossed > first) return null;
   const split = rule === 'add' ? first : undefined;
   const spoken = Array.from({ length: count }, (_, index) =>
-    (index === split ? 'それから ' : index >= count - crossed ? 'ばつの ' : '') + name).join('、');
+    (index === split ? 'それから ' : index >= count - crossed ? 'ばつの ' : '')
+      + (other && rule === 'add' && index >= split ? other : name)).join('、');
+  const clue = { icon, count, crossed, split, spoken, secondIcon, separate: Boolean(selected) };
+  const choices = labels.map(numberChoice);
+  if (selected) {
+    const [wanted, rest] = selected === name ? [first, second] : [second, first];
+    return { key: 'select:' + wanted + ':' + rest, group: 'select', clue, answer: String(wanted), choices };
+  }
   const pair = rule === 'add' ? [first, second].sort((x, y) => x - y) : [first, second];
   const key = rule + ':' + (rule === 'count' ? first : pair.join(':'));
   return {
     key, group: rule === 'count' ? 'count' : rule + ':' + (count - crossed),
-    clue: { icon, count, crossed, split, spoken }, answer: String(count - crossed),
-    choices: labels.map(numberChoice),
+    clue, answer: String(count - crossed), choices,
   };
 }
 
 function comparing(picture, question, labels) {
   const icon = counters.get(picture);
-  const direction = comparePrompts.findIndex(prompts => prompts.includes(question));
-  if (!icon || direction < 0 || !labels.every(label => /^[1-7]$/.test(label))) return null;
+  const match = compareQuestion.exec(question);
+  if (!icon || !match || Boolean(match[1]) === Boolean(match[3]) || !labels.every(label => /^[1-7]$/.test(label))) return null;
+  const direction = Number(match[2] === 'おおい');
   const values = labels.toSorted().map(Number);
   const answer = String(values[direction ? 2 : 0]);
   return {
@@ -100,7 +116,7 @@ function comparing(picture, question, labels) {
 function positions(picture, question, labels) {
   const names = picture.split(' ');
   const icons = names.map(name => counters.get(name));
-  const index = positionPrompts.findIndex(prompts => prompts.includes(question));
+  const index = positionQuestions.findIndex(pattern => pattern.test(question));
   if (names.length !== 3 || index < 0 || icons.some(icon => !icon) || new Set(icons).size !== 3
     || !labels.every(label => /^@[123]$/.test(label))) return null;
   return {
@@ -116,39 +132,33 @@ function positions(picture, question, labels) {
 }
 
 function sequence(picture, question, labels) {
+  const match = sequenceQuestion.exec(question);
   const values = picture.split(' ');
-  if (values.length !== 3 || !values.every(number) || !labels.every(number)) return null;
+  if (!match || values.length !== 3 || !values.every(number) || !labels.every(number)) return null;
   const [a, b, c] = values.map(Number);
   const step = b - a;
   const next = c + step;
   if (step !== c - b || ![1, 2].includes(Math.abs(step)) || next < 0 || next > 9
-    || question !== sequencePrompts[Number(step > 0)]) return null;
+    || (match[1] === 'ふえる') !== (step > 0)) return null;
   return {
     key: 'sequence:' + a + ':' + step, group: 'sequence:' + step,
     answer: String(next), clue: { values, spoken: values.join('、') }, choices: labels.map(numberChoice),
   };
 }
 
-// Dispatch by the meaning of the prompt and clue. The model's topic label
-// is only for variety and does not gate which questions can be checked.
-const checks = new Map([
-  ...Object.values(countPrompts).flat().map(prompt => [prompt, counting]),
-  ...comparePrompts.flat().map(prompt => [prompt, comparing]),
-  ...positionPrompts.flat().map(prompt => [prompt, positions]),
-  ...sequencePrompts.map(prompt => [prompt, sequence]),
-]);
 const text = /^[ぁ-ゖー0-9 、。！？]+$/u;
 
 export function verifyRound(fields, random = Math.random) {
-  if (fields.length !== 6) return null;
+  if (!Array.isArray(fields) || fields.length !== 6 || fields.some(field => typeof field !== 'string')) return null;
   const [topic, picture, question, ...labels] = fields;
-  const check = checks.get(question);
-  if (!/^[a-z]{1,24}$/.test(topic) || !question.endsWith('？') || question.length > 46 || !text.test(question)
-    || labels.some(label => label.length > 16 || (!text.test(label) && check !== positions))
+  if (!/^[a-z]{1,24}$/.test(topic) || picture.length > 64 || question.length > 46 || !text.test(question)
+    || labels.some(label => label.length > 16 || (!text.test(label) && !/^@[123]$/.test(label)))
     || new Set(labels).size !== 3) return null;
-  const result = check ? check(picture, question, labels) : facts.get([picture, question].join('\n'));
+  // Judge the question and clue independently of the model's topic label.
+  const result = counting(picture, question, labels) ?? comparing(picture, question, labels)
+    ?? positions(picture, question, labels) ?? sequence(picture, question, labels) ?? factual(picture, question, labels);
   if (!result || result.answer !== labels[0]) return null;
-  const choices = result.choices ?? labels.map(label => result.options.get(label));
+  const choices = result.choices;
   if (!choices.every(Boolean)) return null;
   // Randomize position without changing any generated answer text.
   const answer = choices[0];

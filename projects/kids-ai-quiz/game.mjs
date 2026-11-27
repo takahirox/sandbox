@@ -33,7 +33,8 @@ async function showRound(focus) {
   next.disabled = true;
   speak.disabled = true;
   for (const choice of answers.children) choice.disabled = true;
-  const generated = await (prepared ?? model.generate());
+  const retryInProgress = prepared && model.recovering;
+  const generated = retryInProgress ? null : await (prepared ?? model.generate());
   if (current !== revision) return;
   if (generated) item = generated;
   else {
@@ -46,7 +47,7 @@ async function showRound(focus) {
   next.disabled = false;
   speak.disabled = false;
   if (focus) question.focus({ preventScroll: true });
-  prepared = model.generate();
+  if (!retryInProgress) prepared = model.generate();
 }
 
 function art({ icon, kind, label }) {
@@ -84,11 +85,16 @@ function render() {
   if (item.source) game.dataset.source = item.source;
   question.textContent = item.question;
   clue.textContent = item.clue.spoken ?? '';
-  const { icon, icons, values, count, split } = item.clue;
+  const { icon, icons, values, count, split, secondIcon, separate } = item.clue;
   if (split) {
-    const plus = document.createElement('span');
-    plus.textContent = '＋';
-    illustration.replaceChildren(counters({ icon, count: split }), plus, counters({ icon, count: count - split }));
+    const first = counters({ icon, count: split });
+    const second = counters({ icon: secondIcon ?? icon, count: count - split });
+    if (separate) illustration.replaceChildren(first, second);
+    else {
+      const plus = document.createElement('span');
+      plus.textContent = '＋';
+      illustration.replaceChildren(first, plus, second);
+    }
   } else if (icons) {
     illustration.replaceChildren(...icons.map(icon => art({ icon })));
   } else if (values) {

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { dataset, heldOut, seeded, memoryStorage } from './dataset.mjs';
 import { createSession } from '../../projects/kids-ai-quiz/quiz.mjs';
-import { generateRound, nearWindow } from '../../projects/kids-ai-quiz/generate.mjs';
+import { generateRound } from '../../projects/kids-ai-quiz/generate.mjs';
 import { loadModel, modelURL } from '../../projects/kids-ai-quiz/model.mjs';
 import { verifyRound } from '../../projects/kids-ai-quiz/verify.mjs';
 
@@ -15,6 +15,23 @@ const baseline = '1d8075bbea02d3acf4191f2c33684a743cd5f295';
 const project = 'projects/kids-ai-quiz';
 const visits = 24;
 const roundsPerVisit = 12;
+const nearWindow = 6;
+
+// Map the old fact IDs to the relationship or task in their displayed clues.
+// The new generator and fallback already prefix their keys with that family.
+const baselineFamilies = {
+  animals: 'call', colors: 'color', shapes: 'shape', counting: 'count', food: 'part',
+};
+const baselineRelations = {
+  train: 'travel', plane: 'travel', boat: 'travel', bicycle: 'job', bus: 'job', 'fire-engine': 'job', ambulance: 'job',
+  toothbrush: 'use', umbrella: 'use', spoon: 'use', towel: 'use', shoes: 'wear', ball: 'object-property', clock: 'use',
+};
+
+function baselineRound(item) {
+  const family = baselineFamilies[item.topic] ?? baselineRelations[item.key];
+  if (!family) throw new Error('Missing baseline relationship for ' + item.key);
+  return { ...item, key: family + ':' + item.key };
+}
 
 async function unpackBaseline(directory) {
   const git = (...args) => execFileSync('git', args, { cwd: root });
@@ -26,7 +43,7 @@ async function unpackBaseline(directory) {
 
 function target(item) {
   // Count largest/smallest of the same three groups as one stimulus.
-  return item.key.replace(/^compare:[01]:/, 'compare:');
+  return item.key.replace(/^compare:[01]:(\d+:\d+:\d+)$/, 'compare:$1');
 }
 
 function description(item) {
@@ -38,7 +55,7 @@ function description(item) {
 
 function sample(startVisit) {
   const seen = new Set(), first = new Set(), recent = [];
-  const topics = {}, examples = {}, unseen = {}, newPositionScenes = new Set();
+  const topics = {}, examples = {}, unseen = {}, newPositionScenes = new Set(), selectiveTargets = new Set();
   const teacherScenes = new Set([...dataset()].filter(row => row[0] === 'positions').map(row => row[1]));
   let recentExact = 0, recentRelated = 0, fallback = 0;
   for (let visit = 0; visit < visits; visit++) {
@@ -46,11 +63,12 @@ function sample(startVisit) {
     for (let round = 0; round < roundsPerVisit; round++) {
       const item = next();
       const key = target(item);
+      const family = key.split(':', 1)[0];
       if (!round) first.add(key);
-      const exact = recent.some(previous => target(previous) === key);
+      const exact = recent.some(previous => previous.key === key);
       recentExact += Number(exact);
-      recentRelated += Number(exact || recent.some(previous => previous.group === item.group));
-      recent.push(item);
+      recentRelated += Number(recent.some(previous => previous.family === family));
+      recent.push({ key, family });
       if (recent.length > nearWindow) recent.shift();
       fallback += Number(item.source === 'fallback');
       const info = topics[item.topic] ??= { rounds: 0, distinct: 0 };
@@ -61,7 +79,8 @@ function sample(startVisit) {
         if (audit.length < 2) audit.push(description(item));
       }
       if (item.source === 'model' && heldOut(item.key)) unseen[key] ??= description(item);
-      if (item.source === 'model' && item.topic === 'positions') {
+      if (item.source === 'model' && family === 'select') selectiveTargets.add(key);
+      if (item.source === 'model' && family === 'position') {
         const scene = item.clue.spoken.replace('ひだりから、', '').replaceAll('、', ' ');
         if (!teacherScenes.has(scene)) newPositionScenes.add(scene);
       }
@@ -70,7 +89,8 @@ function sample(startVisit) {
   }
   return {
     distinct: seen.size, revisits: visits * roundsPerVisit - seen.size, distinctOpeners: first.size,
-    recentExact, recentRelated, fallback, topics, unseen, novelPositionScenes: newPositionScenes.size, examples,
+    recentExact, recentRelated, fallback, topics, unseen,
+    selectiveTargets: selectiveTargets.size, novelPositionScenes: newPositionScenes.size, examples,
   };
 }
 
@@ -86,13 +106,13 @@ async function compareContent(directory) {
     return () => {
       if (first) {
         first = false;
-        return { ...old.firstQuestion, group: old.firstQuestion.topic };
+        return baselineRound(old.firstQuestion);
       }
       const fact = session.next();
       const proposals = Array.from({ length: oldModel.attempts }, () =>
         oldModel.generateTokens(sampleToken, fact.topic, modelRandom));
       const item = proposals.map(tokens => old.validate(fact, tokens)).find(Boolean) ?? old.fallback(fact, random);
-      return { ...item, group: item.topic };
+      return baselineRound(item);
     };
   });
 
@@ -184,7 +204,9 @@ async function compareBrowser(directory) {
               constructor(...args) {
                 super(...args);
                 let started;
-                this.addEventListener('message', ({ data }) => workers.push([performance.now() - started, data.ms]));
+                this.addEventListener('message', ({ data }) => {
+                  if (!data.ready) workers.push([performance.now() - started, data.ms]);
+                });
                 this.clock = () => { started = performance.now(); };
               }
               postMessage(...args) { this.clock(); super.postMessage(...args); }

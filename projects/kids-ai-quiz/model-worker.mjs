@@ -27,7 +27,10 @@ async function load() {
 
 self.onmessage = async ({ data: { seed, recent } }) => {
   try {
-    loading ??= load();
+    loading ??= load().then(model => {
+      self.postMessage({ ready: true });
+      return model;
+    });
     const model = await loading;
     const started = performance.now();
     const result = generateRound(model, recent, () => {

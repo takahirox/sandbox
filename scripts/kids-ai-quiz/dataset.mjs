@@ -2,7 +2,34 @@
 // offline teacher constructs gold rows. The browser samples every field.
 import { fileURLToPath } from 'node:url';
 import { modelRelations } from '../../projects/kids-ai-quiz/content.mjs';
-import { comparePrompts, countPrompts, counters, factPrompts, positionPrompts, sequencePrompts } from '../../projects/kids-ai-quiz/verify.mjs';
+import { counters } from '../../projects/kids-ai-quiz/verify.mjs';
+
+const countPrompts = {
+  count: ['いくつ ある？', 'ぜんぶで なんこ？'],
+  add: ['あわせて なんこ？', 'ぜんぶで いくつ？'],
+  take: ['ばつの ものを とると、いくつ のこる？', 'ばつの ものを へらすと、のこりは なんこ？'],
+};
+const positionPrompts = [
+  ['ひだりの はしは どれ？', 'いちばん ひだりに あるのは？'],
+  ['まんなかは どれ？', 'まんなかに あるのは？'],
+  ['みぎの はしは どれ？', 'いちばん みぎに あるのは？'],
+];
+const sequencePrompts = [
+  'おなじ ぶんずつ へるよ。つぎの かずは？',
+  'おなじ ぶんずつ ふえるよ。つぎの かずは？',
+];
+const comparePrompts = [['いちばん すくないのは？', 'どれが いちばん すくない？'],
+  ['いちばん おおいのは？', 'どれが いちばん おおい？']];
+
+function factPrompts(family, wording, name) {
+  const question = wording.replace('{subject}', name);
+  if (question.endsWith('のは？')) return [question, question.replace(/のは？$/, 'のは どれ？')];
+  if (question.endsWith('のは どれ？')) return [question, question.replace(/のは どれ？$/, 'のは？')];
+  if (family === 'shape') return [question, 'この かたちと おなじなのは？'];
+  if (family === 'color') return [question, 'この いろと おなじなのは？'];
+  if (family === 'corners') return [question, 'かどは なんこ ある？'];
+  return [question];
+}
 
 export function seeded(seed) {
   return () => {
@@ -19,7 +46,7 @@ export function memoryStorage() {
 export function heldOut(key) {
   const [rule, a, b, c, d] = key.split(':');
   if (rule === 'add') return (3 * Number(a) + Number(b)) % 7 === 1;
-  if (rule === 'take') return (3 * Number(a) + Number(b)) % 7 === 3;
+  if (rule === 'take' || rule === 'select') return (3 * Number(a) + Number(b)) % 7 === 3;
   if (rule === 'compare') return (Number(b) + 3 * Number(c) + Number(d)) % 7 === 0;
   if (rule === 'sequence') return (Number(a) + Number(b) + 2) % 7 === 0;
   if (rule === 'position') return [...counters.keys()].indexOf(b) % 5 === Number(a);
@@ -64,6 +91,20 @@ export function* dataset(seed = 68, examplesPerTopic = 1400) {
         add('counting', () => ['counting', pick(names) + ' ' + a + ' - ' + b, pick(countPrompts.take),
           ...negatives(String(a - b), integers)]);
       }
+    }
+  }
+
+  for (let wanted = 1; wanted <= 8; wanted++) {
+    for (let other = 1; wanted + other <= 9; other++) {
+      if (heldOut('select:' + wanted + ':' + other)) continue;
+      add('select', () => {
+        const name = pick(names);
+        const distractor = pick(names.filter(candidate => candidate !== name));
+        const groups = [name + ' ' + wanted, distractor + ' ' + other];
+        if (random() < 0.5) groups.reverse();
+        const question = name + ' は ' + pick(['なんこ？', 'いくつ ある？']);
+        return ['counting', groups.join(' + '), question, ...negatives(String(wanted), integers)];
+      });
     }
   }
 
