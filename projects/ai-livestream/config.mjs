@@ -188,11 +188,26 @@ export function echoesSpeech(comment, speech, language) {
 // A reply can imply a view of the stream without using visual language itself.
 export function asksForVisualObservation(speech) {
   const text = speech.normalize('NFKC');
-  return /\b(?:pretend (?:to see|you (?:can |could )?see)|act as (?:if|though) you (?:can |could )?see)\b/i.test(text) ||
-    /(?:^|[.!?;:,])\s*(?:please,?\s+)?(?:(?:(?:can|could|would) you (?:please )?)?(?:look at|take a look at)|(?:can|could) you see)\s+(?:me\b|my\b|(?:this|these|those)\b|what (?:i['’]m|i am)\b|the (?:live )?(?:camera|video|stream|screen)\b)/i.test(text) ||
-    /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text) ||
-    /見て(?:ください|(?:くれ|もらえ)(?:る|ますか))|見て[、,\s]*(?:何色|どんな)|(?:何色|どんな色)に見え(?:る\?|ますか)/u.test(text) ||
-    /見て[^。!?]{0,32}(?:(?:何色|どんな色)か|(?:色|形|柄)を)(?:教えて|答えて)(?:[。!?]|$)/u.test(text);
+  if (/\b(?:pretend (?:to see|you (?:can |could )?see)|act as (?:if|though) you (?:can |could )?see)\b/i.test(text) ||
+      /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text)) return true;
+
+  return text.split(/[.!?;。]/u).some(sentence => {
+    // Explicit questions about the live image can appear alongside material references.
+    if (/\b(?:(?:what|which) (?:colou?r|shape|pattern)|look at|(?:can|could) you see)\b.*\b(?:on camera|in the (?:live|camera) feed)\b/i.test(sentence) ||
+        /(?:カメラ|映像|画面)に映ってい?る.*(?:何色|どんな(?:色|形|柄)|見て)/u.test(sentence)) return true;
+
+    // Resolve vague requests to look using the source named in the same sentence.
+    if (/\b(?:in|on|from|via) (?:the |my |this )?(?:description|(?:pinned )?comments?|chat|link|website|(?:attached )?(?:photo|screenshot))\b|\b(?:link|description) below\b/i.test(sentence) ||
+        /\b(?:look at|see) (?:my |the |this |that )?(?:recipe|description|link|article|attachment)\b/i.test(sentence) ||
+        /概要欄|説明欄|コメント欄|固定コメント|チャット欄|リンク先|リンクの|添付(?:の|した)|写真(?:の|では|に)|(?:レシピ|リンク|記事)を[、,\s]*見て/u.test(sentence)) return false;
+
+    return /\b(?:what|which) (?:colou?r|shape|pattern)\b.*\b(?:i['’]m|i am|am i) (?:wearing|holding)\b/i.test(sentence) ||
+      /\b(?:what|who) (?:can|could) you see\b|\bhow many\b.*\bam i holding up\b/i.test(sentence) ||
+      /(?:^|[:,])\s*(?:please,?\s+)?(?:(?:(?:can|could|would) you (?:please )?)?(?:look at|take a look at)|(?:can|could) you see)\s+(?:me\b|my\b|(?:this|these|those)\b|what (?:i['’]m|i am)\b|the (?:live )?(?:camera|video|stream|screen)\b)/i.test(sentence) ||
+      /(?:かけ|掛け|つけ|付け|着|履い|持っ|映っ)てい?る.{0,32}(?:何色|どんな(?:色|形|柄))/u.test(sentence) ||
+      /見て(?:ください|(?:くれ|もらえ)(?:る|ますか))|見て[、,\s]*(?:何色|どんな)/u.test(sentence) ||
+      /(?:何色|どんな色)に見え(?:る|ますか)|見て.{0,32}(?:(?:何色|どんな色)か|(?:色|形|柄)を)(?:教えて|答えて)/u.test(sentence);
+  });
 }
 
 // Conservative local guardrails supplement prompting; no moderation service.

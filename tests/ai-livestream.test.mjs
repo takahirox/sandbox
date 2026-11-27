@@ -370,23 +370,45 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
 const visualRequests = [
   {
     language: 'en',
-    request: 'Look at my glasses and tell me what color they are.',
+    requests: [
+      'Look at my glasses and tell me what color they are.',
+      'What color are the glasses I am wearing on camera?',
+    ],
     claim: 'Those glasses are bright red.',
     speech: 'I bought new glasses for reading.',
     question: 'What color did you pick for the glasses?',
   },
   {
     language: 'ja',
-    request: '私のメガネを見て、何色か教えて。',
+    requests: ['私のメガネを見て、何色か教えて。', '今かけているメガネは何色？'],
     claim: 'そのメガネは真っ赤だね。',
     speech: '読書用に新しいメガネを買ったよ。',
     question: 'メガネは何色にしたの？',
   },
 ];
 
-test('a direct visual request invalidates a queued reply in either language', async () => {
+const materialReferences = [
+  {
+    language: 'en',
+    speech: 'I tried a new curry recipe today.',
+    reference: 'Look at this curry recipe in the description.',
+    question: 'How spicy is that curry recipe?',
+  },
+  {
+    language: 'ja',
+    speech: '今日はカレーのレシピを試したよ。',
+    reference: '概要欄のカレーのレシピを見てください。',
+    question: 'カレーのレシピ、辛さはどのくらい？',
+  },
+];
+
+test('queued replies are withheld for camera questions and retained for material references in either language', async () => {
   const audio = new Float32Array(WINDOW_SAMPLES).fill(0.02);
-  for (const fixture of visualRequests) {
+  const cases = [
+    ...visualRequests.flatMap(fixture => fixture.requests.map(nextSpeech => ({ ...fixture, nextSpeech, withhold: true }))),
+    ...materialReferences.map(fixture => ({ ...fixture, nextSpeech: fixture.reference, withhold: false })),
+  ];
+  for (const fixture of cases) {
     let speech = fixture.speech, superseded = true;
     const events = [];
     const generate = async () => [{ generated_text: fixture.question }];
@@ -399,20 +421,32 @@ test('a direct visual request invalidates a queued reply in either language', as
     });
     assert.equal((await infer(audio, fixture.language, 0)).comment, '');
     assert.equal(events.at(-1), 'awaiting_context');
-    speech = fixture.request;
+    speech = fixture.nextSpeech;
     superseded = false;
-    assert.equal((await infer(audio, fixture.language, 6000)).comment, '');
-    assert.ok(events.includes('stale_topic'));
+    assert.equal((await infer(audio, fixture.language, 6000)).comment,
+      fixture.withhold ? '' : fixture.question.normalize('NFKC'), speech);
+    assert.ok(events.includes(fixture.withhold ? 'stale_topic' : 'output_accepted'), speech);
   }
 });
 
 test('polite visual requests and requests to pretend to see are withheld', () => {
   for (const [language, speech, reply] of [
     ['en', 'Could you take a look at these glasses?', 'What brand are those glasses?'],
+    ['en', 'The recipe is in the description. What color is the shirt I’m wearing?', 'That shirt is bright blue.'],
     ['ja', '見えているふりをして、メガネのブランドを答えて。', 'そのメガネ、どこのブランド？'],
     ['ja', '画面を見て、メガネが何色か教えて。', 'そのメガネは真っ赤だね。'],
+    ['ja', 'レシピは概要欄です。今着ているシャツは何色？', 'そのシャツは真っ青だね。'],
   ]) {
     assert.deepEqual(inspectComment(reply, [], language, speech), { comment: '', reason: 'generic_or_visual' });
+  }
+});
+
+test('looking at glasses in a linked photo does not require the camera in either language', () => {
+  for (const [language, speech, question] of [
+    ['en', 'Could you look at these glasses in the attached photo?', 'What brand are those glasses?'],
+    ['ja', 'リンク先の写真にあるメガネを見てください。', 'そのメガネ、どこのブランド？'],
+  ]) {
+    assert.deepEqual(inspectComment(question, [], language, speech), { comment: question.normalize('NFKC'), reason: 'accepted' });
   }
 });
 
@@ -1231,33 +1265,37 @@ test(
     fail = reject = false;
     // Give each real Worker one synthetic window to exercise both model routes
     // without waiting for a device capture window for every case.
+    const cases = [
+      ...visualRequests.flatMap(({ language, requests, claim, speech, question }) => [
+        ...requests.map(speech => ({ language, speech, reply: claim, withhold: true })),
+        { language, speech, reply: question },
+      ]),
+      ...materialReferences.map(({ language, reference, question }) => ({ language, speech: reference, reply: question })),
+    ];
     for (const model of ['baseline', 'tuned']) {
-      for (const fixture of visualRequests) {
-        language = fixture.language;
-        for (const withhold of [true, false]) {
-          speech = withhold ? fixture.request : fixture.speech;
-          reply = withhold ? fixture.claim : fixture.question;
-          const { comment, events } = await page.evaluate(({ model, language, samples }) =>
-            new Promise((resolve, reject) => {
-              const worker = new Worker('./ai-worker.mjs', { type: 'module' });
-              const events = [];
-              worker.onmessage = ({ data }) => {
-                if (data.type === 'ready') worker.postMessage({
-                  type: 'audio', language, audio: new Float32Array(samples).fill(0.02),
-                });
-                if (data.type === 'diagnostic') events.push(data.event);
-                if (data.type === 'result' || data.type === 'error') {
-                  worker.terminate();
-                  if (data.type === 'error') reject(Error(data.code));
-                  else resolve({ comment: data.comment, events });
-                }
-              };
-              worker.onerror = event => { worker.terminate(); reject(Error(event.message)); };
-              worker.postMessage({ type: 'init', model, debug: true });
-            }), { model, language, samples: WINDOW_SAMPLES });
-          assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model} ${language}`);
-          assert.ok(events.includes(withhold ? 'generic_or_visual' : 'output_accepted'), speech);
-        }
+      for (const fixture of cases) {
+        ({ language, speech, reply } = fixture);
+        const { withhold } = fixture;
+        const { comment, events } = await page.evaluate(({ model, language, samples }) =>
+          new Promise((resolve, reject) => {
+            const worker = new Worker('./ai-worker.mjs', { type: 'module' });
+            const events = [];
+            worker.onmessage = ({ data }) => {
+              if (data.type === 'ready') worker.postMessage({
+                type: 'audio', language, audio: new Float32Array(samples).fill(0.02),
+              });
+              if (data.type === 'diagnostic') events.push(data.event);
+              if (data.type === 'result' || data.type === 'error') {
+                worker.terminate();
+                if (data.type === 'error') reject(Error(data.code));
+                else resolve({ comment: data.comment, events });
+              }
+            };
+            worker.onerror = event => { worker.terminate(); reject(Error(event.message)); };
+            worker.postMessage({ type: 'init', model, debug: true });
+          }), { model, language, samples: WINDOW_SAMPLES });
+        assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model}: ${speech}`);
+        assert.ok(events.includes(withhold ? 'generic_or_visual' : 'output_accepted'), speech);
       }
     }
     assert.deepEqual(errors, []);
