@@ -1,134 +1,207 @@
-import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { platform, release, tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { facts, starter } from '../../projects/kids-ai-quiz/content.mjs';
-import { attempts, generateTokens, instantiateModel, modelURL } from '../../projects/kids-ai-quiz/model.mjs';
-import { createSession, decode, hasStructure, validate } from '../../projects/kids-ai-quiz/quiz.mjs';
-import { benchmarkAnswers, independentAnswers } from './answer-key.mjs';
-import { heldOut, seeded } from './dataset.mjs';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cpus, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { gzipSync } from 'node:zlib';
+import { createSession, nearWindow, puzzles } from '../../projects/kids-ai-quiz/quiz.mjs';
 
-assert.deepEqual(new Set(Object.keys(benchmarkAnswers)), heldOut);
+const root = resolve(import.meta.dirname, '../..');
+const baseline = '1d8075bbea02d3acf4191f2c33684a743cd5f295';
+const project = 'projects/kids-ai-quiz';
+const visits = 24;
+const roundsPerVisit = 12;
 
-const roundsPerFact = 60;
-const benchmarkFacts = facts.filter(fact => heldOut.has(fact.id));
-const shortJapanese = /^[ぁ-ゖー0-9 「」、。！？]+$/u;
-
-function example(item, tokens, failedChecks = []) {
-  return {
-    question: item.question,
-    choices: item.choices.map(choice => choice.label),
-    correctChoice: item.choices[item.correct].label,
-    tokens,
-    failedChecks,
+export function seeded(seed) {
+  return () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
   };
 }
 
-async function measure(bytes) {
-  const start = performance.now();
-  const { sample, memoryBytes } = await instantiateModel(bytes);
-  const loadMs = performance.now() - start;
-  const random = seeded(64064);
-  // Warm the sampler with a separate seed.
-  const warmup = seeded(6464);
-  for (let i = 0; i < 100; i++) generateTokens(sample, i % 7, warmup);
+export function memoryStorage() {
+  let value = null;
+  return { getItem: () => value, setItem: (_, next) => { value = next; } };
+}
 
-  const counts = { structured: 0, singleAnswer: 0, childLanguage: 0, relevant: 0, accepted: 0, playableRounds: 0 };
-  const examples = {};
-  let closeRepeats = 0, combinations = 0;
-  const timings = [];
-  for (const fact of benchmarkFacts) {
-    const expectedLabel = benchmarkAnswers[fact.id][2];
-    const recent = [], unique = new Set();
-    for (let i = 0; i < roundsPerFact; i++) {
-      let playable = false;
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        const before = performance.now();
-        const tokens = generateTokens(sample, fact.topic, random);
-        timings.push((performance.now() - before) * 1000);
-        if (!hasStructure(tokens)) continue;
-        counts.structured++;
-        const item = decode(fact, tokens);
-        const labels = item.choices.map(choice => choice.label);
-        const matches = independentAnswers(item);
-        const singleAnswer = new Set(labels).size === 3 && matches.length === 1
-          && matches[0] === item.choices[item.correct] && matches[0].label === expectedLabel;
-        const childLanguage = shortJapanese.test(item.question) && [...item.question].length <= 45;
-        const relevant = item.choices.every(choice => choice.topic === fact.topic);
-        const passed = { singleAnswer, childLanguage, relevant };
-        for (const [check, ok] of Object.entries(passed)) counts[check] += Number(ok);
+async function unpackBaseline(directory) {
+  const git = (...args) => execFileSync('git', args, { cwd: root });
+  const files = git('ls-tree', '--name-only', baseline + ':' + project).toString().trim().split('\n');
+  await mkdir(join(directory, project), { recursive: true });
+  await Promise.all(files.map(file =>
+    writeFile(join(directory, project, file), git('show', baseline + ':' + project + '/' + file))));
+}
 
-        const accepted = Object.values(passed).every(Boolean);
-        assert.equal(Boolean(validate(fact, tokens)), accepted);
-        if (accepted) {
-          counts.accepted++;
-          playable = true;
-          const pair = labels.filter(label => label !== expectedLabel).sort().join('|');
-          if (recent.includes(pair)) closeRepeats++;
-          recent.push(pair);
-          if (recent.length > 4) recent.shift();
-          unique.add(pair);
-          examples.accepted ??= example(item, tokens);
-        } else {
-          for (const [check, ok] of Object.entries(passed)) {
-            if (!ok) examples[check] ??= example(item, tokens, Object.keys(passed).filter(key => !passed[key]));
+function sample(startVisit) {
+  const seen = new Set(), first = new Set(), recent = [];
+  const topics = {}, examples = {};
+  let firstRepeats = 0, recentExactRepeats = 0, recentGroupRepeats = 0, recentEitherRepeats = 0;
+  for (let visit = 0; visit < visits; visit++) {
+    const next = startVisit(seeded(68 + visit), visit);
+    for (let round = 0; round < roundsPerVisit; round++) {
+      const item = next();
+      if (!round) {
+        firstRepeats += Number(first.has(item.key));
+        first.add(item.key);
+      }
+      const exact = recent.some(previous => previous.key === item.key);
+      const group = recent.some(previous => previous.group === item.group);
+      recentExactRepeats += Number(exact);
+      recentGroupRepeats += Number(group);
+      recentEitherRepeats += Number(exact || group);
+      recent.push(item);
+      if (recent.length > nearWindow) recent.shift();
+      const info = topics[item.topic] ??= { rounds: 0, distinct: 0 };
+      info.rounds++;
+      info.distinct += Number(!seen.has(item.key));
+      seen.add(item.key);
+      const family = item.family ?? item.key.split(':')[0];
+      examples[family] ??= {
+        question: item.question,
+        clue: item.clue.spoken,
+        answer: item.choices[item.correct].label,
+      };
+    }
+  }
+  return {
+    rounds: visits * roundsPerVisit, distinct: seen.size, revisits: visits * roundsPerVisit - seen.size,
+    distinctOpeners: first.size, repeatedOpeners: firstRepeats,
+    recentExactRepeats, recentGroupRepeats, recentEitherRepeats, topics, examples,
+  };
+}
+
+async function compareContent(directory) {
+  const url = file => pathToFileURL(join(directory, project, file));
+  const old = await import(url('quiz.mjs'));
+  const { attempts, generateTokens, instantiateModel, modelURL } = await import(url('model.mjs'));
+  const { sample: sampleToken, memoryBytes } = await instantiateModel(await readFile(modelURL));
+  const before = sample((random, visit) => {
+    const modelRandom = seeded(64000 + visit);
+    const session = old.createSession(random);
+    let first = true;
+    return () => {
+      let item;
+      if (first) {
+        item = old.firstQuestion;
+        first = false;
+      } else {
+        const fact = session.next();
+        const proposals = Array.from({ length: attempts }, () => generateTokens(sampleToken, fact.topic, modelRandom));
+        item = proposals.map(tokens => old.validate(fact, tokens)).find(Boolean) ?? old.fallback(fact, random);
+      }
+      // One question family per topic in the old quiz.
+      return { ...item, group: item.topic, family: item.topic };
+    };
+  });
+  const storage = memoryStorage();
+  const after = sample(random => createSession({ random, storage }).next);
+  const fallbackStorage = memoryStorage();
+  const fallback = sample(random => createSession({ random, storage: fallbackStorage, solve: () => null }).next);
+  console.log(JSON.stringify({
+    baseline, visits, roundsPerVisit, nearWindow, possibleBefore: 49, possibleAfter: puzzles.length,
+    before, after, fallback,
+    persistedIdBytes: Buffer.byteLength(storage.getItem()),
+    baselineWasmLinearBytes: memoryBytes,
+  }, null, 2));
+}
+
+const startupFiles = ['index.html', 'style.css', 'game.mjs', 'quiz.mjs', 'content.mjs'];
+async function transfer(directory, first, later) {
+  async function bytes(files) {
+    const buffers = await Promise.all(files.map(file => readFile(join(directory, project, file))));
+    return {
+      raw: buffers.reduce((sum, data) => sum + data.length, 0),
+      gzip: buffers.reduce((sum, data) => sum + gzipSync(data).length, 0),
+    };
+  }
+  return { startup: await bytes(first), later: await bytes(later) };
+}
+
+function summary(values) {
+  const ordered = values.toSorted((a, b) => a - b);
+  const percentile = p => Number(ordered[Math.ceil(p * ordered.length) - 1].toFixed(3));
+  return { median: percentile(0.5), p95: percentile(0.95) };
+}
+
+async function compareBrowser(directory) {
+  const { chromium } = await import('../../workers/persistent-counter/node_modules/playwright/index.mjs');
+  const { previewServer } = await import('../capture_screenshots.mjs');
+  const servers = [];
+  const contextsPerVersion = 32;
+  const browser = await chromium.launch();
+  try {
+    for (const source of [directory, root]) servers.push(await previewServer(source));
+    const measurements = servers.map(() => ({ startup: [], firstAdvance: [], warm: [], mainHeap: [] }));
+    for (let visit = 0; visit < contextsPerVersion; visit++) {
+      // Reverse the order every other run to spread out browser warm-up effects.
+      for (const index of visit % 2 ? [1, 0] : [0, 1]) {
+        const context = await browser.newContext({ viewport: { width: 390, height: 740 }, isMobile: true, hasTouch: true });
+        try {
+          const page = await context.newPage();
+          const cdp = await context.newCDPSession(page);
+          await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+          await page.addInitScript(initialSeed => {
+            let seed = initialSeed;
+            Math.random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
+            const results = window.quizTimes = [];
+            let clickedAt;
+            document.addEventListener('click', event => {
+              if (event.target.id === 'next') clickedAt = performance.now();
+            }, true);
+            new MutationObserver(() => {
+              if (document.querySelectorAll('#answers button:enabled').length !== 3) return;
+              if (!results.length) results.push(performance.now());
+              else if (clickedAt !== undefined) {
+                results.push(performance.now() - clickedAt);
+                clickedAt = undefined;
+              }
+            }).observe(document, { childList: true, subtree: true });
+          }, 68 + visit);
+          await page.goto(servers[index].origin + '/sandbox/' + project + '/');
+          await page.waitForFunction(() => window.quizTimes.length === 1);
+          for (let advance = 0; advance < 7; advance++) {
+            await page.locator('#next').tap();
+            await page.waitForFunction(count => window.quizTimes.length === count, advance + 2);
           }
+          const [startup, firstAdvance, ...warm] = await page.evaluate(() => window.quizTimes);
+          const data = measurements[index];
+          data.startup.push(startup);
+          data.firstAdvance.push(firstAdvance);
+          data.warm.push(...warm);
+          await cdp.send('HeapProfiler.collectGarbage');
+          const usage = await cdp.send('Runtime.getHeapUsage');
+          data.mainHeap.push(usage.usedSize);
+        } finally {
+          await context.close();
         }
       }
-      counts.playableRounds += Number(playable);
     }
-    combinations += unique.size;
+    console.log(JSON.stringify({
+      browser: browser.version(), host: cpus()[0].model, node: process.version, freshContextsPerVersion: contextsPerVersion,
+      before: {
+        transfer: await transfer(directory, [...startupFiles, 'model.mjs'], ['model-worker.mjs', 'quiz-model-v2.wasm']),
+        wasmLinearBytes: 65536,
+        ...Object.fromEntries(Object.entries(measurements[0]).map(([name, values]) => [name, summary(values)])),
+      },
+      after: {
+        transfer: await transfer(root, startupFiles, []),
+        wasmLinearBytes: 0,
+        ...Object.fromEntries(Object.entries(measurements[1]).map(([name, values]) => [name, summary(values)])),
+      },
+    }, null, 2));
+  } finally {
+    await browser.close();
+    await Promise.all(servers.map(server => server.close()));
   }
-  timings.sort((a, b) => a - b);
-  const quantile = p => Number(timings[Math.floor(p * (timings.length - 1))].toFixed(3));
-  return {
-    counts,
-    meanDistinctAcceptedPairsPerFact: combinations / benchmarkFacts.length,
-    repeatedAcceptedPairInLastFour: closeRepeats,
-    bytes: bytes.length,
-    sha256: createHash('sha256').update(bytes).digest('hex'),
-    wasmLinearMemoryBytes: memoryBytes,
-    instantiateMs: Number(loadMs.toFixed(3)),
-    tokenSamplingMicroseconds: { median: quantile(0.5), p95: quantile(0.95) },
-    examples,
-  };
 }
 
-const scratch = await mkdtemp(join(tmpdir(), 'kids-quiz-'));
-try {
-  const baselinePath = join(scratch, 'baseline.wasm');
-  const rebuiltPath = join(scratch, 'adapted.wasm');
-  execFileSync('python3', [fileURLToPath(new URL('./train.py', import.meta.url)), '--output', rebuiltPath, '--baseline', baselinePath]);
-  const [baselineBytes, rebuiltBytes, shippedBytes] = await Promise.all([
-    readFile(baselinePath), readFile(rebuiltPath), readFile(modelURL),
-  ]);
-  assert.deepEqual(rebuiltBytes, shippedBytes, 'The shipped version must match reproducible training');
-  const baseline = await measure(baselineBytes);
-  const adapted = await measure(shippedBytes);
-
-  const session = createSession(seeded(64064));
-  const rounds = [starter, ...Array.from({ length: 489 }, () => session.next())];
-  let adjacentTopics = 0, recentFacts = 0;
-  for (let i = 1; i < rounds.length; i++) {
-    adjacentTopics += Number(rounds[i].topic === rounds[i - 1].topic);
-    recentFacts += Number(rounds.slice(Math.max(0, i - 12), i).includes(rounds[i]));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const directory = await mkdtemp(join(tmpdir(), 'kids-quiz-baseline-'));
+  try {
+    await unpackBaseline(directory);
+    await compareContent(directory);
+    if (process.argv.includes('--browser')) await compareBrowser(directory);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
-  console.log(JSON.stringify({
-    environment: { os: platform(), release: release(), arch: process.arch, runtime: process.version },
-    heldOutFacts: benchmarkFacts.length,
-    proposals: benchmarkFacts.length * roundsPerFact * attempts,
-    rounds: benchmarkFacts.length * roundsPerFact,
-    baseline,
-    adapted,
-    rotation: { rounds: rounds.length, adjacentTopics, recentFacts },
-  }, null, 2));
-  assert.ok(adapted.counts.structured > 0.99 * benchmarkFacts.length * roundsPerFact * attempts);
-  assert.ok(adapted.counts.accepted > baseline.counts.accepted);
-  assert.ok(adapted.counts.playableRounds >= 0.99 * benchmarkFacts.length * roundsPerFact);
-  assert.equal(adjacentTopics + recentFacts, 0);
-} finally {
-  await rm(scratch, { recursive: true, force: true });
 }

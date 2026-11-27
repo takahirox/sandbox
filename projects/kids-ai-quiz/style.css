@@ -84,13 +84,28 @@ button {
 }
 
 [data-topic="counting"] .illustration {
-  width: 155px;
-  grid-template-columns: repeat(4, auto);
-  gap: 5px;
-  align-content: center;
+  width: 180px;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
 }
 
-[data-topic="counting"] .illustration .art { font-size: 1.35rem; }
+.counters {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 3px;
+  justify-content: center;
+  align-content: center;
+}
+.counters .art { font-size: 1.35rem; }
+.counters .crossed { position: relative; opacity: .65; }
+.counters .crossed::after {
+  content: "×";
+  position: absolute;
+  color: #98293a;
+  font-size: 1.65rem;
+  text-shadow: 0 0 3px white;
+}
 [data-topic="counting"] .illustration::before { background: #fff0ad; }
 
 .prompt {
@@ -156,6 +171,7 @@ h1:focus { outline: none; }
 .answer[data-result="correct"] { --edge: #388858; --card: #dff6d7; }
 .answer[data-result="retry"] { --edge: #926ab9; }
 
+.answer.text-answer, .answer:has(.counters) { grid-template-rows: 1fr; }
 .answer:disabled { cursor: default; }
 .answer:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 1px 0 var(--edge); }
 
@@ -222,7 +238,6 @@ h1:focus { outline: none; }
 }
 
 .game[data-solved] #next { color: #fff; background: #603ca0; border-color: #603ca0; }
-.retry { background: #fffdf8; }
 
 .answer[data-result="correct"] .art { animation: hop 410ms ease-out; }
 @keyframes hop {
@@ -244,10 +259,11 @@ h1:focus { outline: none; }
   .game { padding: 14px 22px; }
   .challenge { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
   .illustration { margin: 0; flex: 0 0 113px; min-height: 76px; }
+  [data-topic="counting"] .illustration { flex-basis: 180px; }
   .prompt { flex: 1; margin: 0; }
   h1 { font-size: clamp(1.3rem, 3.7vw, 2rem); }
   .answer { min-height: 91px; padding: 7px 4px; }
-  .answer .art { font-size: 2.5rem; }
+  .answer > .art { font-size: 2.5rem; }
   .controls { margin-top: 12px; }
 }
 

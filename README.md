@@ -38,8 +38,8 @@ the URL. Directories without an entry point are not published.
 See [Happy cat](projects/happy-cat/index.html) for a standalone static example.
 The [walk to hospital](projects/walk-to-hospital/index.html) toy uses large arrow
 buttons (tap or hold) and keyboard arrows to walk, arrive, and play again.
-The [Japanese three-choice quiz](docs/kids-ai-quiz.md) uses a small trained
-model to generate and verify new rounds in the browser.
+The [Japanese three-choice quiz](docs/kids-ai-quiz.md) combines curated
+relationships and number rules to generate varied rounds in the browser.
 The [Persistent Counter](docs/persistent-counter.md) adds a small Cloudflare
 Worker, Durable Object, WebSocket, and D1 backend while keeping its frontend in
 this static project layout.
