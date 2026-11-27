@@ -1,5 +1,5 @@
 // Offline only: replay recorded synthetic model output, never live user content.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createInference as before } from '../tests/fixtures/ai-livestream/issue50/inference.mjs';
 import { createInference as after } from '../projects/ai-livestream/inference.mjs';
 import { VirtualAudience, speechInterest } from '../projects/ai-livestream/audience.mjs';
@@ -58,7 +58,6 @@ export async function evaluation() {
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const result = await evaluation();
-  await writeFile(new URL('pipeline-replay.json', directory), JSON.stringify(result, null, 2) + '\n');
   console.log(JSON.stringify(Object.fromEntries(['isolated', 'pronounFollowups', 'conversation'].map(key =>
     [key, Object.fromEntries(Object.entries(result[key]).map(([k,v]) => [k, { recognized: v.recognized, attempts: v.attempts, accepted: v.accepted }]))])), null, 2));
 }

@@ -51,3 +51,32 @@ revised prompt via `--mlc-stronger --issue52`. Production remains 1.7B. The repo
 `comment` fields are measured outputs; `finalComment` / `finalReason` replay the
 final reference/echo filters over the recorded raw output. See the model evaluation
 for the two recurring Japanese ASR detail errors and model-size trade-off.
+
+For Issue #62, `tuning-holdout.json` includes the original transcript scenarios
+and eight additional Japanese scenarios. `tuning-audio.json` lists four
+additional Japanese WAVs generated with Kyoko at the settings above. These
+WAVs contain no user recordings and were excluded along with the transcript
+fixtures from training and teacher generation. The raw browser turns,
+separate quality ratings, and reproduction steps are in the
+[tuning evaluation](../../../projects/ai-livestream/TUNING-EVALUATION.md).
+
+`follow-up-holdout.json` contains the fresh, independently authored spoken
+Japanese and English transcript scenarios for the second round. They were
+excluded from both training corpora and checkpoint selection.
+`follow-up-benchmark.json` records raw and displayed browser outputs for all
+three stacks, with WAV and text runs in separate fields. The accompanying
+`follow-up-ratings.json` annotates displayed final turns and WAV replies.
+See the [follow-up evaluation](../../../projects/ai-livestream/FOLLOW-UP-EVALUATION.md)
+for scoring and reproduction.
+
+## Expanded-corpus holdout
+
+`expanded-holdout.json` contains 49 fictional clean transcript scenarios
+authored apart from the training data, including multi-turn references and
+topic shifts. It has 30 Japanese and 12 English opportunities for a reply
+plus seven withholding scenarios. The two direct clothing-color questions
+reproduce the review regression. All other turns use new synthetic wording
+and story details. The teacher receives only training prompts, and the trainer
+does not read this fixture. The corpus curator checks it for lexical leakage.
+The [expanded-corpus evaluation](../../../projects/ai-livestream/EXPANDED-EVALUATION.md)
+explains the rubric, raw and displayed evidence, and separate WAV runs.

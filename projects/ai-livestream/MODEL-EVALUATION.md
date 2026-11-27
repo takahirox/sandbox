@@ -1,5 +1,7 @@
 # Local model and pipeline evaluation — issues #52 / #50
 
+The [issue #62 tuning evaluation](./TUNING-EVALUATION.md) compares the current
+0.6B experimental default with the original 1.7B and the untuned 0.6B control.
 
 ## Issue #52: retain 1.7B and repair the pipeline
 

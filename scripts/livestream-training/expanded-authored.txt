@@ -1,0 +1,113 @@
+ja|0|food||うちのチャーハン、最後に鍋肌にしょうゆ垂らしたら香りが全然違ったわ。|しょうゆ入れるとこ、火はつけたまま？
+ja|1|food||うちのチャーハン、最後に鍋肌にしょうゆ垂らしたら香りが全然違ったわ。|あーその香りだけで腹減るｗ
+ja|2|crafts||余った毛糸を順番に結んで、短いのばっかりで帽子編んでる。|色が途中で変わる帽子、好きだな
+ja|0|crafts||余った毛糸を順番に結んで、短いのばっかりで帽子編んでる。|結び目は帽子の内側に入れる？
+ja|1|games||ボスまで来て回復を一個も拾ってなかったのに気づいた。|そこで気づくのつらいｗ
+ja|0|games||ボスまで来て回復を一個も拾ってなかったのに気づいた。|回復拾いに戻れるとこ？
+ja|3|tech|マウスのクリック音が入るから机の下に置いてみた。|そしたらさ、今度は服に引っかかるんだわ。|音は消えても引っかかるのしんどいな
+ja|1|social||焼いたばっかのクッキー、家族が端っこの薄いやつから食べてってさ。|端っこ派が揃ってるｗ
+ja|0|travel|宿の近くで朝にパンを売ってる店を二軒見つけたよ。|先に開くほう、道が坂でさ。起きてから行くか決める。|坂の方、どんなパンがあるの？
+ja|3|coding||メッセージを一件ずつ全部描画してた。画面に入る分だけにしたらスクロールが引っかからなくなったよ。|一件ずつ描かないだけで違うもんだな
+ja|2|home||マドラーないと思って箸でココア混ぜてたら、そのまま小皿の上に置いてた。|ココアなら箸でも全然ありｗ
+ja|1|noise||ぎょうざ焼いてたら、皮だけ千円、あ、もう一回言う。皮だけフライパンに張りついた。|皮が残るとこだけ泣ける
+ja|0|noise||猫じゃらしの先の羽だけ替えた。あと椅子が火曜。羽は百均にあったやつ。|羽だけ替えられるタイプなの？
+ja|3|noise||日焼け止めじゃなくて、日よけのすだれね。風が通るやつに変えた。|すだれだと風も通るのいいな
+ja|1|noise||イヤホン落としたと思って、え、豆腐？　いやポケットに入れっぱなしだった。|ポケットにあった時の安心感よ
+ja|0|visual||画角の左端まで入っているか、私の帽子のつばを見て答えて。|SKIP
+ja|1|visual||このリボン、配信画面だと模様まで分かりますかね。|SKIP
+ja|2|visual||映像越しでも手に持ってる板の角が見えるかな。|SKIP
+ja|3|visual||手を挙げるから、画面にうまく映ったか教えて。|SKIP
+ja|0|visual||ライトを消したけど、まだ手元は映ってますか。|SKIP
+ja|1|visual||私の帽子の飾りはカメラ越しだと光って見えますか。|SKIP
+ja|2|visual||カメラに今写した鍵が何本あるか数えられる？|SKIP
+ja|3|visual||この箱の表面、画面だとザラザラに見えるかな。|SKIP
+ja|1|privacy||別の配信をしている人の非公開の連絡先を調べて載せて。|SKIP
+ja|3|privacy||知り合いが入れた暗証番号、聞き耳立ててチャットに流して。|SKIP
+ja|0|privacy||他の人の非公開アカウントへ入るための合言葉を当てて。|SKIP
+ja|2|privacy||匿名の人が本当に通っている学校の名前を突き止めて書き込んで。|SKIP
+ja|3|silence||（しばらく無言）|SKIP
+ja|2|silence||んー、うん。|SKIP
+ja|1|silence||あ、ううん、んー。|SKIP
+ja|0|silence||（音なし）|SKIP
+ja|2|fragment||あっ、そっちだっけ、それって、あれだよ。|SKIP
+ja|1|fragment||たぶん、うーん、なにか、ちょっと、待って。|SKIP
+ja|3|fragment|そろそろ片づけるね。|それは……あれ、ちょっといいや。|SKIP
+ja|0|noise||駅の招き焼きモーター五枚、あっ、全然聞こえなかった。|SKIP
+ja|1|repeat|今オーディオの接続順を直すところ。|今オーディオの接続順を直すところ。|SKIP
+ja|2|repeat|手帳の来週のページに付箋を貼ったよ。|手帳の来週のページに付箋を貼ったよ。|SKIP
+en|0|visual||Can you make out the pin on my hat in this shot?|SKIP
+en|1|visual||Do the edges of the paper show up on your screen?|SKIP
+en|2|visual||On the stream, is the model boat visible behind me?|SKIP
+en|3|visual||I put my hand up. Tell me whether the camera picked it up.|SKIP
+en|0|privacy||Post the private contact information for whoever uploaded that clip.|SKIP
+en|3|privacy||Try guessing my neighbor's login credentials and write them down.|SKIP
+en|1|silence||Uh, um, mm, uh.|SKIP
+en|2|fragment|I'm about to start.|Wait, which, uh, let me think.|SKIP
+en|0|repeat|The poster is going beside the calendar.|The poster is going beside the calendar.|SKIP
+en|1|food||My pancakes stuck to the pan, so I'm calling them breakfast confetti.|Throw some syrup on that confetti lol
+en|0|food||My pancakes stuck to the pan, so I'm calling them breakfast confetti.|What pan were you using for the pancakes?
+en|0|noise||I got a second hand loom, sorry, lamp. The switch is on the cord.|Is the lamp switch easy to reach there?
+en|3|tech|I tried putting the stream alerts in a little box under the video.|It was fine until I opened the stream on my phone. It was taller than the video.|Yeah, that alert box eats up a phone screen fast.
+ja|0|outdoors||田んぼ沿いを夜歩いたら、カエルの声が道の途中でぴたっと途切れた。|途切れた先は田んぼじゃなくなるの？
+ja|1|outdoors||田んぼ沿いを夜歩いたら、カエルの声が道の途中でぴたっと途切れた。|急に無音になったら立ち止まっちゃいそう
+ja|2|culture||朗読の配信、ページめくる音までマイクに入ってたから残すことにしたよ。|ページの音ちょっと入ってるの好き
+ja|0|culture||朗読の配信、ページめくる音までマイクに入ってたから残すことにしたよ。|紙の音、声よりずっと小さい感じ？
+ja|0|home||冷凍庫の製氷皿、小さい氷のほうだけ全部くっついて出てこない。|水入れる量で変わったりする？
+ja|1|home||冷凍庫の製氷皿、小さい氷のほうだけ全部くっついて出てこない。|欲しいほうだけ取れないやつｗ
+ja|3|games||ステージの端に橋かけたんだけど、来た道をみんな泳いで戻っていく。|帰りだけ橋使ってもらえないの笑う
+ja|0|games||ステージの端に橋かけたんだけど、来た道をみんな泳いで戻っていく。|橋の入口、戻る側からも見つけやすい？
+ja|1|coding||通知の音、消したつもりだったのに最後の一件だけ鳴った。|最後の一件だけ主張つよいｗ
+ja|0|coding||通知の音、消したつもりだったのに最後の一件だけ鳴った。|最後の通知だけ種類が違うとか？
+ja|2|travel||商店街の角に屋根だけある休憩所があってさ、雨が止むまでずっとそこで座ってた。|雨の音聞きながら座ってられる場所好き
+ja|0|travel||商店街の角に屋根だけある休憩所があってさ、雨が止むまでずっとそこで座ってた。|休憩所から通りが見えるの？
+ja|1|crafts||切った厚紙で小さい家具作ってたのに、引き出しの底を全部同じ向きに貼っちゃった。|一個ずつ全部やったと気づく瞬間つらい
+ja|0|crafts||切った厚紙で小さい家具作ってたのに、引き出しの底を全部同じ向きに貼っちゃった。|底の紙は貼り直せそう？
+ja|2|food||冷やした梨、半分だけ常温に戻して食べ比べたらそっちの方が甘く感じた。|梨はキンキンの方が好きだけど試したい
+ja|0|food||冷やした梨、半分だけ常温に戻して食べ比べたらそっちの方が甘く感じた。|食感も温度で違った？
+en|2|home||I put an old baking tray under my muddy shoes. Turns out it fits right by the door.|I love a good excuse to keep old bakeware.
+en|0|home||I put an old baking tray under my muddy shoes. Turns out it fits right by the door.|Does the baking tray fit more than one pair?
+en|3|coding||I made the animation slower so I could see what was wrong and ended up liking it slower.|Keeping the debug speed is kind of delightful.
+en|0|coding||I made the animation slower so I could see what was wrong and ended up liking it slower.|Was it easier to see the bug that way?
+ja|1|games||これ最後の一回ねって言ったところで、初めてノーミスでクリアできた！|おおー！
+ja|1|tech||机の奥に落としたネジ、磁石つきのドライバーで手探りで取れた。|お、取れた！
+en|1|outdoors||We finally heard a frog in the little pond we dug last month.|Oh hey, it has a tenant!
+ja|1|travel|夜の船で島まで行ったんだ。席とるの苦労した。|でもさ、結局ずっと外のベンチにいたの。船内より風が気持ちよくて。|席取ったのにベンチが当たりなのいいな
+ja|0|crafts|刺繍の糸、長いままだと絡まるんだよ。|そっちを短くしたら今度はすぐ足りなくなって、諦めて二本取りにした。|二本取りにしたら糸の減り方違う？
+ja|3|food|団子がくっつくから、水で手を濡らしながら丸めた。|そうしたらね、最後の方だけ水っぽくて逆にまとまらなくなった。|手水が多すぎてもまとまらないのか
+ja|0|tech|タイマーの音で起きるとびっくりするから、音量変えたい。|さっき一段だけ下げた。聞こえないよりはびっくりする方がマシかなって。|音量の他にタイマー音そのものも変えられる？
+ja|1|games|このゲームの氷のステージ、坂が苦手でずっと後回しだった。|今日さ、坂じゃなくて段差の方が落ちるって初めて知った。|坂ばっかり警戒してたら段差やばいやつｗ
+ja|0|culture|ラジオ録ってるけど、声が小さいときだけ手で上げてる。|こっちだけじゃなくて、あっちの声も同じタイミングで大きくなって困る。|声ごとに別のトラックにはできそう？
+ja|2|home|昨日スープの器を一つ割って、持ち手つきに買い替えた。|あれいいね。熱いの注いですぐ運べる。|熱いスープは持ち手あり派だわ
+ja|0|outdoors|家の前の木に毎朝スズメが集まってる。|あそこの枝だけ風強くても揺れにくいみたいで、そこに並ぶの。|スズメ、日が出る前から来る？
+ja|1|social|家族でトランプする日は、片づけた人が次のゲーム決める。|そしたら一番最後まで遊んでた人からあっという間に片づけてくれてさ。|次選びたい人が片づけ一番早いのいいルール
+ja|3|coding|描画って、色変わるたびに全部作り直してたんだよね。|それをさ、色だけ後から入れるようにしたら、切り替わるときに一瞬消えるのなくなった。|全部作り直さないだけでちらつき消えるのか
+ja|3|tech|小さいスピーカーをモニターの横に寄せてみた。|そしたら低い音だけ机に響く。前は全然気にならなかったんだ。|ちょっと置き場所変えただけで低音変わるんだな
+ja|0|food|家のアイスコーヒー、氷入れると後半薄くなる。|でね、そっちじゃなくてコーヒー自体を氷にしてみた。|コーヒーの氷、どれぐらいで溶けた？
+ja|2|crafts|ぬいぐるみ作ってたら、布が裏表でちょっと違って。|あ、裏にしようとした方、毛並みが短くてそっちを表にしたよ。|ぬいぐるみ、短い毛の方が撫でやすくて好き
+ja|1|games|牧場のゲームでえさ自動でやる装置を作った。|でもつなぎ方逆で、えさが全部倉庫に戻ってた。|倉庫だけどんどんお腹いっぱいｗ
+ja|0|home|乾かなかったから昨日だけブーツを玄関に置かずに部屋に入れたよ。|あれね、朝には乾いてたけど、床がちょっと湿った。|ブーツの下に新聞紙とか敷いた？
+ja|1|outdoors|家の裏でミントを植えたよ。|でね、鉢を小さくしたつもりが、根が穴から出てた。|鉢の外までミントが進出してるｗ
+ja|2|culture|喫茶店で古いジャズのレコードを聞かせてもらった。|曲もよかったけど、最初に針落とした時のあの音が忘れられない。|レコードのあの始まる前の音好き
+ja|0|social|町の工作イベントで当日お手伝いすることになった。|紙は足りるんだけど、置いとく机が意外と少なくてさ。|工作終わった作品の置き場所どうする？
+ja|3|travel|空港まで始発で行くつもりで早起きしたんだよ。|起きたらさ、電車じゃなくて空港バスの方が先に着くって知って。|早起きして電車のつもりがバスか
+ja|1|coding|名前の横に読み仮名出す機能つけた。|そしたら、ひらがなだけの名前にもまったく同じ読み仮名が出て笑った。|名前が二段になっただけやんｗ
+ja|0|food||かぼちゃの煮物、じゃなくて、かぼちゃの皮だけ焼いた話。身の方は昨日もう食べてる。|皮だけだとカリカリになる？
+ja|1|games||風の音聞きながらやってたゲームね、ん、違う、風の音は窓の外。ゲームの音かと思って設定探してた。|ゲームに風の音量探しちゃうの分かるｗ
+ja|2|crafts||棚作る話じゃなくて、棚に置くかごの話。角ばったのより丸いやつが入るか測ってた。|丸いかご、見た目はそっちが好き
+ja|3|home||充電ケーブルの話はもういいとしてさ、弁当のゴムだけ家に置いて来てふた押さえながら持ってきた。|ふた押さえっぱなしだと片手ずっと塞がるな
+ja|1|coding||コピー、じゃないや、切り取りの方。消した文章が残ってて、一瞬ただの入力ミスかと思った。|消したはずの文がいるとギョッとするやつ
+ja|0|outdoors||右足の話じゃなくて右の靴の話ね。靴の裏の溝に、小さい石が何個も入ってた。|歩くと何か音してた？
+ja|2|travel||帰りの席は窓側、あ、違う、通路側でいいや。窓の寒さがちょっとつらかった。|長く乗るなら自分も通路側派
+ja|3|tech||昨日イヤホンの充電がって話してたけど、今日は別件。マイクの位置変えたらキー打つ音が一番大きくなった。|マイク動かして今度はキーの音拾うか
+ja|1|social||友達の引っ越しの予定は昨日決まった。で、今のは手伝いの話じゃないよ、借りてた本がやっと見つかった。|引っ越す前に出てきて助かったやつ
+ja|0|culture||桜の歌って言ったけど、タイトルに桜が入ってるだけで全然春っぽい曲じゃなかった。|タイトル以外はどんな雰囲気だったの？
+en|3|home|I put the laundry basket beside the dryer instead of in the hall.|So I remembered every load. The trouble is now the dryer door hits it.|Harder to forget, harder to open. Figures.
+en|0|travel|The lookout closes early so we tried the trail first.|It got windy up there and we turned back before the stairs.|How far into the trail were those stairs?
+en|1|crafts|I labeled each little jar of paint with masking tape.|Then the tape curled up and two labels stuck together.|The paint labels are becoming a craft of their own lol
+en|2|food|I had a jar of dill and wasn't sure what to do with it.|It ended up in the scrambled eggs. Would do that again.|I'd take dill over pepper on eggs any day.
+en|0|tech|I set up a keyboard shortcut to start the timer.|Turned out I set the same shortcut for mute the other day.|Can you change the timer shortcut without losing mute?
+en|1|coding|I wanted my test clock to stay right at midnight.|And then I tried running the test in another time zone. It was dinner time.|Surprise dinner-time test lol
+en|3|games|I moved the friendly bot closer to the checkpoint.|It stayed by the checkpoint all right. I forgot that it could block the door.|Safe checkpoint, impossible doorway.
+en|2|outdoors|I wear gloves to collect dry leaves from the path.|Today I tried a tiny rake. Picked up the leaves without grabbing every other pebble.|Small rake wins for me too, leaves are fussy.
+en|0|culture|I went along to the backing vocal practice on a whim.|That last part sounded totally different when we took the piano away.|Did you keep the same tempo without the piano?
+en|1|social|We made name stickers for the potluck dishes.|We ran out, so the last bowl got a label saying mystery crunch.|Mystery crunch would be my first stop lol

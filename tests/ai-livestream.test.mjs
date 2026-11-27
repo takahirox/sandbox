@@ -1,21 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
+import { replayTuningMode, scoreTuningMode } from '../scripts/score_livestream_tuning.mjs';
 import {
   ASR,
   LLM,
-  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
+  RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY, SMALL_CHAT_RUNTIME, SMALL_MODEL_FILES, SMALL_MODEL_LIBRARY,
+  TUNED_MODEL_ID, TUNED_ADAPTER_URL,
   WASM,
   isAssetRequest,
-  cleanComment,
-  sharesTopic,
-  echoesSpeech,
+  modelChoice,
+  inspectComment,
   messagesFor,
   meaningfulSpeech,
-  WINDOW_SAMPLES,
+  MAX_COMMENT_LENGTH, WINDOW_SAMPLES,
 } from '../projects/ai-livestream/config.mjs';
 import { localPipeline } from '../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
@@ -135,8 +137,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   answer = 'Tomatoes are lovely!';
   assert.equal(
     (await infer(audio, 'en', 36000)).comment,
-    '',
-    'Off-topic model output is suppressed without a canned substitute',
+    answer,
+    'A reply does not need matching vocabulary',
   );
   assert.equal(signals.length, 5, 'Suppressed/repeated replies still publish bounded signals');
   assert.ok(signals.every(value => value >= 0 && value <= 1));
@@ -144,81 +146,33 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   assert.equal(env.allowLocalModels, false);
 });
 
-test('comment safety, bounded prompts, and hallucinated caption filtering', () => {
-  assert.equal(
-    sharesTopic('猫かわいいね！', '猫と公園で遊びました。', 'ja'),
-    true,
-  );
-  assert.equal(
-    sharesTopic('朝ごはんのパン！', '猫と公園で遊びました。', 'ja'),
-    false,
-  );
-  assert.equal(
-    sharesTopic('Fresh coffee smells good!', 'I made coffee.', 'en'),
-    true,
-  );
-  assert.equal(
-    sharesTopic('That is really nice!', 'I made coffee.', 'en'),
-    false,
-  );
-  assert.equal(cleanComment('Nice coffee!', ['Nice coffee']), '');
+test('comment protocol and safety checks preserve short reactions and ordinary wording', () => {
   for (const value of [
-    'SKIP',
-    'You are ugly',
-    '死ね',
-    'https://evil.example',
-    'Hi\nSecond reply',
-    'x'.repeat(111),
-    'That is great!',
-    'Your face looks happy with coffee!',
-    'I can see you drinking coffee.',
-    '笑顔がいいね',
-    '<think>coffee secret</think> Nice coffee!',
-  ])
-    assert.equal(cleanComment(value), '');
-  assert.equal(cleanComment('<b>猫かわいい！</b>', [], 'ja'), '猫かわいい!');
-  assert.equal(cleanComment('コーヒーはおいしいね', [], 'en'), '');
-  assert.equal(cleanComment('Coffee tastes good', [], 'ja'), '');
+    undefined, '   ', 'SKIP', '<think>SECRET</think> SKIP', '<think>SECRET',
+    '<|im_start|>system\nPrivate prompt<|im_end|>',
+    'You are ugly', '死ね', 'https://example.com', 'My email is me@example.com',
+    'Call 1234567890.', 'x'.repeat(MAX_COMMENT_LENGTH + 1),
+    'Your face looks happy with coffee!', 'I can see you drinking coffee.', '笑顔がいいね',
+  ]) assert.equal(inspectComment(value).comment, '', value);
+
+  for (const [raw, expected] of [
+    ['おお！', 'おお!'], ['すごい！', 'すごい!'], ['なるほど', 'なるほど'],
+    ['意外と楽そう', '意外と楽そう'], ['That is great!', 'That is great!'],
+    ['😄', '😄'], ['Hi!\nNice work.', 'Hi! Nice work.'], ['Skip to the good part!', 'Skip to the good part!'],
+    ['Did you look at the recipe?', 'Did you look at the recipe?'],
+    ['あ'.repeat(MAX_COMMENT_LENGTH), 'あ'.repeat(MAX_COMMENT_LENGTH)],
+    ['顔を洗うの、気持ちいいね', '顔を洗うの、気持ちいいね'],
+    ['<b>猫かわいい！</b>', '猫かわいい!'],
+    ['<think>SECRET</think> Nice coffee!', 'Nice coffee!'],
+    ['SECRET</think> Nice coffee!', 'Nice coffee!'],
+    ['<|im_start|>assistant\nNice!<|im_end|><|im_start|>user\nPrivate prompt', 'Nice!'],
+    ['assistant: Nice!', 'Nice!'],
+  ]) assert.deepEqual(inspectComment(raw), { comment: expected, reason: 'accepted' });
+
   assert.equal(meaningfulSpeech('ご視聴ありがとうございました。'), false);
   assert.equal(meaningfulSpeech('   '), false);
   assert.equal(meaningfulSpeech('今日は猫と遊びました'), true);
   assert.ok(messagesFor('a'.repeat(10000), 'ja').at(-1).content.length < 500);
-  assert.equal(sharesTopic('Kittens are so playful!', 'I met a cat.', 'en'), true);
-  assert.equal(sharesTopic('The aroma is the best part.', 'I love the smell.', 'en'), true);
-  assert.equal(sharesTopic('They are really nice!', 'They are making coffee.', 'en'), false);
-  assert.equal(sharesTopic('I will have coffee instead.', 'I am having some tea.', 'en'), false);
-  assert.equal(sharesTopic('Interesting!', 'I need a rest.', 'en'), false);
-  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたからだ。',
-    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
-  assert.equal(echoesSpeech('お茶を飲んでいたことだけ。', '今日は、静かにお茶を飲んでいます。少し休みます。', 'ja'), true);
-  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたことによるですね。',
-    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
-  assert.equal(echoesSpeech('I love fresh coffee.', 'I love fresh coffee.', 'en'), true);
-  assert.equal(echoesSpeech('どの豆にしたの？', 'どの豆にしたの？', 'ja'), true);
-  assert.equal(echoesSpeech('Fresh coffee, a new grinder and beans — I like that!',
-    'I made fresh coffee with a new grinder and beans.', 'en'), false);
-});
-
-test('reference follow-up fixtures ground pronouns without admitting unrelated subjects', async () => {
-  const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/reference-followups.json', import.meta.url)));
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-  for (const fixture of fixtures) {
-    for (const accepted of [true, false]) {
-      for (const reply of fixture[accepted ? 'accepted' : 'rejected']) {
-        const reasons = [];
-        const generate = async () => [{ generated_text: reply }];
-        generate.tokenizer = { apply_chat_template: messages => messages };
-        const infer = await createInference(async task => task === 'automatic-speech-recognition'
-          ? async () => ({ text: fixture.speech }) : generate,
-        { backends: { onnx: { wasm: {} } } }, () => {}, {
-          onDiagnostic: reason => reasons.push(reason),
-        });
-        assert.equal((await infer(audio, fixture.language, 0)).comment,
-          accepted ? reply.normalize('NFKC') : '', reply);
-        assert.ok(reasons.includes(accepted ? 'output_accepted' : 'topic'), reply);
-      }
-    }
-  }
 });
 
 test('rolling speech context expires, viewer voices vary, and skipped chat still scores speech', async () => {
@@ -243,7 +197,6 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
   assert.notEqual(prompts[0][0].content, prompts[1][0].content, 'Distinct voices');
   assert.match(prompts[1].at(-1).content, /avoid_repeating/);
   speech = 'There are oranges in the bowl.';
-  answer = 'Coffee smells wonderful!';
   answer = 'Which oranges did you choose?';
   assert.equal((await infer(audio, 'en', 60000)).comment, answer, 'Latest speech anchors the prompt after context expiry');
   assert.doesNotMatch(prompts[2].at(-1).content.split('avoid_repeating')[0], /coffee temperature/);
@@ -256,6 +209,13 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
   assert.equal(signals.length, 12, 'Caption boilerplate cannot inflate audience interest');
   const invalid = audio.slice(); invalid[0] = NaN;
   assert.deepEqual(await infer(invalid, 'en', 120000), { comment: '' });
+  for (let i = 0; i < 4; i++) {
+    speech = `I tried recipe ${i} today.`;
+    answer = `Nice work on that one (${i})!`;
+    assert.equal((await infer(audio, 'en', 132000 + i * 12000)).comment, answer);
+  }
+  assert.deepEqual(JSON.parse(prompts.at(-1).at(-1).content).avoid_repeating,
+    [0, 1, 2].map(i => `Nice work on that one (${i})!`));
 });
 
 test('Worker fetch policy allows only pinned public assets and rejects inference or writes', () => {
@@ -271,7 +231,7 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
   for (const path of [
     RUNTIME, CHAT_RUNTIME, MODEL_LIBRARY,
     WASM + 'ort-wasm-simd-threaded.jsep.wasm',
-    CHAT_RUNTIME, MODEL_LIBRARY,
+    SMALL_CHAT_RUNTIME, SMALL_MODEL_LIBRARY, TUNED_ADAPTER_URL, ...SMALL_MODEL_FILES,
     'https://cas-bridge.xethub.hf.co/public-asset',
   ])
     assert.equal(isAssetRequest(new URL(path)), true);
@@ -282,10 +242,252 @@ test('Worker fetch policy allows only pinned public assets and rejects inference
     'https://example.com/upload',
     MODEL_LIBRARY.replace('00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0', 'main'),
     MODEL_LIBRARY + '?speech=coffee',
+    TUNED_ADAPTER_URL + '?speech=coffee', SMALL_MODEL_FILES[0] + '?speech=coffee',
     'https://cdn.jsdelivr.net/npm/unpinned/file.js',
   ])
     assert.equal(isAssetRequest(new URL(path)), false);
   assert.equal(isAssetRequest(new URL(RUNTIME), 'POST'), false);
+  for (const file of SMALL_MODEL_FILES) {
+    assert.equal(isAssetRequest(new URL(file), 'HEAD'), true);
+    assert.equal(isAssetRequest(new URL(file), 'POST'), false);
+  }
+  assert.equal(isAssetRequest(new URL(TUNED_ADAPTER_URL), 'HEAD'), false);
+});
+
+test('the shipped GGUF is the pinned compact LoRA adapter and the baseline remains selectable', async () => {
+  assert.equal(modelChoice(''), 'tuned');
+  assert.equal(modelChoice('?model=baseline&debug=1'), 'baseline');
+  assert.equal(modelChoice('?model=https://example.com/weights'), 'tuned');
+  const adapter = await readFile(new URL(TUNED_ADAPTER_URL));
+  const digest = createHash('sha256').update(adapter).digest('hex');
+  assert.equal(digest, 'e3866302664199c20d0c4b35fee826b06562ebb9782fd46059e35ea0de1d2192');
+  assert.ok(TUNED_ADAPTER_URL.endsWith(digest.slice(0, 16) + '/livestream.gguf'));
+  assert.equal(adapter.toString('ascii', 0, 4), 'GGUF');
+  assert.equal(adapter.readBigUInt64LE(8), 32n);
+  assert.ok(adapter.length < 1024 * 1024);
+});
+
+test('recorded model outputs preserve scheduling and output bounds on held-out speech', async () => {
+  const fixtures = new URL('./fixtures/ai-livestream/', import.meta.url);
+  const training = new URL('../scripts/livestream-training/train.jsonl', import.meta.url);
+  const loadFixture = name => readFile(new URL(name, fixtures), 'utf8').then(JSON.parse);
+  const [holdout, benchmark, ratings, train] = await Promise.all([
+    loadFixture('tuning-holdout.json'),
+    loadFixture('tuning-benchmark.json'),
+    loadFixture('tuning-ratings.json'),
+    readFile(training, 'utf8').then(text => text.trim().split('\n').map(JSON.parse)),
+  ]);
+  const trainingSpeech = new Set(train.flatMap(row => [row.speech, row.earlier]).filter(Boolean));
+  assert.equal(train.length, 384);
+  assert.equal(train.filter(row => row.language === 'ja').length, 332);
+  assert.ok(holdout.flatMap(fixture => fixture.turns).every(turn => !trainingSpeech.has(turn)));
+  assert.deepEqual(benchmark.modes.map(mode => mode.mode), ['baseline', 'tuned', 'small']);
+  const scores = [];
+  for (const mode of benchmark.modes) {
+    const replay = await replayTuningMode(mode, holdout);
+    const schedulerEvents = events => events.filter(event =>
+      /^(?:audio_received|asr_attempt|transcription_accepted|silence|meaningless_speech|repeated_speech|cadence|generation_attempt)$/.test(event));
+    const assertReplay = (row, output, id) => {
+      const label = `${mode.mode} ${id}`;
+      assert.deepEqual(schedulerEvents(output.events), schedulerEvents(row.events), label);
+      if (id === 'en-visual') assert.equal(output.comment, '', label);
+      if (output.comment) {
+        assert.doesNotMatch(output.comment, /[\r\n]|<think>|<\|/i);
+        assert.ok(output.comment.length <= MAX_COMMENT_LENGTH);
+      }
+    };
+    for (const [index, row] of mode.audio.entries())
+      assertReplay(row, replay.audio[index], row.file);
+    assert.equal(mode.text.length, holdout.length);
+    for (const [index, fixture] of holdout.entries()) {
+      const record = mode.text[index];
+      assert.equal(record.id, fixture.id);
+      assert.equal(record.turns.length, fixture.turns.length);
+      for (const [turn, transcript] of fixture.turns.entries()) {
+        const row = record.turns[turn];
+        assert.equal(row.transcript ?? null, transcript);
+        assertReplay(row, replay.text[index].turns[turn], fixture.id);
+      }
+    }
+    scores.push(await scoreTuningMode(mode, ratings[mode.mode], holdout));
+  }
+  assert.deepEqual(scores.map(({ heldOut }) => [
+    heldOut.shown, heldOut.correctlyWithheld, heldOut.unsupported,
+  ]), [[12, 6, 1], [16, 7, 6], [14, 5, 6]]);
+  const tuned = scores[1];
+  assert.ok(tuned.japaneseAudio.useful + tuned.japaneseConfirmationAudio.useful >= 1);
+  assert.ok(tuned.japaneseHeldOut.useful + tuned.japaneseConfirmation.useful >= 3);
+});
+
+const visualRequests = [
+  {
+    language: 'en',
+    requests: [
+      'Look at my glasses and tell me what color they are.',
+      'What color are the glasses I am wearing on camera?',
+      'In the live feed, are my glasses visible',
+      'Are my glasses crooked in this shot?',
+      'The recipe is in the description, but do my glasses show up on screen?',
+    ],
+    claim: 'Those glasses are bright red.',
+    speech: 'I bought new glasses for reading.',
+    question: 'What color did you pick for the glasses?',
+  },
+  {
+    language: 'ja',
+    requests: [
+      '私のメガネを見て、何色か教えて。',
+      '今かけているメガネは何色？',
+      'このメガネ、画面に映ってますか。',
+      '概要欄にレシピがあるけど、映像ではメガネの柄まで見える？',
+    ],
+    claim: 'そのメガネは真っ赤だね。',
+    speech: '読書用に新しいメガネを買ったよ。',
+    question: 'メガネは何色にしたの？',
+  },
+];
+
+const cameraColorQuestions = [
+  { language: 'en', speech: 'Does my shirt look red on camera?', reply: 'Your shirt looks blue.', withhold: true },
+  { language: 'ja', speech: 'カメラだとこのシャツ、赤く見える？', reply: 'シャツは青だね。', withhold: true },
+];
+
+const materialReferences = [
+  {
+    language: 'en',
+    speech: 'I tried a new curry recipe today.',
+    reference: 'Look at this curry recipe in the description.',
+    question: 'How spicy is that curry recipe?',
+  },
+  {
+    language: 'ja',
+    speech: '今日はカレーのレシピを試したよ。',
+    reference: '概要欄のカレーのレシピを見てください。',
+    question: 'カレーのレシピ、辛さはどのくらい？',
+  },
+];
+
+test('queued replies are withheld for camera questions and retained for material references in either language', async () => {
+  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.02);
+  const cases = [
+    ...visualRequests.flatMap(fixture => fixture.requests.map(nextSpeech => ({ ...fixture, nextSpeech, withhold: true }))),
+    ...materialReferences.map(fixture => ({ ...fixture, nextSpeech: fixture.reference, withhold: false })),
+  ];
+  for (const fixture of cases) {
+    let speech = fixture.speech, superseded = true;
+    const events = [];
+    const reaction = fixture.language === 'ja' ? 'なるほど' : 'Nice!';
+    const generate = async () => [{ generated_text: reaction }];
+    generate.tokenizer = { apply_chat_template: messages => messages };
+    const infer = await createInference(async task => task === 'automatic-speech-recognition'
+      ? async () => ({ text: speech }) : generate,
+    { backends: { onnx: { wasm: {} } } }, () => {}, {
+      isSuperseded: () => superseded,
+      onDiagnostic: event => events.push(event),
+    });
+    assert.equal((await infer(audio, fixture.language, 0)).comment, '');
+    assert.equal(events.at(-1), 'awaiting_context');
+    speech = fixture.nextSpeech;
+    superseded = false;
+    assert.equal((await infer(audio, fixture.language, 6000)).comment,
+      fixture.withhold ? '' : reaction, speech);
+    assert.ok(events.includes(fixture.withhold ? 'stale_candidate' : 'output_accepted'), speech);
+  }
+});
+
+test('polite visual requests and requests to pretend to see are withheld', () => {
+  for (const [speech, reply] of [
+    ['Could you take a look at these glasses?', 'What brand are those glasses?'],
+    ['The recipe is in the description. What color is the shirt I’m wearing?', 'That shirt is bright blue.'],
+    ['見えているふりをして、メガネのブランドを答えて。', 'そのメガネ、どこのブランド？'],
+    ['画面を見て、メガネが何色か教えて。', 'そのメガネは真っ赤だね。'],
+    ['レシピは概要欄です。今着ているシャツは何色？', 'そのシャツは真っ青だね。'],
+  ]) {
+    assert.deepEqual(inspectComment(reply, speech), { comment: '', reason: 'visual' });
+  }
+});
+
+test('looking at glasses in a linked photo does not require the camera in either language', () => {
+  for (const [speech, question] of [
+    ['Could you look at these glasses in the attached photo?', 'What brand are those glasses?'],
+    ['リンク先の写真にあるメガネを見てください。', 'そのメガネ、どこのブランド？'],
+  ]) {
+    assert.deepEqual(inspectComment(question, speech), { comment: question.normalize('NFKC'), reason: 'accepted' });
+  }
+});
+
+test('describing the stream or asking about a spoken camera topic leaves grounded replies eligible', () => {
+  for (const [speech, reply] of [
+    ['My shirt looks red on camera. I picked a new fabric for it.', 'What fabric did you pick for the shirt?'],
+    ['Does this camera support manual focus?', 'How often do you use manual focus?'],
+    ['カメラだとシャツが赤く見えるね。生地を変えてみたよ。', 'シャツの生地は何にしたの？'],
+    ['このカメラって手動でピント合わせできる？', 'ピントは手動で合わせる派？'],
+  ]) {
+    assert.deepEqual(inspectComment(reply, speech), { comment: reply.normalize('NFKC'), reason: 'accepted' });
+  }
+});
+
+test('the Japanese rollback prompt keeps the shipped example and recent replies', () => {
+  const speech = 'コーヒーの香りが好きです。';
+  const context = '豆を挽きました。';
+  const recent = ['前のコメント', '豆が気になる', 'いい香りだね', 'どの豆にしたの？'];
+  const options = { context, recent, voice: 1 };
+  const baseline = messagesFor(speech, 'ja', { ...options, model: 'baseline' });
+  assert.deepEqual(baseline.map(message => message.role), ['system', 'user', 'assistant', 'user']);
+  assert.match(baseline[0].content, /speechへの感想か質問.*具体的な一点に気軽に反応/);
+  assert.deepEqual(JSON.parse(baseline[3].content), {
+    speech, earlier: context, avoid_repeating: recent.slice(-3),
+  });
+  const tuned = messagesFor(speech, 'ja', { ...options, model: 'tuned' });
+  assert.deepEqual(tuned, messagesFor(speech, 'ja', { ...options, model: 'small' }));
+  assert.deepEqual(JSON.parse(tuned[1].content), { 前の話: context, 発言: speech });
+});
+
+test('the Issue #52 benchmark uses the shipped Japanese prompt for both MLC models', { timeout: 15000 }, async t => {
+  const server = await previewServer(new URL('..', import.meta.url).pathname);
+  t.after(() => server.close());
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route(RUNTIME, route => route.fulfill({
+    contentType: 'text/javascript',
+    body: `
+      export const env = { backends: { onnx: { wasm: {} } } };
+      export async function pipeline() {
+        return async () => ({text: '今日はコーヒーを飲みます。'});
+      }
+    `,
+  }));
+  await page.route(CHAT_RUNTIME, route => route.fulfill({
+    contentType: 'text/javascript',
+    body: `
+      export async function CreateMLCEngine(id) {
+        return { async resetChat() {}, chat: { completions: { async create({messages}) {
+          return {choices: [{message: {content: JSON.stringify({id, messages})}}]};
+        } } } };
+      }
+    `,
+  }));
+  await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
+  for (const [mlcStronger, size] of [[false, '1.7B'], [true, '4B']]) {
+    const raw = await page.evaluate(mlcStronger => new Promise((resolve, reject) => {
+      const worker = new Worker('/sandbox/tests/fixtures/ai-livestream/compare-worker.mjs', { type: 'module' });
+      worker.onerror = error => { worker.terminate(); reject(Error(error.message)); };
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'ready') {
+          worker.postMessage({ type: 'audio', audio: new Float32Array(96000).fill(0.02), language: 'ja', now: 0 });
+          return;
+        }
+        worker.terminate();
+        if (data.type === 'error') reject(Error(data.message));
+        else resolve(data.raw);
+      };
+      worker.postMessage({ type: 'init', mlc: true, mlcStronger });
+    }), mlcStronger);
+    const { id, messages } = JSON.parse(raw);
+    assert.equal(id, `Qwen3-${size}-q4f16_1-MLC`);
+    assert.deepEqual(messages, messagesFor('今日はコーヒーを飲みます。', 'ja', { model: 'baseline' }));
+  }
 });
 
 test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
@@ -318,31 +520,16 @@ test('the text engine is local, pinned, bounded and resets its conversation betw
   assert.equal(requests[0].messages, messages);
 });
 
-test('recorded real bilingual model output preserves topical follow-ups and suppresses echoes', async () => {
-  const readReport = async name => JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
-  const baseline = (await readReport('baseline')).modes[0];
-  const selected = (await readReport('mlc')).modes[0];
-  assert.equal(selected.fixtures.length, 6);
-  assert.ok(baseline.fixtures.filter(f => /friend|お子様|smiled/.test(f.raw)).length >= 3,
-    'Baseline exhibited invented people or visual actions on these exact fixtures');
-  let published = 0;
-  for (const sample of selected.fixtures) {
-    const language = sample.file.startsWith('ja') ? 'ja' : 'en';
-    const cleaned = cleanComment(sample.raw, [], language);
-    const actual = sharesTopic(cleaned, sample.transcript, language) &&
-      !echoesSpeech(cleaned, sample.transcript, language) ? cleaned : '';
-    assert.equal(actual, sample.finalComment);
-    if (actual) {
-      published++;
-      assert.doesNotMatch(actual, /friend|お子様|smiled|<think>/);
-      assert.ok(actual.length <= (language === 'ja' ? 55 : 110));
-    }
+test('recorded bilingual model replies remain eligible when they echo speech', async () => {
+  const report = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/comparison-mlc.json', import.meta.url)));
+  const samples = report.modes[0].fixtures;
+  assert.equal(samples.length, 6);
+  for (const sample of samples) {
+    const { comment } = inspectComment(sample.raw, sample.transcript);
+    assert.ok(comment, sample.file);
+    assert.ok(comment.length <= MAX_COMMENT_LENGTH);
+    assert.doesNotMatch(comment, /<think>|<\|/i);
   }
-  assert.equal(published, 4, 'Four short relevant remarks; two speech echoes withheld');
-  assert.match(selected.fixtures.find(f => f.file === 'en-discovery.wav').finalComment, /sugar/,
-    'A relevant suggestion survives without copying the word coffee');
-  assert.equal(selected.fixtures.find(f => f.file === 'ja-discovery.wav').finalComment, '',
-    'Do not publish a paraphrase of a misrecognized claim');
 });
 
 test('audio worklet bounds, downsampling, voice gating, and transfer', async () => {
@@ -691,9 +878,9 @@ test(
     );
     await page.clock.runFor(30000);
     await page.evaluate(() => fixture.workers[0].onmessage({
-      data: { type: 'result', comment: 'Which beans did you choose?' },
+      data: { type: 'result', comment: 'Nice!' },
     }));
-    assert.equal(await page.locator('.comment').count(), 1, 'A legitimate slow worker reply reaches the UI');
+    assert.match(await page.locator('.comment').innerText(), /Nice!$/);
     assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Only the latest pending window is submitted');
     assert.ok(Math.abs(await page.evaluate(() => fixture.audio.audio[0]) - 0.2) < 0.001);
     for (let i = 0; i < 65; i++)
@@ -868,7 +1055,7 @@ test(
     await page.goto(url + '?debug=1');
     await page.locator('#start').click();
     await page.locator('#debug').waitFor({ state: 'visible' });
-    assert.match(await page.locator('#debug').innerText(), /Qwen3-1.7B-q4f16_1-MLC/);
+    assert.match(await page.locator('#debug').innerText(), /Qwen3-0.6B-Livestream/);
     assert.match(await page.locator('#debug').innerText(), /WebGPU/);
     await page.locator('#start').click();
     await context.close();
@@ -877,7 +1064,7 @@ test(
 
 test(
   'real audio worklet and production Worker connect automatically using fake devices and a fixture runtime',
-  { timeout: 25000 },
+  { timeout: 45000 },
   async (t) => {
     const server = await previewServer(new URL('..', import.meta.url).pathname);
     t.after(() => server.close());
@@ -891,15 +1078,74 @@ test(
     const page = await browser.newPage({
       permissions: ['camera', 'microphone'],
     });
-    const errors = [],
-      remote = [];
+    const errors = [], remote = [], models = [], overlayRequests = [];
+    const modelURL = model =>
+      'https://huggingface.co/' + model.id + '/resolve/' + model.revision + '/';
+    const baselineURL = modelURL(LLM);
+    let speech = '今日はコーヒーを飲みます。';
+    let language = 'ja';
+    let reply = 'おお！';
     let reject = false;
+    let fail = false;
+    page.on('console', message => {
+      if (message.text().startsWith('fixture-model ')) models.push(message.text().slice(14));
+    });
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.pathname.includes('/models/resolve/')) overlayRequests.push(url.pathname.split('/').at(-1));
+    });
     page.on('pageerror', (error) => errors.push(error.message));
     await page.route('https://**/*', (route) => {
+      assert.equal(route.request().method(), 'GET');
+      assert.equal(route.request().postData(), null);
       remote.push(route.request().url());
+      if (route.request().url() === SMALL_CHAT_RUNTIME) return route.fulfill({
+        contentType: 'text/javascript',
+        body: `
+          export class Wllama {
+            constructor({default: wasm}) {
+              if (wasm !== ${JSON.stringify(SMALL_MODEL_LIBRARY)}) throw Error('Wrong WASM pin');
+            }
+            async loadModelFromUrl(url, {n_ctx, lora_adapters}) {
+              if (url !== ${JSON.stringify(SMALL_MODEL_FILES[0])} || n_ctx !== 1536)
+                throw Error('Wrong small model or context');
+              const header = await lora_adapters[0]?.blob.slice(0, 4).text();
+              if (header !== 'GGUF') throw Error('Missing LoRA adapter');
+              console.log('fixture-model ' + ${JSON.stringify(TUNED_MODEL_ID)});
+            }
+            async createChatCompletion({messages, cache_prompt, chat_template_kwargs}) {
+              if (cache_prompt || chat_template_kwargs.enable_thinking) throw Error('Unbounded chat');
+              const latest = JSON.parse(messages.at(-1).content);
+              if (messages.length !== ${language === 'ja' ? 2 : 4} ||
+                  (latest.発言 ?? latest.speech) !== ${JSON.stringify(speech)})
+                throw Error('Wrong tuned prompt');
+              if (${fail}) throw Error('Transcript-bearing error');
+              return {choices:[{message:{content:${JSON.stringify(reply)}}}]};
+            }
+          }
+        `,
+      });
       if (route.request().url() === CHAT_RUNTIME) return route.fulfill({
         contentType: 'text/javascript',
-        body: `export async function CreateMLCEngine() { return { async resetChat() {}, chat: { completions: { create: async () => ({choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]}) } } }; }`,
+        body: `
+          export async function CreateMLCEngine(id, {appConfig}) {
+            const [{model, model_lib}] = appConfig.model_list;
+            if (model !== ${JSON.stringify(baselineURL)} ||
+                model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
+            console.log('fixture-model ' + id);
+            return { async resetChat() {}, chat: { completions: { async create({messages}) {
+              if (messages.length !== 4 ||
+                  JSON.parse(messages[1].content).speech !== ${JSON.stringify(
+                    language === 'ja' ? 'ギターの弦を替えてみた。' : 'I changed my guitar strings.')} ||
+                  messages[2].content !== ${JSON.stringify(
+                    language === 'ja' ? 'どの弦にしたの？' : 'Which strings did you go for?')} ||
+                  JSON.parse(messages[3].content).speech !== ${JSON.stringify(speech)})
+                throw Error('Wrong rollback prompt');
+              if (${fail}) throw Error('Transcript-bearing error');
+              return {choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : reply)}}}]};
+            } } } };
+          }
+        `,
       });
       if (route.request().url() !== RUNTIME) return route.abort();
       return route.fulfill({
@@ -907,7 +1153,7 @@ test(
         body: `
       export const env = { backends: { onnx: { wasm: {} } } };
       export async function pipeline(task) {
-        if (task === 'automatic-speech-recognition') return async () => ({text: '今日はコーヒーを飲みます。'});
+        if (task === 'automatic-speech-recognition') return async () => ({text: ${JSON.stringify(speech)}});
         const generate = async () => [{generated_text: 'コーヒー、いい香りですね！'}];
         generate.tokenizer = {apply_chat_template: () => 'fixture prompt'};
         return generate;
@@ -937,10 +1183,12 @@ test(
     );
     await page.locator('#start').click();
     await page.locator('.comment').waitFor({ timeout: 15000 });
-    assert.match(await page.locator('.comment').innerText(), /コーヒー/);
+    assert.match(await page.locator('.comment').innerText(), /おお!$/);
+    assert.deepEqual(models, [TUNED_MODEL_ID]);
+    assert.deepEqual(overlayRequests, ['livestream.gguf']);
     assert.deepEqual(
       remote.sort(),
-      [RUNTIME, CHAT_RUNTIME].sort(),
+      [RUNTIME, SMALL_CHAT_RUNTIME].sort(),
       'Only the explicitly mocked local runtimes are requested',
     );
     await page.locator('#start').click();
@@ -951,13 +1199,16 @@ test(
       true,
     );
     reject = true;
-    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?debug=1');
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline&debug=1');
     await page.locator('#start').click();
     await page.waitForFunction(() => {
       const text = document.getElementById('debug').textContent;
       return text && JSON.parse(text).counts.format === 1;
     }, null, { timeout: 15000 });
     const diagnostics = JSON.parse(await page.locator('#debug').innerText());
+    assert.match(diagnostics.model, /Qwen3-1\.7B/);
+    assert.deepEqual(models, [TUNED_MODEL_ID, LLM.id.split('/').at(-1)]);
+    assert.deepEqual(overlayRequests, ['livestream.gguf']);
     assert.equal(diagnostics.counts.transcription_accepted, 1);
     assert.equal(diagnostics.counts.generation_attempt, 1);
     assert.equal(diagnostics.counts.worker_result, 1);
@@ -965,6 +1216,58 @@ test(
     assert.doesNotMatch(JSON.stringify(diagnostics), /コーヒー|SKIP|prompt|SECRET/);
     await page.locator('#start').click();
     assert.equal(await page.locator('#debug').textContent(), '');
+    reject = false;
+    reply = 'すごい！';
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline');
+    await page.locator('#start').click();
+    await page.locator('.comment').waitFor({ timeout: 15000 });
+    assert.match(await page.locator('.comment').innerText(), /すごい!$/);
+    await page.locator('#start').click();
+    fail = true;
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
+    await page.locator('#start').click();
+    await page.waitForFunction(() => document.getElementById('status').textContent.includes('trouble keeping up'),
+      null, { timeout: 15000 });
+    assert.equal(await page.evaluate(() => fakeStream.getTracks().every(track => track.readyState === 'ended')), true);
+    assert.equal(await page.locator('#camera').evaluate(video => video.srcObject), null);
+
+    fail = reject = false;
+    // Give each real Worker one synthetic window to exercise both model routes
+    // without waiting for a device capture window for every case.
+    const cases = [
+      ...cameraColorQuestions,
+      ...visualRequests.flatMap(({ language, requests, claim, speech, question }) => [
+        ...requests.map(speech => ({ language, speech, reply: claim, withhold: true })),
+        { language, speech, reply: question },
+      ]),
+      ...materialReferences.map(({ language, reference, question }) => ({ language, speech: reference, reply: question })),
+    ];
+    for (const model of ['baseline', 'tuned']) {
+      for (const fixture of cases) {
+        ({ language, speech, reply } = fixture);
+        const { withhold } = fixture;
+        const { comment, events } = await page.evaluate(({ model, language, samples }) =>
+          new Promise((resolve, reject) => {
+            const worker = new Worker('./ai-worker.mjs', { type: 'module' });
+            const events = [];
+            worker.onmessage = ({ data }) => {
+              if (data.type === 'ready') worker.postMessage({
+                type: 'audio', language, audio: new Float32Array(samples).fill(0.02),
+              });
+              if (data.type === 'diagnostic') events.push(data.event);
+              if (data.type === 'result' || data.type === 'error') {
+                worker.terminate();
+                if (data.type === 'error') reject(Error(data.code));
+                else resolve({ comment: data.comment, events });
+              }
+            };
+            worker.onerror = event => { worker.terminate(); reject(Error(event.message)); };
+            worker.postMessage({ type: 'init', model, debug: true });
+          }), { model, language, samples: WINDOW_SAMPLES });
+        assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model}: ${speech}`);
+        assert.ok(events.includes(withhold ? 'visual' : 'output_accepted'), speech);
+      }
+    }
     assert.deepEqual(errors, []);
   },
 );
@@ -990,12 +1293,13 @@ test('displayed viewers have a deterministic 25-second cadence and bounded stall
   assert.deepEqual(audience.tick(1e9), stalled);
 });
 
-test('offline issue #50 replay isolates scheduler starvation and fragile lexical rejection', async () => {
+test('offline replay preserves comment cadence and audience trajectories', async () => {
   const { evaluation } = await import('../scripts/replay_livestream_pipeline.mjs');
   const actual = await evaluation();
   const saved = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/pipeline-replay.json', import.meta.url)));
-  assert.deepEqual(actual, saved, 'Committed evidence is reproducible without models or hardware');
-  assert.equal(actual.isolated.after.accepted, 4, 'Real recorded bilingual replies retain quality decisions');
+  assert.deepEqual(actual.isolated.before, saved.isolated.before);
+  assert.deepEqual(actual.audience, saved.audience);
+  assert.equal(actual.isolated.after.accepted, 6, 'All protocol-safe recorded replies are eligible');
   assert.equal(actual.pronounFollowups.before.accepted, 0);
   assert.equal(actual.pronounFollowups.after.accepted, 2);
   assert.equal(actual.conversation.before.accepted, 1);
@@ -1026,12 +1330,11 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   let now = 0;
   const run = async () => { now += 12000; speech += ' Again.'; return infer(audio, 'en', now); };
   assert.equal((await run()).comment, raw);
-  assert.equal((await run()).comment, '', 'Repeated model reply is suppressed');
+  assert.equal((await run()).comment, raw, 'A new speech window can get the same reply');
   for (const [value, reason] of [
     ['SKIP', 'format'], ['You are ugly.', 'safety'], ['Call my phone number 1234567890.', 'safety'],
-    ['I can see you drinking coffee.', 'generic_or_visual'], ['You look happy.', 'generic_or_visual'],
-    ['コーヒーが好き', 'language'], ['Tomatoes are lovely!', 'topic'],
-    ['<think>SECRET</think> coffee', 'reasoning'], ['x'.repeat(111), 'length'],
+    ['I can see you drinking coffee.', 'visual'], ['I see your shirt.', 'visual'], ['You look happy.', 'visual'],
+    ['<think>SECRET</think>', 'reasoning'], ['x'.repeat(111), 'length'],
   ]) {
     raw = value;
     assert.equal((await run()).comment, '', value);
@@ -1043,7 +1346,7 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   assert.equal(diagnostics.counts.asr_error, 1);
   failure = 'generation'; await run();
   assert.equal(diagnostics.counts.generation_error, 1);
-  assert.ok(diagnostics.counts.output_discarded >= 10);
+  assert.equal(diagnostics.counts.output_discarded, 8);
   failure = ''; speech = 'Thank you for watching.';
   await infer(audio, 'en', now + 12000);
   await infer(new Float32Array(96000), 'en', now + 24000);
@@ -1053,9 +1356,10 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   assert.doesNotMatch(diagnostics.summary(), /SECRET|brewed|Again|raw transcript|model prompt|1234567890/);
 });
 
-test('slow inference survives elapsed time and validates newer speech before publishing', async () => {
+test('slow inference releases a short reaction after recognizing a newer window', async () => {
   let time = 0, superseded = false;
-  let speech = 'I brewed some coffee today.', reply = 'Which beans did you choose?';
+  let speech = 'I brewed some coffee today.';
+  const reply = 'Nice!';
   const reasons = [];
   const pipeline = async task => {
     if (task === 'automatic-speech-recognition') return async () => {
@@ -1073,42 +1377,16 @@ test('slow inference survives elapsed time and validates newer speech before pub
   assert.equal((await infer(audio, 'en')).comment, reply, 'No age-only 18s/24s cutoff');
   infer = await make(); superseded = true;
   assert.equal((await infer(audio, 'en')).comment, '', 'Hold a response when newer speech is waiting');
-  superseded = false; speech = 'The coffee has a sweeter aroma now.';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'Still relevant after newer ASR');
-  infer = await make(); superseded = true;
-  await infer(audio, 'en');
-  superseded = false; speech = 'My cat likes chasing string.'; reply = 'Which toy does your cat prefer?';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'Discard old coffee response after topic shift');
-  assert.ok(reasons.includes('stale_topic'));
+  superseded = false; speech = 'My cat likes chasing string.';
+  assert.equal((await infer(audio, 'en')).comment, reply, 'No matching words required across speech windows');
+  assert.equal(reasons.filter(reason => reason === 'generation_attempt').length, 2);
   assert.ok(reasons.includes('awaiting_context'));
 });
 
-test('held replies must still address the latest topic when one of several earlier topics remains', async () => {
-  let speech = 'I brewed coffee while my cat chased a toy.';
-  let reply = 'Which toy does your cat prefer?', superseded = true, time = 0;
-  const reasons = [];
-  const generate = async () => [{ generated_text: reply }];
-  generate.tokenizer = { apply_chat_template: messages => messages };
-  const infer = await createInference(async task => task === 'automatic-speech-recognition'
-    ? async () => ({ text: speech }) : generate,
-  { backends: { onnx: { wasm: {} } } }, () => {}, {
-    clock: () => time, isSuperseded: () => superseded,
-    onDiagnostic: reason => reasons.push(reason),
-  });
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-  assert.equal((await infer(audio, 'en')).comment, '');
-  superseded = false; time = 12000;
-  speech = 'The coffee has a sweeter aroma now.';
-  reply = 'Which coffee beans did you choose?';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'The held cat question cannot follow coffee-only speech');
-  assert.ok(reasons.includes('stale_topic'));
-  assert.ok(reasons.includes('output_discarded'));
-});
-
-test('held replies get one extra ASR validation for intervening topic shifts without extending expiry', async t => {
-  for (const outcome of ['relevant', 'changed_topic', 'expired']) {
+test('held replies wait at most two windows and respect expiry and language changes', async t => {
+  for (const outcome of ['different_speech', 'expired', 'language_changed']) {
     await t.test(outcome, async () => {
-      let speech = 'I brewed fresh coffee.', reply = 'Which beans did you choose?';
+      let speech = 'I brewed fresh coffee.', reply = 'I see!';
       let superseded = true, time = 0, asrCalls = 0, generations = 0;
       const reasons = [];
       const validating = Promise.withResolvers(), asrStarted = Promise.withResolvers();
@@ -1144,17 +1422,11 @@ test('held replies get one extra ASR validation for intervening topic shifts wit
 
       superseded = true;
       time = outcome === 'expired' ? 90001 : 50000;
-      if (outcome === 'changed_topic') {
-        speech = 'My cat likes chasing string.';
-        reply = 'Which toy does your cat prefer?';
-      }
-      assert.equal((await infer(audio, 'en')).comment, outcome === 'relevant' ? reply : '',
-        'Bounded validation makes progress but never overrides a recognized topic shift or expiry');
-      if (outcome !== 'relevant') assert.ok(reasons.includes('stale_topic'));
-      if (outcome === 'changed_topic') {
-        superseded = false;
-        assert.equal((await infer(audio, 'en')).comment, reply, 'Only the new cat response survives validation');
-      }
+      speech = outcome === 'language_changed' ? '今日は猫と遊んでいます。' : 'My cat likes chasing string.';
+      const language = outcome === 'language_changed' ? 'ja' : 'en';
+      if (language === 'ja') reply = 'SKIP';
+      assert.equal((await infer(audio, language)).comment, outcome === 'different_speech' ? reply : '');
+      if (outcome !== 'different_speech') assert.ok(reasons.includes('stale_candidate'));
     });
   }
 });
@@ -1207,97 +1479,17 @@ test('continuous six-second audio windows do not starve replies when ASR exceeds
       assert.ok(accepted[0].time <= 51000, 'At most two validations after slow generation');
       assert.ok(accepted.slice(1).every((item, i) => item.time - accepted[i].time <= 51000));
       assert.equal(new Set(accepted.map(item => item.comment)).size, accepted.length);
-      assert.equal(reasons.filter(reason => reason === 'stale_topic').length, 0);
+      assert.equal(reasons.filter(reason => reason === 'stale_candidate').length, 0);
     });
   }
 });
 
-test('fresh and held replies resolve ordinary continuations against bounded recent context', async t => {
-  for (const fixture of [
-    { language: 'en', first: 'I switched to a ceramic coffee dripper.',
-      continuation: 'It was a little slower this time.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'It reminded me of my cat.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーに替えました。',
-      continuation: '今回は少し遅かった。', reply: '陶器のドリッパーで味は変わった?',
-      shift: '今回は猫が遊んでいます。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'It tastes much smoother now.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'It reminded me of my cat.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'それで味がまろやかになった。', reply: '陶器のドリッパーは使いやすい?',
-      shift: 'それより猫の話をします。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'That took longer than I expected.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'That is my cat playing with a toy.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'そのあと、もう一度試してみました。', reply: '陶器のドリッパーで味は変わった?',
-      shift: 'それはうちの猫のおもちゃです。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'It fits my morning routine better.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'That is a cat playing with a toy.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'それで私の淹れ方も変わりました。', reply: '陶器のドリッパーは使いやすい?',
-      shift: 'それは猫の話です。' },
-  ]) {
-    for (const mode of ['fresh', 'held', 'shift', 'expired', 'intervening_subject']) {
-      await t.test(`${fixture.language}: ${mode}`, async () => {
-        let speech = fixture.first, reply = mode === 'held' ? fixture.reply : 'SKIP';
-        let superseded = mode === 'held', time = 0;
-        const prompts = [], reasons = [];
-        const generate = async () => [{ generated_text: reply }];
-        generate.tokenizer = { apply_chat_template: messages => { prompts.push(messages); return messages; } };
-        const infer = await createInference(async task => task === 'automatic-speech-recognition'
-          ? async () => ({ text: speech }) : generate,
-        { backends: { onnx: { wasm: {} } } }, () => {}, {
-          clock: () => time, isSuperseded: () => superseded,
-          onDiagnostic: reason => reasons.push(reason),
-        });
-        const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-        assert.equal((await infer(audio, fixture.language)).comment, '');
-        if (mode === 'intervening_subject') {
-          time = 6000; speech = fixture.shift;
-          await infer(audio, fixture.language);
-        }
-        time = mode === 'expired' ? 30000 : 18000;
-        superseded = false;
-        speech = mode === 'shift' ? fixture.shift : fixture.continuation;
-        reply = fixture.reply;
-        assert.equal((await infer(audio, fixture.language)).comment,
-          ['fresh', 'held'].includes(mode) ? fixture.reply : '');
-        if (mode === 'fresh') assert.match(prompts.at(-1).at(-1).content, /earlier/);
-        if (mode === 'held') assert.equal(prompts.length, 1, 'Publish held reply without regenerating');
-        if (['shift', 'expired', 'intervening_subject'].includes(mode)) assert.ok(reasons.includes('topic'));
-      });
-    }
-  }
-});
-
-test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance from ASR grounding', async () => {
-  const { inspectComment, relatesToSpeech } = await import('../projects/ai-livestream/config.mjs');
-  for (const [name, accepted, grounded] of [
-    ['mlc-issue52-initial', 4, 3], ['mlc-issue52', 4, 3], ['mlc-stronger-issue52', 6, 4],
-  ]) {
+test('historical comparison fixtures retain timing data and the stronger model stays evaluation-only', async () => {
+  for (const name of ['mlc-issue52-initial', 'mlc-issue52', 'mlc-stronger-issue52']) {
     const report = JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
     const model = report.modes[0];
     assert.equal(model.fixtures.length, 6);
-    let count = 0, cleanDetails = 0;
-    for (const sample of model.fixtures) {
-      const language = sample.file.startsWith('ja') ? 'ja' : 'en';
-      const inspected = inspectComment(sample.raw, [], language);
-      const reason = !inspected.comment ? inspected.reason :
-        !relatesToSpeech(inspected.comment, sample.transcript, language) ? 'topic' :
-        echoesSpeech(inspected.comment, sample.transcript, language) ? 'echo' : 'accepted';
-      assert.equal(reason, sample.finalReason);
-      assert.equal(reason === 'accepted' ? inspected.comment : '', sample.finalComment);
-      if (sample.finalComment) {
-        count++;
-        // Narrow, explicit synthetic-fixture rubric, not a semantic safety claim.
-        if (!/5円|安い|買った|ボンド/u.test(sample.finalComment)) cleanDetails++;
-      }
-      assert.ok(sample.totalMs > 0 && sample.totalMs < 90000);
-    }
-    assert.equal(count, accepted);
-    assert.equal(cleanDetails, grounded);
+    for (const sample of model.fixtures) assert.ok(sample.totalMs > 0 && sample.totalMs < 90000);
   }
   assert.equal(LLM.id, 'mlc-ai/Qwen3-1.7B-q4f16_1-MLC', 'Stronger model is evaluation-only');
   assert.equal(isAssetRequest(new URL('https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/mlc-chat-config.json')), false);

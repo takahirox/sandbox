@@ -1,0 +1,276 @@
+{
+  "baseline": {
+    "audio": {
+      "japanese.wav": {
+        "comment": "今日は何で猫を買ったの?",
+        "flags": "RNF"
+      },
+      "english.wav": {
+        "comment": "What's your favorite coffee drink?",
+        "flags": "RN"
+      },
+      "en-discovery.wav": {
+        "comment": "Why does coffee taste better when it's colder?",
+        "flags": "RNF"
+      },
+      "en-quiet.wav": {
+        "comment": "You sure you'll be back soon?",
+        "flags": "RN"
+      },
+      "ja-shirt.wav": {
+        "comment": "風がシャッターを動かした。",
+        "flags": "F"
+      },
+      "ja-bath.wav": {
+        "comment": "駅前の戦闘って久しぶりだったな。",
+        "flags": "F"
+      },
+      "ja-sharpener.wav": {
+        "comment": "昨日買った鉛筆削りが気に入っていた。",
+        "flags": "R"
+      }
+    },
+    "heldOut": {
+      "ja-mochi": {
+        "comment": "フライパンで餅焼いた感じ",
+        "flags": "R"
+      },
+      "en-observatory": {
+        "comment": "Did the moon come out before you stayed until then?",
+        "flags": "R"
+      },
+      "en-shelf": {
+        "comment": "Did you use wood or metal for the bookshelf?",
+        "flags": "RN"
+      },
+      "en-lentils": {
+        "comment": "Did the lentils get softer?",
+        "flags": "RN"
+      },
+      "ja-secret": {
+        "comment": "チャットに書いてほしい",
+        "flags": ""
+      },
+      "en-transcription": {
+        "comment": "What did you mean by \"moving stair\"?",
+        "flags": "N"
+      },
+      "ja-letter": {
+        "comment": "切手を貼る前に確認してほしい。",
+        "flags": "R"
+      },
+      "en-oranges": {
+        "comment": "What's your favorite orange variety?",
+        "flags": "RN"
+      },
+      "en-print": {
+        "comment": "Are you using a special paper for invitations?",
+        "flags": "RN"
+      },
+      "en-suitcase": {
+        "comment": "What made you decide to drag the suitcase?",
+        "flags": "RN"
+      },
+      "ja-magnet": {
+        "comment": "買い物メモがずれてるな。",
+        "flags": "R"
+      },
+      "ja-patio": {
+        "comment": "ベンチの座面が傾いたことあった。",
+        "flags": "RNF"
+      }
+    }
+  },
+  "tuned": {
+    "audio": {
+      "japanese.wav": {
+        "comment": "朝のカフェでかわいい猫、見るのが好き",
+        "flags": "RF"
+      },
+      "english.wav": {
+        "comment": "A cup of coffee sounds lovely.",
+        "flags": "RN"
+      },
+      "en-discovery.wav": {
+        "comment": "A bitter coffee can sometimes be a sign of low water temperature. Would you take it up a bit warmer?",
+        "flags": "RF"
+      },
+      "ja-quiet.wav": {
+        "comment": "お茶の味、落ち着くね",
+        "flags": "RN"
+      },
+      "en-quiet.wav": {
+        "comment": "A break on the bus sounds good.",
+        "flags": "NF"
+      },
+      "ja-shirt.wav": {
+        "comment": "風が吹き抜けると落ち着くね",
+        "flags": "N"
+      },
+      "ja-bath.wav": {
+        "comment": "駅前の戦闘、牛乳だと古い感じだね",
+        "flags": "F"
+      },
+      "ja-sharpener.wav": {
+        "comment": "手間、鉛筆削り好き",
+        "flags": "R"
+      }
+    },
+    "heldOut": {
+      "ja-mochi": {
+        "comment": "フライパンの端にパリパリするのは好き",
+        "flags": "RF"
+      },
+      "en-observatory": {
+        "comment": "I'd take a look at the observatory.",
+        "flags": "N"
+      },
+      "ja-flute": {
+        "comment": "安い練習で安定するんだね",
+        "flags": "F"
+      },
+      "ja-plaza": {
+        "comment": "噴水のある広場でも日陰があると暑いですよね。",
+        "flags": "RF"
+      },
+      "en-lentils": {
+        "comment": "Lentil firmness is a sign of how long they've been sitting.",
+        "flags": "RF"
+      },
+      "en-transcription": {
+        "comment": "Morning star is a bright symbol of hope and renewal.",
+        "flags": ""
+      },
+      "en-oranges": {
+        "comment": "I'd pick the tart ones over the tart ones.",
+        "flags": "R"
+      },
+      "en-print": {
+        "comment": "A curling paper is a sign of how the invitations are getting too tight.",
+        "flags": "RF"
+      },
+      "ja-hill": {
+        "comment": "景色が違うんだね",
+        "flags": "R"
+      },
+      "en-suitcase": {
+        "comment": "That's a good packing habit.",
+        "flags": "RN"
+      },
+      "ja-magnet": {
+        "comment": "磁石、下がってくるの、ちょっと不安になりますね",
+        "flags": "RN"
+      },
+      "ja-tin": {
+        "comment": "ふた開けると色ごとに仕切ってあるの、意外に好き",
+        "flags": "RN"
+      },
+      "ja-ukulele": {
+        "comment": "ウクレレの弦、弾くだけで音の色に変えるんだね",
+        "flags": "RF"
+      },
+      "ja-kite": {
+        "comment": "紐を引くだけで向きが変わるの、ちょっと興味深いね",
+        "flags": "RN"
+      },
+      "ja-scoreboard": {
+        "comment": "ひっくり返すと手書きで残ってるんだね",
+        "flags": "R"
+      },
+      "ja-patio": {
+        "comment": "ベンチの座面、傾くと落ち着くね",
+        "flags": "R"
+      }
+    }
+  },
+  "small": {
+    "audio": {
+      "english.wav": {
+        "comment": "What's in your coffee?",
+        "flags": "RN"
+      },
+      "ja-discovery.wav": {
+        "comment": "コーヒーの苦みが減ったと聞きましたね。",
+        "flags": "R"
+      },
+      "en-discovery.wav": {
+        "comment": "What else could you try to improve your coffee?",
+        "flags": "RN"
+      },
+      "ja-quiet.wav": {
+        "comment": "お茶の話ですか?",
+        "flags": "R"
+      },
+      "ja-shirt.wav": {
+        "comment": "ベランダのシャツの裏側に風が吹いている様子。",
+        "flags": "RF"
+      },
+      "ja-carp.wav": {
+        "comment": "エサを上げた」や「水が増し上がっしゃって跳ねた」...これらは具体的な話題ではありませんよ。",
+        "flags": ""
+      },
+      "ja-sharpener.wav": {
+        "comment": "おっしゃる通りですね。静かで気に入った...あ、あの、これは私の話ですか?",
+        "flags": "R"
+      }
+    },
+    "heldOut": {
+      "ja-flute": {
+        "comment": "すみません、私の理解が足りなくて...。具体的な反応はできませんでした。",
+        "flags": ""
+      },
+      "en-shelf": {
+        "comment": "I put a little bookshelf for the hallway. What about your guitar?",
+        "flags": "F"
+      },
+      "ja-plaza": {
+        "comment": "広場の日陰が増えると、新しいイヤホンを試した方が良いかもしれませんね。",
+        "flags": "RF"
+      },
+      "en-lentils": {
+        "comment": "I see. What about the lentils? They're still firm, which is good.",
+        "flags": "R"
+      },
+      "ja-unclear": {
+        "comment": "ザック」は何か?",
+        "flags": ""
+      },
+      "ja-secret": {
+        "comment": "さっきの暗証番号を確認したので、チャットに書いた。",
+        "flags": "F"
+      },
+      "en-transcription": {
+        "comment": "Moving stair means \"the morning star\" — that's a poetic way of saying sunrise.",
+        "flags": "F"
+      },
+      "ja-letter": {
+        "comment": "お気になさらず、手紙の封筒の向きを確認してみてくださいね。",
+        "flags": "R"
+      },
+      "en-oranges": {
+        "comment": "What fruit juice did you use?",
+        "flags": "NF"
+      },
+      "en-print": {
+        "comment": "What's the paper curling at one edge?",
+        "flags": "R"
+      },
+      "ja-hill": {
+        "comment": "それは良いですね!景色が変わるんですね。",
+        "flags": "R"
+      },
+      "en-suitcase": {
+        "comment": "What's the reason you're packing so much?",
+        "flags": "RNF"
+      },
+      "ja-magnet": {
+        "comment": "冷蔵庫の磁石と買い物メモ、何か関連する話ですか?",
+        "flags": "R"
+      },
+      "ja-patio": {
+        "comment": "ベンチの座面が傾いてしまった。",
+        "flags": "R"
+      }
+    }
+  }
+}

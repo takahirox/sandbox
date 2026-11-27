@@ -18,15 +18,19 @@ Use a current desktop Chrome or Edge with WebGPU, `shader-f16`, AudioWorklet,
 and camera/microphone access enabled. Other browsers/devices may work when they
 provide these APIs. The app checks GPU support before asking for media or loading
 models. Unsupported devices get a retryable message, never a remote API fallback.
-Speech uses single-threaded WebAssembly; chat uses WebLLM on WebGPU. A CPU-only language
+Speech uses single-threaded WebAssembly; chat uses wllama on WebGPU. A CPU-only language
 model fallback is deliberately omitted because its latency would make this demo
 unusable on many devices. Mobile layout is supported; mobile inference depends
 on the device and available GPU memory.
 
-Expect about **1.1 GB** on first use, plus temporary inference memory (allow roughly
-4–6 GB of free memory during loading). Actual speed and memory depend on the
-GPU, CPU, browser and device. Japanese recognition with Base can miss words, particularly with noise,
-quiet speech, or partial sentences. Select the spoken language before starting.
+The experimental default is **Japanese-adapted Qwen3 0.6B with a livestream LoRA adapter**.
+Expect about **755 MB** on first use, plus temporary inference memory. Append
+`?model=baseline` to use the original 1.7B generator (about 1.1 GB) on the
+same recognition and comment pipeline. Actual speed and memory depend on the
+GPU, CPU, browser and device. The [tuning evaluation](./TUNING-EVALUATION.md)
+and [expanded-corpus evaluation](./EXPANDED-EVALUATION.md) report desktop
+browser results and mobile feasibility limits. Japanese recognition
+with Base can miss words, particularly with noise, quiet speech, or partial sentences. Select the spoken language before starting.
 Downloads stop with End; completed model assets can be reused from browser cache.
 Failed downloads, lost devices, GPU/runtime errors and slow operations end cleanly
 and leave Go live available. Loading has a five-minute limit and each inference job
@@ -51,27 +55,26 @@ has a 90-second limit. A slow connection can require another attempt.
   prioritizes recent speech over backlog. There are no random opportunity skips or
   viewer-dependent inference rates. A first meaningful window can generate immediately;
   six-second windows typically yield one opportunity every twelve seconds.
-  Slow replies are not rejected merely for taking 24 seconds. If newer speech arrived,
-  a reply is held in the Worker until the latest recognition confirms its topic (within
-  90 seconds); otherwise it is discarded. End cancels all pending work. Silence produces no job
-  or filler chat. Recognizer errors/hallucinations remain possible.
+  If newer audio arrives during inference, the Worker can hold one reply for
+  up to two recognition windows within the original 90-second deadline. It
+  clears held replies on silence or failed recognition and discards them on a
+  language change or a request to observe the camera. End cancels pending work.
 - Transcription is supplied as quoted context to Qwen, which generates the actual
   comment; there is no canned comment roulette. Reasoning mode is disabled. A
   rolling prompt context uses at most 400 characters from three speech windows
-  for 24 seconds;
-  it expires on silence or language changes. Four viewer voices rotate between
+  for 24 seconds and resets on language changes. Four viewer voices rotate between
   questions, casual reactions, preferences and noticing changes. Sampling uses
   temperature 0.7, top-p 0.9, repetition penalty 1.15 and frequency/presence
   penalties. One unrelated question/reply example establishes the conversational
   format; it is never substituted for generated output. Three recent replies
   discourage repetition.
-  Short, safe topical replies survive a word/concept or conversational-reference check
-  (including pronoun-based follow-ups). Explicit preferences and questions may reuse
-  topic words without being treated as echoes. Generic praise, visual claims, URLs,
-  unsafe vocabulary, wrong-language replies, speech echoes, multiline/long replies
-  and duplicates are suppressed. These
-  checks are imperfect, not a moderation or factuality guarantee. Odd wording and
-  ASR mistakes remain possible. The AI never receives camera frames.
+  Both chat routes can display short reactions such as `おお！` or `なるほど`
+  even when they share no words with the transcript. Output handling removes
+  reasoning and control tokens, honors empty output and `SKIP`, and bounds
+  plain-text comments to 110 characters. Local safeguards cover unsafe content,
+  contact details, links and some claims about the live image. Camera frames stay
+  in the local preview. Fictional comments can still include invented visual
+  observations.
 - Audience scoring uses only recognized words, questions, detail, invitations and
   a small bounded audio RMS contribution. It does not infer emotions or understand
   video. Each score is posted before chat generation. Skipped/filtered replies
@@ -92,17 +95,17 @@ has a 90-second limit. A slow connection can require another attempt.
   and publishes only one bounded viewer change, so delays never create a catch-up
   burst. End cancels the timer and resets simulated counts; manual choices are
   preserved and contribute exactly zero or one. Nothing is persisted.
-- Network traffic consists of static page/runtime/model GETs from the site,
+- Network traffic consists of static page, runtime and model requests from the site,
   jsDelivr, Hugging Face, its asset delivery hosts and a pinned model library on
-  raw.githubusercontent.com. The inference Worker's fetch guard permits only GET asset requests. No inference API, WebSocket,
+  raw.githubusercontent.com. The inference Worker's fetch guard permits static asset GETs and HEAD checks for the two pinned GGUF shards. No inference API, WebSocket,
   service worker, telemetry or application-server writes are used. Asset providers
   receive ordinary download request metadata such as IP address, **never audio,
   video, transcripts, prompts or comments**. No credentials are required.
-- Only runtime/model assets may persist in ordinary HTTP/Cache Storage caches
-  (Transformers.js uses `transformers-cache`; WebLLM uses model, WASM and config
-  Cache Storage caches). Clear this site's browser storage to remove model cache. User media, transcripts and chat are never persisted.
+- Only runtime and model assets may persist. Transformers.js and WebLLM use
+  Cache Storage, and wllama caches the frozen GGUF shards in origin-private file
+  storage. Clear this site's browser storage to remove cached assets. User media, transcripts and chat are never persisted.
   The camera is never sampled by code or recorded. Current chat has a 60-row limit;
-  Worker deduplication keeps 20 recent comments. End clears chat, terminates the
+  the Worker keeps up to three recent replies for the prompt. End clears chat, terminates the
   Worker (including in-flight inference/downloads), closes AudioContext and stops
   every media track. Late permission responses are stopped immediately.
 
@@ -114,17 +117,18 @@ has a 90-second limit. A slow connection can require another attempt.
 | ONNX Runtime Web, matching bundled runtime's WASM | `1.22.0-dev.20250409-89f8206ba4` | Tens of MB runtime/WASM | MIT; [Microsoft](https://github.com/microsoft/onnxruntime) |
 | [Xenova/whisper-base](https://huggingface.co/Xenova/whisper-base/tree/64da57285918e20ea79ea5c88eed7197933abaa8), multilingual, q8 | `64da57285918e20ea79ea5c88eed7197933abaa8` | 76.9 MB encoder + merged decoder, plus tokenizer/config | Conversion repository Apache-2.0; [original Whisper](https://github.com/openai/whisper) MIT |
 | WebLLM browser ESM | `0.2.85` | 6.6 MB JS | Apache-2.0; [MLC](https://github.com/mlc-ai/web-llm/tree/v0.2.85) |
+| [Qwen3 0.6B WBD](https://huggingface.co/webbigdata/Qwen3-0.6B_WBD/tree/789a31e3011376f1c5f1ace071ba81f39ed20b5a) and [livestream adapter](./models/NOTICE.md) | `789a31e3011376f1c5f1ace071ba81f39ed20b5a`, adapter `e3866302664199c2` | 639.4 MB Q8_0 GGUF shards, 0.92 MB LoRA | Apache-2.0 |
+| wllama browser ESM and WASM | `4.0.0` | 11.0 MB | MIT. [wllama](https://github.com/ngxson/wllama) |
 | [mlc-ai/Qwen3-1.7B-q4f16_1-MLC](https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_1-MLC/tree/80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc) | `80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc` | 968.0 MB weight shards + 11.4 MB tokenizer/config | [Original Qwen](https://huggingface.co/Qwen/Qwen3-1.7B), Apache-2.0 |
 | MLC compiled WebGPU model library, `v0_2_84/base/Qwen3-1.7B-q4f16_1_cs1k-webgpu.wasm` | `00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0` | 5.6 MB | Apache-2.0; [MLC binary libraries](https://github.com/mlc-ai/binary-mlc-llm-libs/tree/00fe7a40e57e5e8eb9fef87526a4bf28ad5846c0) |
 
 Sizes are decimal MB, approximate, excluding browser overhead. Models are fetched
 from immutable revision paths; runtime and WASM use exact jsDelivr npm versions.
-WebLLM's chat-completion method runs inside the Worker, not through an HTTP API.
-It has one pinned model entry, a 1,536-token context, 256-token prefill chunks and
-no thinking output. Its conversation/KV state is reset before each comment; only
-the bounded quoted context is supplied again. No model files or third-party runtime
-code are vendored in this project. See
-[`config.mjs`](./config.mjs) for the authoritative pins. The illustration is original CSS.
+The dedicated Worker loads one local text engine with a 1,536-token context,
+256-token batches or prefill chunks, and thinking disabled. It sends only the
+bounded messages for each reply. The static site ships the learned GGUF adapter.
+The browser downloads the frozen shards and both available runtimes from pinned
+sources as needed. The illustration is original CSS.
 
 ## Validation
 
@@ -140,10 +144,12 @@ node --test tests/gallery.test.mjs tests/pokemon-coin-flip.test.cjs tests/walk-t
 ```
 
 The normal suite uses fake media devices, mocked AI and synthesized audio buffers.
-It checks seeded Japanese/English audience trajectories, silence/decline, count caps,
+It checks the adapter format and default/rollback routing, seeded Japanese/English
+audience trajectories, silence/decline, count caps,
 reactions without chat, manual-choice independence, rolling context/voice selection,
 resource cleanup, permission races/errors, unavailable GPU, failed model
-downloads, silence, language/context transfer, cadence, bounded history, filtering,
+downloads, silence, language/context transfer, cadence, bounded history, short
+reactions on both model routes, and protocol, safety and privacy handling. It checks
 video-first desktop/mobile layout, keyboard focus, reduced motion and network
 inactivity. DOM checks reject removed filler copy and technical badges in every
 session state, verify the single About disclosure, and check contextual loading,
@@ -156,16 +162,17 @@ For the opt-in bounded **real-model** test on a WebGPU-capable machine:
 LOCAL_AI_SMOKE=1 node --test tests/ai-livestream-model.test.mjs
 ```
 
-This downloads the pinned ASR/WebLLM assets and passes synthetic Japanese/English WAV fixtures
+Set `LOCAL_AI_MODEL=baseline` to run the same smoke test with the 1.7B model.
+This downloads the pinned ASR and selected text model assets and passes synthetic Japanese/English WAV fixtures
 through the same ASR/generator implementation in a browser Worker. It asserts
-recognized topics, short topical generated comments, and GET-only asset traffic;
-it never requests real camera/mic access. See fixture provenance in
+recognition, bounded generation and plain-text output, and static asset traffic.
+The smoke test uses no camera or microphone. See fixture provenance in
 `tests/fixtures/ai-livestream/README.md`. This is intentionally excluded from ordinary
 CI to avoid hardware requirements and repeated large downloads. `?debug=1` shows
 only ephemeral numeric counters, last ASR/generation timings, seconds since the last
 visible comment, and exact model/backend identity. It traces VAD silence/backpressure,
 audio submissions/pending windows, ASR errors/accepted recognition, cadence/repeated
-speech, generation errors, categorized output rejection, context validation, Worker
+speech, generation errors, categorized output rejection, queued replies, Worker
 results, UI insertion/discards and engagement ticks. A closed event vocabulary
 rejects arbitrary strings. No audio, transcripts, prompts, runtime exceptions or
 identifying details enter this panel, logs, telemetry or storage. End clears it.
@@ -177,11 +184,9 @@ follow-ups through the issue #50 and current pipelines, without weights:
 node scripts/replay_livestream_pipeline.mjs
 ```
 
-`pipeline-replay.json` records acceptance frequency/reasons and deterministic
-small-audience trajectories. This is a scheduling/filter comparison, not a new
-model-quality or hardware benchmark. The real-model comparison can be saved
-separately from historical evidence with
-`node scripts/compare_livestream_models.mjs --mlc --issue52`.
+`pipeline-replay.json` records the earlier acceptance counts and deterministic
+small-audience trajectories. The replay command prints scheduling and delivery
+counts for the current code.
 
 See [the model comparison](./MODEL-EVALUATION.md) for concrete bilingual fixture
 outputs, measured resource costs, limitations and reproduction commands.

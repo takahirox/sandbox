@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
-import { MODEL_LIBRARY, sharesTopic } from '../projects/ai-livestream/config.mjs';
+import { MAX_COMMENT_LENGTH, MODEL_LIBRARY, SMALL_MODEL_FILES } from '../projects/ai-livestream/config.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
 
-// Explicit opt-in: downloads ~1.1 GB; no credentials, camera, mic or remote inference.
+// Explicit opt-in. The tuned run downloads ~760 MB and the baseline ~1.1 GB.
+const selectedModel = process.env.LOCAL_AI_MODEL === 'baseline' ? 'baseline' : 'tuned';
 test(
-  'real browser-local Japanese/English speech → relevant generated chat',
+  'real browser-local Japanese/English speech reaches the model and publishes bounded chat',
   { skip: process.env.LOCAL_AI_SMOKE !== '1', timeout: 420000 },
   async (t) => {
     const server = await previewServer(new URL('..', import.meta.url).pathname);
@@ -26,11 +27,9 @@ test(
         url: request.url(),
         method: request.method(),
         body: request.postData(),
+        redirectedFrom: request.redirectedFrom()?.url(),
       }),
     );
-    page.on('console', (message) => {
-      if (message.type() === 'log') console.log(message.text());
-    });
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
     assert.equal(
       await page.evaluate(async () =>
@@ -39,29 +38,27 @@ test(
       true,
       'Smoke host needs WebGPU with shader-f16',
     );
-    await page.evaluate(() => {
+    await page.evaluate(model => {
       window.smoke = { results: [], error: '' };
       smoke.worker = new Worker(
-        '/sandbox/tests/fixtures/ai-livestream/smoke-worker.mjs',
+        '/sandbox/tests/fixtures/ai-livestream/tuning-worker.mjs',
         { type: 'module' },
       );
       smoke.worker.onmessage = ({ data }) => {
         if (data.type === 'ready') smoke.ready = true;
         if (data.type === 'error') smoke.error = data.message;
-        if (data.type === 'progress')
-          console.log(`Loading ${data.stage}: ${data.file}`);
         if (data.type === 'result') smoke.results.push(data);
       };
-      smoke.worker.postMessage({ type: 'init' });
-    });
+      smoke.worker.postMessage({ type: 'init', model });
+    }, selectedModel);
     await page.waitForFunction(() => smoke.ready || smoke.error, null, {
       timeout: 300000,
     });
     assert.equal(await page.evaluate(() => smoke.error), '');
-    for (const [index, language, filename, topic] of [
-      [0, 'ja', 'japanese.wav', /猫|公園/],
-      [1, 'en', 'english.wav', /coffee/i],
-    ]) {
+    const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/topics.json', import.meta.url)))
+      .filter(fixture => fixture.activity !== 'quiet');
+    let accepted = 0;
+    for (const [index, { file: filename, language, topic }] of fixtures.entries()) {
       const bytes = await readFile(
         new URL('./fixtures/ai-livestream/' + filename, import.meta.url),
       );
@@ -104,13 +101,19 @@ test(
       console.log(
         `${language}: ${JSON.stringify({ transcript: result.transcript, comment: result.comment })}`,
       );
-      assert.match(result.transcript, topic);
-      assert.ok(result.comment.length > 0 && result.comment.length <= 110);
-      assert.equal(sharesTopic(result.comment, result.transcript, language), true, 'Generated comment reacts to fixture topic');
+      assert.match(result.transcript, new RegExp(topic, 'iu'));
+      assert.ok(result.raw, 'The actual generator decoded a reply');
+      if (result.comment) {
+        accepted++;
+        assert.ok(result.comment.length <= MAX_COMMENT_LENGTH);
+        assert.doesNotMatch(result.comment, /[\r\n]|<think>|<\|/i);
+      }
     }
+    assert.ok(accepted > 0, 'The real speech path publishes at least one comment');
     await page.evaluate(() => smoke.worker.terminate());
     for (const request of traffic) {
-      assert.equal(request.method, 'GET');
+      assert.ok(request.method === 'GET' || (request.method === 'HEAD' &&
+        [request.url, request.redirectedFrom].some(url => SMALL_MODEL_FILES.includes(url))));
       assert.equal(request.body, null);
       const url = new URL(request.url);
       assert.ok(
@@ -126,7 +129,7 @@ test(
       if (url.pathname.startsWith('/api/'))
         assert.match(
           url.pathname,
-          /^\/api\/resolve-cache\/models\/(Xenova\/whisper-base|mlc-ai\/Qwen3-1\.7B-q4f16_1-MLC)\/[a-f0-9]{40}\//,
+          /^\/api\/resolve-cache\/models\/(Xenova\/whisper-base|mlc-ai\/Qwen3-(?:1\.7|0\.6)B-q4f16_1-MLC)\/[a-f0-9]{40}\//,
           'Only static asset metadata redirects',
         );
     }
