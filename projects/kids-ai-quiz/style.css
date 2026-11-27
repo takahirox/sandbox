@@ -180,6 +180,7 @@ h1:focus { outline: none; }
 
 .art[data-number] { color: #4f348c; font-variant-numeric: tabular-nums; }
 .art.shape { color: #5e3da0; }
+.art[data-icon="◆"] { scale: .65 1; }
 .art[data-icon="oval"] { width: .85em; height: .52em; background: #5e3da0; border-radius: 50%; }
 .swatch {
   width: .83em;

@@ -8,26 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { facts, starter } from '../../projects/kids-ai-quiz/content.mjs';
 import { attempts, generateTokens, instantiateModel, modelURL } from '../../projects/kids-ai-quiz/model.mjs';
 import { createSession, decode, hasStructure, validate } from '../../projects/kids-ai-quiz/quiz.mjs';
+import { benchmarkAnswers, independentAnswers } from './answer-key.mjs';
 import { heldOut, seeded } from './dataset.mjs';
 
-// Answer key written separately from the training recipes and verifier.
-const expected = {
-  cat: 'ねこ',
-  sheep: 'ひつじ',
-  strawberry: 'いちご',
-  corn: 'とうもろこし',
-  plane: 'ひこうき',
-  'fire-engine': 'しょうぼうしゃ',
-  yellow: 'きいろ',
-  purple: 'むらさき',
-  triangle: 'さんかく',
-  oval: 'だえん',
-  'apples-4': '4',
-  'apples-7': '7',
-  umbrella: 'かさ',
-  clock: 'とけい',
-};
-assert.deepEqual(new Set(Object.keys(expected)), heldOut);
+assert.deepEqual(new Set(Object.keys(benchmarkAnswers)), heldOut);
 
 const roundsPerFact = 60;
 const benchmarkFacts = facts.filter(fact => heldOut.has(fact.id));
@@ -57,6 +41,7 @@ async function measure(bytes) {
   let closeRepeats = 0, combinations = 0;
   const timings = [];
   for (const fact of benchmarkFacts) {
+    const expectedLabel = benchmarkAnswers[fact.id][2];
     const recent = [], unique = new Set();
     for (let i = 0; i < roundsPerFact; i++) {
       let playable = false;
@@ -68,8 +53,9 @@ async function measure(bytes) {
         counts.structured++;
         const item = decode(fact, tokens);
         const labels = item.choices.map(choice => choice.label);
-        const matches = labels.filter(label => label === expected[fact.id]);
-        const singleAnswer = new Set(labels).size === 3 && matches.length === 1 && labels[item.correct] === matches[0];
+        const matches = independentAnswers(item);
+        const singleAnswer = new Set(labels).size === 3 && matches.length === 1
+          && matches[0] === item.choices[item.correct] && matches[0].label === expectedLabel;
         const childLanguage = shortJapanese.test(item.question) && [...item.question].length <= 45;
         const relevant = item.choices.every(choice => choice.topic === fact.topic);
         const passed = { singleAnswer, childLanguage, relevant };
@@ -80,7 +66,7 @@ async function measure(bytes) {
         if (accepted) {
           counts.accepted++;
           playable = true;
-          const pair = labels.filter(label => label !== expected[fact.id]).sort().join('|');
+          const pair = labels.filter(label => label !== expectedLabel).sort().join('|');
           if (recent.includes(pair)) closeRepeats++;
           recent.push(pair);
           if (recent.length > 4) recent.shift();

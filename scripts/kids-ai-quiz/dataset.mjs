@@ -38,9 +38,8 @@ function trainingData() {
   for (const fact of training) {
     const topic = fact.topic;
     for (let n = 0; n < 36; n++) {
-      // A general quiz generator, trained on conventional
-      // wording and a mix of easy and nearby distractors.
-      const generalWeights = [5, 5, 4, 4, 4, 3, 3, 0];
+      // Conventional wording and a mix of easy and nearby same-topic distractors.
+      const generalWeights = [5, 5, 4, 4, 4];
       const generalFirst = choose(generalWeights, random);
       generalWeights[generalFirst] = 0;
       const general = [
@@ -49,7 +48,9 @@ function trainingData() {
         choose(generalWeights, random),
         n % 3,
       ];
-      assert.ok(decode(fact, general));
+      const generalItem = decode(fact, general);
+      assert.ok(hasOneAnswer(fact, generalItem));
+      assert.ok(generalItem.choices.every(choice => choice.topic === topic));
       baseline.push({ topic, tokens: general });
 
       // A near neighbor and a second, distinct answer from the same topic.

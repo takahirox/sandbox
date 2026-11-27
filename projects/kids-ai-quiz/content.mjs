@@ -1,5 +1,4 @@
-// Original, closed vocabulary. Each topic's choices represent distinct answers.
-// A clue refers to exactly one of those choices in the context of that topic.
+// Original, closed vocabulary. Text clues are checked against the answer rules in quiz.mjs.
 export const topics = [
   {
     id: 'animals', picture: '♪', forms: [
@@ -42,7 +41,7 @@ export const topics = [
       ['boat', 'ふね', '⛵', 'みずに うかんで すすむ', 'travel'],
       ['bicycle', 'じてんしゃ', '🚲', 'ぺだるを こいで すすむ', 'road'],
       ['bus', 'ばす', '🚌', 'まちの みちで たくさんの ひとを のせる', 'road'],
-      ['fire-engine', 'しょうぼうしゃ', '🚒', 'かじの ひを けしに いく', 'help'],
+      ['fire-engine', 'しょうぼうしゃ', '🚒', 'みちを はしって かじの ひを けしに いく', 'help'],
       ['ambulance', 'きゅうきゅうしゃ', '🚑', 'けがを した ひとを びょういんへ はこぶ', 'help'],
     ],
   },
@@ -88,17 +87,17 @@ export const topics = [
   },
   {
     id: 'routines', picture: '☀️', forms: [
-      '{clue}のに つかうのは？', '{clue}とき、なにを つかう？', '{clue}よ。どれを つかう？',
-      '「{clue}」際に用いる道具は何ですか？', '「{clue}」用途に適した物を選びなさい。', '次のうち「{clue}」ための道具はどれでしょうか。',
+      '{clue}は どれ？', '{clue}。どれかな？', 'どれかな？ {clue}。',
+      '「{clue}」に当てはまる物はどれですか？', '次の説明に該当する物を選びなさい。{clue}。', '「{clue}」とはどの物を指すでしょうか。',
     ],
     facts: [
-      ['toothbrush', 'はぶらし', '🪥', 'はを みがく', 'wash'],
-      ['umbrella', 'かさ', '☂️', 'あめを よける', 'out'],
-      ['spoon', 'すぷーん', '🥄', 'すーぷを すくう', 'home'],
-      ['towel', 'たおる', '▰', 'ぬれた からだを ふく', 'wash'],
-      ['shoes', 'くつ', '👟', 'そとで あしを まもる', 'out'],
-      ['ball', 'ぼーる', '⚽', 'けって あそぶ', 'out'],
-      ['clock', 'とけい', '🕒', 'いまの じかんを しる', 'home'],
+      ['toothbrush', 'はぶらし', '🪥', 'はを みがく どうぐ', 'wash'],
+      ['umbrella', 'かさ', '☂️', 'あめの ひに さす もの', 'out'],
+      ['spoon', 'すぷーん', '🥄', 'すーぷを すくう どうぐ', 'home'],
+      ['towel', 'たおる', '▰', 'ぬれた からだを ふく もの', 'wash'],
+      ['shoes', 'くつ', '👟', 'そとへ いくとき あしに はく もの', 'out'],
+      ['ball', 'ぼーる', '⚽', 'けると ころがる まるい もの', 'out'],
+      ['clock', 'とけい', '🕒', 'いまの じかんが わかる もの', 'home'],
     ],
   },
 ].map(({ facts, ...topic }, topicIndex) => ({

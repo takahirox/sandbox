@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { facts, starter, topics } from '../projects/kids-ai-quiz/content.mjs';
+import { distractorPool, facts, starter, topics } from '../projects/kids-ai-quiz/content.mjs';
 import { attempts, createGenerator, generateTokens, loadModel, maxModelBytes, modelURL } from '../projects/kids-ai-quiz/model.mjs';
-import { createSession, fallback, firstQuestion, hasStructure, validate } from '../projects/kids-ai-quiz/quiz.mjs';
+import { childForms, createSession, fallback, firstQuestion, hasOneAnswer, hasStructure, validate } from '../projects/kids-ai-quiz/quiz.mjs';
+import { independentAnswers } from '../scripts/kids-ai-quiz/answer-key.mjs';
 import { seeded } from '../scripts/kids-ai-quiz/dataset.mjs';
 
 test('accepts only approved wording, one distinct correct choice, and two related decoys', () => {
@@ -30,6 +31,36 @@ test('accepts only approved wording, one distinct correct choice, and two relate
       if (item.topic === 'colors' || item.topic === 'shapes') {
         assert.equal(item.choices.filter(choice => choice.icon === item.clue.icon).length, 1);
         assert.equal(item.choices[item.correct].icon, item.clue.icon);
+      }
+    }
+  }
+});
+
+test('the ball clue distinguishes the ball from shoes in both model and fallback rounds', () => {
+  const ball = facts.find(fact => fact.id === 'ball');
+  const pool = distractorPool(ball);
+  const first = pool.findIndex(choice => choice.id === 'shoes');
+  const second = pool.findIndex(choice => choice.id === 'umbrella');
+  const proposal = validate(ball, [0, first, second, 0]);
+  assert.ok(proposal);
+  const legacy = { ...proposal, question: 'けって あそぶのに つかうのは？' };
+  assert.deepEqual(independentAnswers(legacy).map(choice => choice.label), ['ぼーる', 'くつ']);
+  assert.equal(hasOneAnswer(ball, legacy), false);
+
+  for (const item of [proposal, fallback(ball, () => 0.99)]) {
+    assert.ok(item.choices.some(choice => choice.id === 'shoes'));
+    assert.deepEqual(independentAnswers(item), [ball]);
+    assert.equal(item.choices[item.correct], ball);
+  }
+});
+
+test('all distinct same-topic distractor combinations keep the fallback playable', () => {
+  for (const fact of facts) {
+    for (let form = 0; form < childForms; form++) {
+      for (let first = 0; first < 5; first++) {
+        for (let second = first + 1; second < 5; second++) {
+          assert.ok(validate(fact, [form, first, second, 0]), `${fact.id}: ${form}, ${first}, ${second}`);
+        }
       }
     }
   }
