@@ -109,15 +109,17 @@ has a 90-second limit. A slow connection can require another attempt.
 ## Utterance endpointing
 
 The AudioWorklet uses 20 ms frames, DC-corrected energy and adjacent-sample
-differences to reject broadband noise. A noise floor estimated from rejected
-frames raises the thresholds in a noisy room. Onset requires three consecutive
-voiced frames (60 ms) above roughly 2.5 times the noise RMS, with a minimum RMS
-of 0.003 in normalized PCM. During speech the gate drops to 1.7 times the noise
-RMS, with a minimum of 0.002. An utterance needs at least 120 ms of voiced
-frames. It starts with up to 200 ms of pre-roll and keeps 160 ms of trailing PCM
-after a 600 ms pause. At the six-second cap it splits at the quiet tail when
-available, or carries 160 ms of overlap into the next segment. A continuation
-needs fresh voiced audio before it can be submitted.
+differences to reject broadband noise. Rejected frames and frames with
+noise-like sample variation update the noise floor. This lets steady filtered
+noise raise the thresholds even when it initially passes the voice gate.
+
+Onset requires three consecutive voiced frames (60 ms) above roughly 2.5 times
+the noise RMS, with a minimum RMS of 0.003 in normalized PCM. During speech the
+gate drops to 1.7 times the noise RMS, with a minimum of 0.002. An utterance
+needs at least 120 ms of voiced frames. It starts with up to 200 ms of pre-roll
+and keeps 160 ms of trailing PCM after a 600 ms pause. At the six-second cap it
+splits at the quiet tail when available, or carries 160 ms of overlap into the
+next segment. A continuation needs fresh voiced audio before it can be submitted.
 
 WebRTC VAD supports 20 ms frames at 16 kHz and uses a sub-band classifier.
 Kaldi's decoder endpoint rules include a 500 ms pause with high recognition

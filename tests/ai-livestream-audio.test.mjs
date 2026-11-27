@@ -9,14 +9,18 @@ import { makeCapture, roundSeconds, synthesize } from './fixtures/ai-livestream/
 const bounds = ({ start, end, submitted }) => [start, end, submitted].map(roundSeconds);
 
 function record(rate, duration, speech, noise) {
-  const segments = [];
   const pcm = synthesize(rate, duration, speech, noise);
+  return { pcm, segments: recordPcm(rate, pcm) };
+}
+
+function recordPcm(rate, pcm) {
+  const segments = [];
   const capture = makeCapture(rate, segment => segments.push(segment));
   for (let offset = 0; offset < pcm.length; offset += 128) {
     capture.feed(pcm.subarray(offset, offset + 128));
     capture.ack();
   }
-  return { pcm, segments };
+  return segments;
 }
 
 test('short quiet speech reaches recognition after its pause, with onset and tail PCM intact', async () => {
@@ -101,6 +105,39 @@ test('silence, DC, broadband noise and transients do not submit PCM', () => {
 test('the noise estimate follows the room while quiet speech above it can still start a segment', () => {
   const { segments } = record(SAMPLE_RATE, 5, [[2, 2.3, 0.008]], 0.003);
   assert.deepEqual(segments.map(bounds), [[1.8, 2.46, 2.904]]);
+});
+
+test('steady filtered noise stays quiet and does not mask utterance endpoints', () => {
+  const duration = 20;
+  const noise = synthesize(SAMPLE_RATE, duration, [], 1);
+  let filtered = 0, energy = 0;
+  for (let i = 0; i < noise.length; i++) {
+    filtered = 0.6 * filtered + 0.4 * noise[i];
+    noise[i] = filtered;
+    energy += filtered * filtered;
+  }
+  const scale = 0.006 / Math.sqrt(energy / noise.length);
+  const speech = synthesize(SAMPLE_RATE, duration, [[2, 2.4, 0.025], [11, 11.4, 0.025]]);
+  const withLateNoise = speech.slice();
+  for (let i = 0; i < noise.length; i++) {
+    noise[i] *= scale;
+    speech[i] += noise[i];
+  }
+
+  assert.deepEqual({
+    noiseOnly: recordPcm(SAMPLE_RATE, noise).map(bounds),
+    withSpeech: recordPcm(SAMPLE_RATE, speech).map(bounds),
+  }, {
+    noiseOnly: [],
+    withSpeech: [[1.8, 2.56, 3], [10.8, 11.56, 12]],
+  });
+
+  // A new background sound during an active utterance must also let it close.
+  const lateNoiseStart = 2.2 * SAMPLE_RATE;
+  withLateNoise.set(speech.subarray(lateNoiseStart), lateNoiseStart);
+  const lateNoiseSegments = recordPcm(SAMPLE_RATE, withLateNoise);
+  assert.equal(lateNoiseSegments.length, 2);
+  assert.ok(lateNoiseSegments[0].submitted >= 3 && lateNoiseSegments[0].submitted < 3.2);
 });
 
 test('a stalled UI holds only one transferred segment and capture resumes on acknowledgement', () => {
