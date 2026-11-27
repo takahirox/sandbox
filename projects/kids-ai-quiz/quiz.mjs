@@ -3,6 +3,39 @@ import { distractorPool, facts, starter, topics } from './content.mjs';
 export const limits = [6, 8, 8, 3];
 export const childForms = 3;
 
+// List every catalog choice that can satisfy each text clue. The keyed choice
+// in the generator is not evidence that another choice fails the clue.
+const textAnswers = new Map([
+  ['わんわん', ['dog']],
+  ['にゃあにゃあ', ['cat']],
+  ['ぶうぶう', ['pig']],
+  ['もーもー', ['cow']],
+  ['があがあ', ['duck']],
+  ['めえめえ', ['sheep']],
+  ['こけこっこー', ['rooster']],
+  ['かわが きいろくて ながい くだもの', ['banana']],
+  ['きに なる しゃりしゃりの くだもの', ['apple']],
+  ['ごはんを ぎゅっと にぎった たべもの', ['rice-ball']],
+  ['ちーずを のせて やく まるい たべもの', ['pizza']],
+  ['まんなかに あなが ある おかし', ['doughnut']],
+  ['あかくて つぶつぶの くだもの', ['strawberry']],
+  ['きいろい つぶが ならんだ やさい', ['corn']],
+  ['せんろを はしる', ['train']],
+  ['つばさで そらを とぶ', ['plane']],
+  ['みずに うかんで すすむ', ['boat']],
+  ['ぺだるを こいで すすむ', ['bicycle']],
+  ['まちの みちで たくさんの ひとを のせる', ['bus']],
+  ['みちを はしって かじの ひを けしに いく', ['fire-engine']],
+  ['けがを した ひとを びょういんへ はこぶ', ['ambulance']],
+  ['はを みがく どうぐ', ['toothbrush']],
+  ['あめの ひに さす もの', ['umbrella']],
+  ['すーぷを すくう どうぐ', ['spoon']],
+  ['ぬれた からだを ふく もの', ['towel']],
+  ['そとへ いくとき あしに はく もの', ['shoes']],
+  ['けると ころがる まるい もの', ['ball']],
+  ['いまの じかんが わかる もの', ['clock']],
+]);
+
 export function hasStructure(tokens) {
   return Array.isArray(tokens) && tokens.length === limits.length
     && limits.every((limit, i) => Number.isInteger(tokens[i]) && tokens[i] >= 0 && tokens[i] < limit);
@@ -15,37 +48,42 @@ export function decode(fact, tokens) {
   const pool = distractorPool(fact);
   const choices = [pool[first], pool[second]];
   choices.splice(position, 0, fact);
+  let clue = { icon: topic.picture };
+  if (topic.id === 'colors' || topic.id === 'shapes') {
+    clue = { icon: fact.icon, spoken: fact.label };
+  } else if (topic.id === 'counting') {
+    const count = Number(fact.label);
+    clue = { icon: '🍎', count, spoken: Array(count).fill('りんご').join('、') };
+  }
   return {
     topic: topic.id,
     question: topic.forms[form].replace('{clue}', fact.clue),
     choices,
     correct: position,
+    clue,
   };
 }
 
 export function hasOneAnswer(fact, item) {
-  if (!item || new Set(item.choices.map(choice => choice.id)).size !== 3) return false;
+  if (!item || item.choices.length !== 3 || new Set(item.choices.map(choice => choice.label)).size !== 3) return false;
+  let matching;
   if (item.topic === 'counting') {
-    const matching = item.choices.filter(choice => Number(choice.label) === Number(fact.label));
-    return matching.length === 1 && matching[0] === item.choices[item.correct];
+    matching = item.choices.filter(choice => Number(choice.label) === item.clue.count);
+  } else if (item.topic === 'colors' || item.topic === 'shapes') {
+    matching = item.choices.filter(choice => choice.icon === item.clue.icon);
+  } else {
+    const answers = textAnswers.get(fact.clue);
+    if (!answers || !item.question.includes(fact.clue)) return false;
+    matching = item.choices.filter(choice => answers.includes(choice.id));
   }
-  return item.choices.filter(choice => choice === fact).length === 1 && item.choices[item.correct] === fact;
+  return matching.length === 1 && matching[0] === item.choices[item.correct];
 }
 
 export function validate(fact, tokens) {
   const item = decode(fact, tokens);
   if (!item || tokens[0] >= childForms || !hasOneAnswer(fact, item)) return null;
   if (item.choices.some(choice => choice.topic !== fact.topic)) return null;
-  const clue = {
-    colors: () => ({ icon: fact.icon, spoken: fact.label }),
-    shapes: () => ({ icon: fact.icon, spoken: fact.label }),
-    counting: () => ({ icon: '🍎', count: Number(fact.label), spoken: Array(Number(fact.label)).fill('りんご').join('、') }),
-  }[item.topic];
-  return {
-    ...item,
-    clue: clue ? clue() : { icon: topics[fact.topic].picture },
-    key: fact.id,
-  };
+  return { ...item, key: fact.id };
 }
 
 function shuffle(items, random) {

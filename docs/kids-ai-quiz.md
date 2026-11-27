@@ -40,11 +40,14 @@ under the [MIT license](../projects/kids-ai-quiz/LICENSE.txt).
 
 The same model is trained on 1,260 general quiz examples and then adapted on
 1,260 child quiz examples. The general examples favor conventional written
-Japanese and mix close and easy distractors. Child examples favor short
-hiragana, nearby distractors, and balanced positions for the answer. The recipe
-checks that child targets pass the quiz validator and that all 5,040 corrupted
-examples fail it. These corruptions include repeated choices, a duplicate
-answer, choices from other topics, and longer text with kanji.
+Japanese and mix close and easy distractors from the same topic. The recipe
+checks that all general examples have three distinct, relevant choices with
+one defensible answer. Child examples favor short hiragana, nearby distractors,
+and balanced positions for the answer. The recipe checks that child targets
+pass the quiz validator and that all 5,040 corrupted examples fail it. These
+corruptions include repeated choices, a duplicate answer, choices from other
+topics, and longer text with kanji. Both models sample the same token space,
+so their raw proposals can still include invalid tokens.
 
 The model samples four categorical tokens in order from learned softmax
 distributions. They select a wording, two distractor ranks from a fact-specific
@@ -53,13 +56,13 @@ topic and, for the second distractor, on the first. Training uses supervised
 cross-entropy, with an added unlikelihood loss for rejected tokens during
 adaptation. The shipped artifact includes the float32 coefficients and sampler.
 
-The verifier independently checks the token shape, allowlisted wording, three
-distinct choices, topic membership, and one occurrence of the known answer in
-its expected position. Matching and counting questions use explicit visual
-targets. The model cannot introduce free text or assert a fact outside the
-catalog. Coverage of age suitability and semantics depends on the quality of
-the catalog. The language and relevance scores below are automated proxies
-alongside catalog review. They do not measure a child’s comprehension.
+The verifier checks the token shape, allowlisted wording, three distinct
+choices, and topic membership. For each choice, it checks the text clue's
+catalog of defensible answers or compares the choice to the rendered color,
+shape, or count. The sole match must be at the keyed position. Generated and
+fallback rounds use the same checks. The model uses a closed vocabulary, and
+semantic coverage depends on the quality of the curated rules. The language
+and relevance scores below are automated proxies alongside catalog review.
 
 ## Reproduce the experiment
 
@@ -75,8 +78,8 @@ node scripts/kids-ai-quiz/evaluate.mjs
 node --test tests/kids-ai-quiz.test.mjs tests/kids-ai-quiz-browser.test.mjs
 ```
 
-Version 1 is `quiz-model-v1.wasm`, SHA-256
-`3efa6dbe704187193e8ec04edffe6868510101a5b52f0e1fab031027ef78fe4f`.
+Version 2 is `quiz-model-v2.wasm`, SHA-256
+`c9dcb5fb8b7c54a94f2c3c4316862a54c10c9332b59f8c62b80f0cd298225da8`.
 The local CPU training and export took 0.52 seconds in a timed run.
 Training files live outside the static project.
 
@@ -87,38 +90,40 @@ The split shares the seven topics and phrasing vocabulary with training.
 A held-out label can appear as a distractor in another example. The model
 receives rank and topic tokens, so it never learns the held-out label or clue
 text. The evaluation checks 60 rounds per held-out anchor with three proposals
-each, under identical seeds and conditions, against a separately written
-Japanese answer key.
+each, under identical seeds and conditions. A separately written rubric
+checks each offered choice against the rendered clue. A separate regression
+probes the earlier kicking question with both the ball and shoes present.
 
-| Measure | General baseline | Child-adapted v1 |
+| Measure | General baseline | Child-adapted v2 |
 | --- | ---: | ---: |
 | Structured four-token proposals | 2,520 / 2,520 | 2,520 / 2,520 |
-| Three distinct choices and exactly one correct answer | 2,388 / 2,520 | 2,489 / 2,520 |
+| Three distinct choices and exactly one correct answer | 2,434 / 2,520 | 2,491 / 2,520 |
 | Short hiragana-centered language | 1,034 / 2,520 | 2,506 / 2,520 |
-| All choices relevant to the topic | 1,528 / 2,520 | 2,497 / 2,520 |
-| Proposals passing every check | 595 / 2,520 | 2,452 / 2,520 |
-| Rounds with an accepted proposal within three draws | 477 / 840 | 840 / 840 |
-| Mean distinct accepted distractor pairs per anchor | 9.86 / 10 | 10 / 10 |
-| Accepted pair seen among the last four for that anchor | 204 / 595 | 937 / 2,452 |
+| All choices relevant to the topic | 2,486 / 2,520 | 2,504 / 2,520 |
+| Proposals passing every check | 980 / 2,520 | 2,461 / 2,520 |
+| Rounds with an accepted proposal within three draws | 665 / 840 | 840 / 840 |
+| Mean distinct accepted distractor pairs per anchor | 10 / 10 | 10 / 10 |
+| Accepted pair seen among the last four for that anchor | 337 / 980 | 940 / 2,461 |
 | Model transfer size before HTTP compression | 1,554 bytes | 1,554 bytes |
 | Fixed WASM linear memory | 64 KiB | 64 KiB |
-| Warm sampling per proposal, median and p95 | 0.625 / 0.834 µs | 0.625 / 0.791 µs |
+| Warm sampling per proposal, median and p95 | 0.625 / 0.834 µs | 0.625 / 0.750 µs |
 
 The timings above are from Node.js on an Apple M4 Max. They measure the
 four-token sampler and exclude UI, worker startup, and network. In a separate
 Chromium 153 run with a 390×740 viewport and 4× CPU throttling, the first
-request through the real worker returned in 13.1 ms and the next three in
-15.2–16.7 ms on loopback.
+request through the real worker returned in 21.4 ms and the next three in
+15.7–17.0 ms on loopback.
 The worker benchmark includes the first model fetch and initialization. Neither
 measurement establishes runtime, memory pressure, or battery use on a Pixel 7a.
 
-For 「にゃあにゃあ なくのは？」, the adapted model proposed 「ねこ」「いぬ」
-「ひつじ」 and passed. The baseline once proposed 「ねこ」「いぬ」「ひこうき」,
-which failed relevance. The adapted model sometimes repeated 「あひる」 as
-both distractors, used kanji in 「鳴き声」, or offered 「ぴんく」 as a decoy in
-a corn question. All were rejected. Adaptation increased coverage but also
-slightly increased the rate of repeated pairs when repeatedly drawing from
-the same anchor. Across 490 simulated game rounds, topic rotation produced
+Both models passed with 「にゃあにゃあ なくのは？」 and 「ねこ」「いぬ」
+「ひつじ」. The baseline also proposed the coherent 「ねこ」「ひつじ」「ぶた」
+with `次のうち「にゃあにゃあ」と鳴くのはどの動物でしょうか。`, which failed
+the child-language check. Raw adapted proposals sometimes repeated 「あひる」
+as both distractors, used kanji in 「鳴き声」, or included 「きゅうきゅうしゃ」
+in a corn question. All were rejected. Adaptation gave the largest gain in
+child-language compliance and raised the rate of repeated pairs per anchor
+from 34.4% to 38.2%. Across 490 simulated game rounds, topic rotation produced
 zero consecutive same-topic rounds and zero repeats of an anchor within the
 previous 12 rounds.
 

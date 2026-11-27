@@ -4,7 +4,7 @@
   (import "math" "exp" (func $exp (param f64) (result f64)))
   (memory (export "memory") 1 1)
   (data (i32.const 64) "@WEIGHTS@")
-  (func (export "version") (result i32) (i32.const 1))
+  (func (export "version") (result i32) (i32.const 2))
 
   (func $weight (param $row i32) (param $token i32) (result f64)
     (f64.promote_f32

@@ -2,7 +2,7 @@ import { limits } from './quiz.mjs';
 
 export const attempts = 3;
 export const deadline = 1500;
-export const modelURL = new URL('./quiz-model-v1.wasm', import.meta.url);
+export const modelURL = new URL('./quiz-model-v2.wasm', import.meta.url);
 export const maxModelBytes = 4096;
 
 export async function loadModel(response) {
@@ -30,7 +30,7 @@ export async function loadModel(response) {
 export async function instantiateModel(bytes) {
   const { instance } = await WebAssembly.instantiate(bytes, { math: { exp: Math.exp } });
   const { sample, memory, version } = instance.exports;
-  if (version?.() !== 1 || typeof sample !== 'function' || memory?.buffer.byteLength !== 65536) {
+  if (version?.() !== 2 || typeof sample !== 'function' || memory?.buffer.byteLength !== 65536) {
     throw new Error('Unsupported model');
   }
   return { sample, memoryBytes: memory.buffer.byteLength };

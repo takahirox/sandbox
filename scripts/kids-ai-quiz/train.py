@@ -1,4 +1,4 @@
-"""Train the v1 quiz token generator and export a one-page WebAssembly model."""
+"""Train the quiz token generator and export a one-page WebAssembly model."""
 import argparse
 import hashlib
 import json
@@ -12,7 +12,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path(__file__).resolve().parent
-MODEL = ROOT / "projects/kids-ai-quiz/quiz-model-v1.wasm"
+MODEL = ROOT / "projects/kids-ai-quiz/quiz-model-v2.wasm"
 STAGES = 4
 
 
