@@ -373,6 +373,9 @@ const visualRequests = [
     requests: [
       'Look at my glasses and tell me what color they are.',
       'What color are the glasses I am wearing on camera?',
+      'In the live feed, are my glasses visible',
+      'Are my glasses crooked in this shot?',
+      'The recipe is in the description, but do my glasses show up on screen?',
     ],
     claim: 'Those glasses are bright red.',
     speech: 'I bought new glasses for reading.',
@@ -380,11 +383,21 @@ const visualRequests = [
   },
   {
     language: 'ja',
-    requests: ['私のメガネを見て、何色か教えて。', '今かけているメガネは何色？'],
+    requests: [
+      '私のメガネを見て、何色か教えて。',
+      '今かけているメガネは何色？',
+      'このメガネ、画面に映ってますか。',
+      '概要欄にレシピがあるけど、映像ではメガネの柄まで見える？',
+    ],
     claim: 'そのメガネは真っ赤だね。',
     speech: '読書用に新しいメガネを買ったよ。',
     question: 'メガネは何色にしたの？',
   },
+];
+
+const cameraColorQuestions = [
+  { language: 'en', speech: 'Does my shirt look red on camera?', reply: 'Your shirt looks blue.', withhold: true },
+  { language: 'ja', speech: 'カメラだとこのシャツ、赤く見える？', reply: 'シャツは青だね。', withhold: true },
 ];
 
 const materialReferences = [
@@ -447,6 +460,17 @@ test('looking at glasses in a linked photo does not require the camera in either
     ['ja', 'リンク先の写真にあるメガネを見てください。', 'そのメガネ、どこのブランド？'],
   ]) {
     assert.deepEqual(inspectComment(question, [], language, speech), { comment: question.normalize('NFKC'), reason: 'accepted' });
+  }
+});
+
+test('describing the stream or asking about a spoken camera topic leaves grounded replies eligible', () => {
+  for (const [language, speech, reply] of [
+    ['en', 'My shirt looks red on camera. I picked a new fabric for it.', 'What fabric did you pick for the shirt?'],
+    ['en', 'Does this camera support manual focus?', 'How often do you use manual focus?'],
+    ['ja', 'カメラだとシャツが赤く見えるね。生地を変えてみたよ。', 'シャツの生地は何にしたの？'],
+    ['ja', 'このカメラって手動でピント合わせできる？', 'ピントは手動で合わせる派？'],
+  ]) {
+    assert.deepEqual(inspectComment(reply, [], language, speech), { comment: reply.normalize('NFKC'), reason: 'accepted' });
   }
 });
 
@@ -1266,6 +1290,7 @@ test(
     // Give each real Worker one synthetic window to exercise both model routes
     // without waiting for a device capture window for every case.
     const cases = [
+      ...cameraColorQuestions,
       ...visualRequests.flatMap(({ language, requests, claim, speech, question }) => [
         ...requests.map(speech => ({ language, speech, reply: claim, withhold: true })),
         { language, speech, reply: question },

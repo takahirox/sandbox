@@ -191,10 +191,17 @@ export function asksForVisualObservation(speech) {
   if (/\b(?:pretend (?:to see|you (?:can |could )?see)|act as (?:if|though) you (?:can |could )?see)\b/i.test(text) ||
       /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text)) return true;
 
-  return text.split(/[.!?;。]/u).some(sentence => {
-    // Explicit questions about the live image can appear alongside material references.
-    if (/\b(?:(?:what|which) (?:colou?r|shape|pattern)|look at|(?:can|could) you see)\b.*\b(?:on camera|in the (?:live|camera) feed)\b/i.test(sentence) ||
-        /(?:カメラ|映像|画面)に映ってい?る.*(?:何色|どんな(?:色|形|柄)|見て)/u.test(sentence)) return true;
+  return (text.match(/[^.!?;。！\n]+[.!?;。！]?/gu) ?? []).some(sentence => {
+    // A live image and a request to judge its appearance can occur in either order.
+    // Keep the terminator to distinguish questions from descriptions of the image.
+    const liveImageEn = /\b(?:on camera|on (?:the )?(?:live )?stream|on (?:the |your )?screen|in (?:the |this )?(?:live |camera |video )?(?:feed|shot|frame))\b/i;
+    const appearanceEn = /\b(?:look(?:s)?|appear(?:s)?|see|visible|show(?:s)? up|spot|make out|colou?r|shape|pattern|am I|is (?:my|this|that)|are (?:my|these|those))\b/i;
+    const questionEn = /\?\s*$|(?:^|[:,])\s*(?:(?:do|does|did|can|could|will|would|am|is|are|what|which|how)\b|(?:please\s+)?look at\b)/i;
+    const liveImageJa = /(?:カメラ|映像|画面|配信)(?:には?|だと|では?|越し|上)/u;
+    const appearanceJa = /見(?:え|て)|映(?:っ|り|る)|写(?:っ|り|る)|何色|どんな(?:色|形|柄)/u;
+    const questionJa = /\?$|(?:何色|どんな(?:色|形|柄)|見て(?:ください|くれ|もらえ)|教えて|(?:見え|映)\S{0,6}(?:か(?:な|ね)?|の)[。!]?$)/u;
+    if (liveImageEn.test(sentence) && appearanceEn.test(sentence) && questionEn.test(sentence) ||
+        liveImageJa.test(sentence) && appearanceJa.test(sentence) && questionJa.test(sentence)) return true;
 
     // Resolve vague requests to look using the source named in the same sentence.
     if (/\b(?:in|on|from|via) (?:the |my |this )?(?:description|(?:pinned )?comments?|chat|link|website|(?:attached )?(?:photo|screenshot))\b|\b(?:link|description) below\b/i.test(sentence) ||
