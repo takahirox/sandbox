@@ -1,0 +1,4 @@
+export const SAMPLE_RATE = 16000;
+export const MIN_SEGMENT_SAMPLES = SAMPLE_RATE * 0.12;
+export const MAX_SEGMENT_SAMPLES = SAMPLE_RATE * 6;
+export const MIN_SEGMENT_RMS = 0.0001;

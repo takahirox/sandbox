@@ -1,8 +1,9 @@
 import {
   ASR, LLM, WASM, messagesFor, meaningfulSpeech, inspectComment,
   asksForVisualObservation,
-  MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
+  MIN_COMMENT_INTERVAL, VOICES,
 } from './config.mjs';
+import { MIN_SEGMENT_SAMPLES, MAX_SEGMENT_SAMPLES, MIN_SEGMENT_RMS } from './audio-format.mjs';
 import { speechInterest } from './audience.mjs';
 
 // Shared by the actual Worker and fixture evaluation. No user content in diagnostics.
@@ -39,7 +40,8 @@ export async function createInference(pipeline, env, progress, {
       return { comment: '', ...extra };
     };
     onDiagnostic('audio_received');
-    if (!(audio instanceof Float32Array) || audio.length > WINDOW_SAMPLES || audio.length < 1600)
+    if (!(audio instanceof Float32Array) ||
+        audio.length < MIN_SEGMENT_SAMPLES || audio.length > MAX_SEGMENT_SAMPLES)
       return finish('invalid_audio');
     let energy = 0;
     for (const sample of audio) {
@@ -47,7 +49,9 @@ export async function createInference(pipeline, env, progress, {
       energy += sample * sample;
     }
     const rms = Math.sqrt(energy / audio.length);
-    if (rms < 0.006) { candidate = null; return finish('silence'); }
+    // Capture checks individual frames. Only reject essentially silent PCM here,
+    // since context and pauses can dilute the RMS of an otherwise voiced segment.
+    if (rms < MIN_SEGMENT_RMS) { candidate = null; return finish('silence'); }
     const started = clock();
     let output;
     onDiagnostic('asr_attempt');
@@ -80,8 +84,8 @@ export async function createInference(pipeline, env, progress, {
     } else if (context.length) context.at(-1).now = now;
     lastSpeech = text;
 
-    // Check the newer window before releasing a held reply. Wait at most one
-    // additional window so continuous capture cannot starve chat.
+    // Check the newer segment before releasing a held reply. Wait at most one
+    // additional segment so continuous capture cannot starve chat.
     if (candidate) {
       const held = candidate;
       candidate = null;
