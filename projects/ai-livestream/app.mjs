@@ -1,5 +1,5 @@
 import { VirtualAudience } from './audience.mjs';
-import { MIN_AUDIO_INTERVAL, VOICES, modelChoice } from './config.mjs';
+import { MAX_COMMENT_LENGTH, MIN_AUDIO_INTERVAL, VOICES, modelChoice } from './config.mjs';
 import { Diagnostics } from './diagnostics.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -80,7 +80,7 @@ function stop(message = 'Camera & mic off.', error = false) {
 }
 
 function addComment(text, voice = 0) {
-  if (!text || text.length > 110) return false;
+  if (!text || text.length > MAX_COMMENT_LENGTH) return false;
   const log = $('messages');
   const follow = log.scrollHeight - log.scrollTop - log.clientHeight < 64;
   const name = VOICES[Number.isInteger(voice) && voice >= 0 ? voice % VOICES.length : 0].name;

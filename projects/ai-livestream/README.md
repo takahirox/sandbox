@@ -55,27 +55,25 @@ has a 90-second limit. A slow connection can require another attempt.
   prioritizes recent speech over backlog. There are no random opportunity skips or
   viewer-dependent inference rates. A first meaningful window can generate immediately;
   six-second windows typically yield one opportunity every twelve seconds.
-  Slow replies are not rejected merely for taking 24 seconds. If newer speech arrived,
-  a reply is held in the Worker until the latest recognition confirms its topic (within
-  90 seconds); otherwise it is discarded. End cancels all pending work. Silence produces no job
-  or filler chat. Recognizer errors/hallucinations remain possible.
+  If newer audio arrives during inference, the Worker can hold one reply for
+  up to two recognition windows within the original 90-second deadline. It
+  clears held replies on silence or failed recognition and discards them on a
+  language change or a request to observe the camera. End cancels pending work.
 - Transcription is supplied as quoted context to Qwen, which generates the actual
   comment; there is no canned comment roulette. Reasoning mode is disabled. A
   rolling prompt context uses at most 400 characters from three speech windows
-  for 24 seconds;
-  it expires on silence or language changes. Four viewer voices rotate between
+  for 24 seconds and resets on language changes. Four viewer voices rotate between
   questions, casual reactions, preferences and noticing changes. Sampling uses
   temperature 0.7, top-p 0.9, repetition penalty 1.15 and frequency/presence
   penalties. One unrelated question/reply example establishes the conversational
   format; it is never substituted for generated output. Three recent replies
   discourage repetition.
-  Short, safe topical replies survive a word/concept or conversational-reference check
-  (including pronoun-based follow-ups). Explicit preferences and questions may reuse
-  topic words without being treated as echoes. Generic praise, visual claims, URLs,
-  unsafe vocabulary, wrong-language replies, speech echoes, multiline/long replies
-  and duplicates are suppressed. These
-  checks are imperfect, not a moderation or factuality guarantee. Odd wording and
-  ASR mistakes remain possible. The AI never receives camera frames.
+  Both chat routes can display short reactions such as `おお！` or `なるほど`
+  even when they share no words with the transcript. Output handling removes
+  reasoning and control tokens, honors empty output and `SKIP`, and bounds
+  plain-text comments to 110 characters. Local safeguards cover unsafe content,
+  contact details, links and claims about the live image. The AI never receives
+  camera frames.
 - Audience scoring uses only recognized words, questions, detail, invitations and
   a small bounded audio RMS contribution. It does not infer emotions or understand
   video. Each score is posted before chat generation. Skipped/filtered replies
@@ -106,7 +104,7 @@ has a 90-second limit. A slow connection can require another attempt.
   Cache Storage, and wllama caches the frozen GGUF shards in origin-private file
   storage. Clear this site's browser storage to remove cached assets. User media, transcripts and chat are never persisted.
   The camera is never sampled by code or recorded. Current chat has a 60-row limit;
-  Worker deduplication keeps 20 recent comments. End clears chat, terminates the
+  the Worker keeps up to three recent replies for the prompt. End clears chat, terminates the
   Worker (including in-flight inference/downloads), closes AudioContext and stops
   every media track. Late permission responses are stopped immediately.
 
@@ -149,7 +147,8 @@ It checks the adapter format and default/rollback routing, seeded Japanese/Engli
 audience trajectories, silence/decline, count caps,
 reactions without chat, manual-choice independence, rolling context/voice selection,
 resource cleanup, permission races/errors, unavailable GPU, failed model
-downloads, silence, language/context transfer, cadence, bounded history, filtering,
+downloads, silence, language/context transfer, cadence, bounded history, short
+reactions on both model routes, and protocol, safety and privacy handling. It checks
 video-first desktop/mobile layout, keyboard focus, reduced motion and network
 inactivity. DOM checks reject removed filler copy and technical badges in every
 session state, verify the single About disclosure, and check contextual loading,
@@ -165,14 +164,14 @@ LOCAL_AI_SMOKE=1 node --test tests/ai-livestream-model.test.mjs
 Set `LOCAL_AI_MODEL=baseline` to run the same smoke test with the 1.7B model.
 This downloads the pinned ASR and selected text model assets and passes synthetic Japanese/English WAV fixtures
 through the same ASR/generator implementation in a browser Worker. It asserts
-recognized topics, short topical generated comments, and static asset traffic.
+recognition, bounded generation and plain-text output, and static asset traffic.
 The smoke test uses no camera or microphone. See fixture provenance in
 `tests/fixtures/ai-livestream/README.md`. This is intentionally excluded from ordinary
 CI to avoid hardware requirements and repeated large downloads. `?debug=1` shows
 only ephemeral numeric counters, last ASR/generation timings, seconds since the last
 visible comment, and exact model/backend identity. It traces VAD silence/backpressure,
 audio submissions/pending windows, ASR errors/accepted recognition, cadence/repeated
-speech, generation errors, categorized output rejection, context validation, Worker
+speech, generation errors, categorized output rejection, queued replies, Worker
 results, UI insertion/discards and engagement ticks. A closed event vocabulary
 rejects arbitrary strings. No audio, transcripts, prompts, runtime exceptions or
 identifying details enter this panel, logs, telemetry or storage. End clears it.
@@ -184,11 +183,9 @@ follow-ups through the issue #50 and current pipelines, without weights:
 node scripts/replay_livestream_pipeline.mjs
 ```
 
-`pipeline-replay.json` records acceptance frequency/reasons and deterministic
-small-audience trajectories. This is a scheduling/filter comparison, not a new
-model-quality or hardware benchmark. The real-model comparison can be saved
-separately from historical evidence with
-`node scripts/compare_livestream_models.mjs --mlc --issue52`.
+`pipeline-replay.json` records the earlier acceptance counts and deterministic
+small-audience trajectories. The replay command prints scheduling and delivery
+counts for the current code.
 
 See [the model comparison](./MODEL-EVALUATION.md) for concrete bilingual fixture
 outputs, measured resource costs, limitations and reproduction commands.

@@ -28,6 +28,7 @@ export const SAMPLE_RATE = 16000;
 export const WINDOW_SAMPLES = SAMPLE_RATE * 6;
 export const MIN_COMMENT_INTERVAL = 8000;
 export const MIN_AUDIO_INTERVAL = 5500;
+export const MAX_COMMENT_LENGTH = 110;
 
 export function isAssetRequest(url, method = 'GET') {
   if (SMALL_MODEL_FILES.includes(url.href)) return method === 'GET' || method === 'HEAD';
@@ -104,87 +105,6 @@ export function messagesFor(text, language, { context = '', recent = [], voice =
   ];
 }
 
-// Match topic concepts, including common inflections/paraphrases. Never replace
-// suppressed output with a canned comment. Keep generic words out of the overlap.
-const concepts = [
-  ['coffee', 'beans', 'roast', 'コーヒー', '珈琲', '豆', '焙煎'], ['cat', 'cats', 'kitten', 'kittens', '猫', '子猫'],
-  ['bitter', 'bitterness', 'sweet', 'sweeter', 'sugar', '苦い', '苦味', '苦み', '甘い', '甘み', '砂糖'], ['temperature', 'heat', '温度', '湯温'],
-  ['smell', 'aroma', '香り', '匂い'], ['tea', 'お茶', '紅茶'],
-];
-function topicText(value) {
-  let text = value.normalize('NFKC').toLowerCase();
-  for (const [i, words] of concepts.entries())
-    for (const word of [...words].sort((a, b) => b.length - a.length))
-      text = text.replace(new RegExp(/^[a-z]+$/.test(word) ? `\\b${word}\\b` : word, 'gu'), ` concept${i} `);
-  return text;
-}
-function topicTerms(value, language) {
-  const common = new Set(
-    'だ よ ね からだ からです な の は が を に と も で です います たい から ので だった 今日 昨日 明日 私 自分 これ それ その あれ どれ ここ そこ こと もの とても です ます ました ません ある いる する した して ない という am be been being doing do done has had having get got take taking little say saying ask asked question answer used use next feel feeling trying tried try work works working enjoy enjoying need let the and are was were for but not you can will would could should they them their it its itself these those there then when where how why who does did too also today yesterday tomorrow really think want going something anything thanks thank this that with from have made make today just really very like love some what good nice great stream your about said'.split(
-      ' ',
-    ),
-  );
-  common.add('好き');
-  return [...new Intl.Segmenter(language, { granularity: 'word' }).segment(topicText(value))]
-    .filter(({ segment, isWordLike }) => isWordLike && !common.has(segment) &&
-      (segment.length >= 2 || /\p{Script=Han}/u.test(segment)))
-    .map(({ segment }) => language === 'en' && segment.length > 4
-      ? segment.replace(/(?:ing|ed|s)$/, '') : segment);
-}
-
-export function sharesTopic(comment, speech, language) {
-  const words = new Set(topicTerms(comment, language));
-  return topicTerms(speech, language).some(word => words.has(word));
-}
-
-// Reference-led speech can describe new properties/actions without repeating its
-// subject. Recognize that structure, rather than whitelisting complete predicates.
-// Explicit transitions and introductions of another subject break the chain.
-// This is a bounded heuristic, not semantic proof (as with relatesToSpeech).
-export function isReferenceContinuation(speech, language) {
-  const text = speech.normalize('NFKC').trim();
-  if (language === 'en') {
-    if (/\b(?:anyway|instead|speaking of|moving on|(?:change|changing|switch|switching) (?:the )?(?:topic|subject)|remind(?:s|ed)?\b[^.!?]*\bof)\b/iu.test(text) ||
-        /\b(?:is|are|was|were)\s+(?:my|your|his|her|our|their|a|an)\s+(?!(?:little|bit)\b)\p{L}/iu.test(text)) return false;
-    return /^(?:(?:and|but|so|now)[,\s]+)*(?:it|that|this|they|those|these)\b/iu.test(text);
-  }
-  if (/ところで|それより|話(?:題)?(?:は|を|が)?(?:変|替)|別の話|の話|(?:それ|これ|あれ)(?:は|が)(?:私|僕|うち|あなた|彼|彼女)の/u.test(text)) return false;
-  if (/^(?:(?:それ|これ|あれ)(?:は|が|で|って|を|に)|その(?:あと|後|結果)|この(?:あと|後))/u.test(text)) return true;
-  // Without a reference, keep the existing conservative subjectless fragments:
-  // a temporal/adverbial opener alone can also introduce a new concrete subject.
-  return /^(?:(?:それ|これ|あれ)(?:は|が|って)?[、,\s]*)?(?:今回は|今度は)?(?:少し|ちょっと|かなり|もっと|前より|やはり|やっぱり)*(?:遅かった|速かった|早かった|長かった|短かった|よかった|良かった|難しかった|簡単だった)(?:です|ね|よ)?[。!?]*$/u.test(text);
-}
-
-// Only bounded reference-only questions may omit the transcript's topic words.
-// A pronoun alone cannot ground a new subject or an assertion. This remains a
-// conservative heuristic, not semantic proof.
-export function relatesToSpeech(comment, speech, language) {
-  if (sharesTopic(comment, speech, language)) return true;
-  const question = comment.normalize('NFKC').trim();
-  if (language === 'en')
-    return /^(?:how long did (?:that|it) take|how did (?:that|it) (?:go|turn out)|(?:would|will|did) you (?:do|try|make) (?:that|it) again|which one (?:did|would) you (?:choose|pick|prefer)|(?:did|do) you (?:like|enjoy) (?:that|it)|what would you (?:try|do) next)\?$/iu.test(question) ||
-      (/\b(?:break|back|return|pause|rest)\b/iu.test(speech) &&
-        /^(?:are you coming back soon|will you be back soon|you sure you'll be back soon)\?$/iu.test(question));
-  return /^(?:それ|あれ)(?:は|って)?[、,\s]*(?:どうだった(?:の)?|どうでしたか|どのくらいかかった(?:の)?|また試したい|またやりたい)\?$/u.test(question) ||
-    // A temperament question needs an animate referent, not just 「それ」.
-    (/(?:猫|犬|子供|子ども)/u.test(speech) &&
-      /^それ[、,\s]*(?:人懐っこい|おとなしい|元気な)子だった(?:の)?\?$/u.test(question));
-}
-
-export function echoesSpeech(comment, speech, language) {
-  const compact = value => value.normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\p{S}]/gu, '');
-  const reply = compact(comment), sourceText = compact(speech);
-  if (reply && (reply === sourceText ||
-      (reply.length >= (language === 'ja' ? 8 : 16) && sourceText.includes(reply)))) return true;
-  if (/[?？]/u.test(comment) || /\bI (?:like|love|prefer)\b|好き|いいな|気になる/iu.test(comment))
-    return false; // Questions and explicit personal reactions can reuse topic words.
-  const words = new Set(topicTerms(comment, language));
-  const source = new Set(topicTerms(speech, language));
-  const overlap = [...words].filter(word => source.has(word)).length / Math.max(1, words.size);
-  return words.size >= 3 && (overlap >= 0.85 ||
-    (language === 'ja' && overlap >= 0.6 && /ことだけ|による|からだ/u.test(comment)));
-}
-
 // A reply can imply a view of the stream without using visual language itself.
 export function asksForVisualObservation(speech) {
   const text = speech.normalize('NFKC');
@@ -217,62 +137,35 @@ export function asksForVisualObservation(speech) {
   });
 }
 
-// Conservative local guardrails supplement prompting; no moderation service.
-export function inspectComment(value, recent = [], language = 'en', speech = '') {
-  if (/<think>(?!\s*<\/think>)/i.test(String(value))) return { comment: '', reason: 'reasoning' };
-  let text = String(value)
-    .normalize('NFKC')
+// Apply model protocol and local safety/privacy checks before rendering.
+export function inspectComment(value, speech = '') {
+  const raw = typeof value === 'string' ? value.normalize('NFKC') : '';
+  const withoutReasoning = raw
+    .replace(/<think\b(?:[^>]*>[\s\S]*?(?:<\/think\s*>|$)|[^>]*$)/gi, '')
+    .replace(/^[\s\S]*<\/think\s*>/i, '');
+  const text = withoutReasoning.trim()
+    .replace(/^<\|im_start\|>\s*assistant\b\s*/i, '')
+    .split(/<\|(?:im_end|im_start|endoftext)\|>|^\s*(?:system|user):/im, 1)[0]
     .replace(/<[^>]*>/g, '')
+    .replace(/^(?:assistant|viewer comments?|コメント):\s*/i, '')
     .replace(/^[\s"「『]+|[\s"」』]+$/g, '')
+    .replace(/[\s\p{Cc}]+/gu, ' ')
     .trim();
+  if (!text)
+    return { comment: '', reason: withoutReasoning !== raw ? 'reasoning' : 'format' };
+  if (/^SKIP$/i.test(text)) return { comment: '', reason: 'format' };
+  if (text.length > MAX_COMMENT_LENGTH) return { comment: '', reason: 'length' };
   if (
-    !text ||
-    text.length > 400 ||
-    /[\r\n]|https?:|www\.|@|SKIP|<\||system:|assistant:|viewer comments?:|コメント[:：]|発言[:：]/i.test(
-      text,
-    )
-  )
-    return { comment: '', reason: 'format' };
-  const japanese = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u.test(text);
-  if ((language === 'ja' && (!japanese || /\p{Script=Hangul}/u.test(text))) ||
-      (language === 'en' && japanese)) return { comment: '', reason: 'language' };
-  if (
-    /\b(?:address|phone number|email|password)\b|\d[\d ()+-]{7,}\d|\b(sex|sexy|nude|porn|kill|hate|ugly|stupid|idiot|suicide|fuck|shit|bitch)\b|死ね|殺|エロ|セックス|ブス|バカ|馬鹿|個人情報|住所|電話番号|おっぱい|自殺|障害者/i.test(
+    /https?:|www\.|@|\b(?:address|phone number|email|password)\b|\d[\d ()+-]{7,}\d|\b(sex|sexy|nude|porn|kill|hate|ugly|stupid|idiot|suicide|fuck|shit|bitch)\b|死ね|殺|エロ|セックス|ブス|バカ|馬鹿|個人情報|住所|電話番号|おっぱい|自殺|障害者/i.test(
       text,
     )
   )
     return { comment: '', reason: 'safety' };
   if (
-    /^(?:that(?:'s| is)|so|very|really)?\s*(?:nice|great|cool|awesome|interesting|amazing|good)(?:\s+(?:stream|story|stuff|job))?[!. ]*$/i.test(text) ||
-    /^(?:いいね|すごい|素晴らしい|楽しそう|なるほど)[!！。 ]*$/u.test(text) ||
-    /\b(?:you look|your face|your outfit|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see (?:you|your (?:face|hair|eyes|shirt|clothes|outfit)))\b|顔|髪型|笑顔|映像が|画面に/i.test(text) ||
-    asksForVisualObservation(speech) ||
-    /^(?:a (?:friend|viewer|streamer) |the streamer |配信者[はが])/i.test(text)
-  ) return { comment: '', reason: 'generic_or_visual' };
-  // Small models sometimes continue after their first complete comment.
-  const limit = language === 'ja' ? 55 : 110;
-  if (
-    text.length > limit ||
-    (language !== 'ja' && text.split(/\s+/).length > 22)
-  )
-    text = (text.match(/^.*?[。！？!?]|^.*?\.(?:\s|$)/u)?.[0] || text).trim();
-  if (
-    text.length > limit ||
-    (language !== 'ja' && text.split(/\s+/).length > 22)
-  )
-    return { comment: '', reason: 'length' };
-  const key = text.toLowerCase().replace(/[\p{P}\p{Z}\p{S}]/gu, '');
-  if (
-    recent.some(
-      (old) => old.toLowerCase().replace(/[\p{P}\p{Z}\p{S}]/gu, '') === key,
-    )
-  )
-    return { comment: '', reason: 'duplicate' };
+    /\b(?:you look (?:happy|sad|tired|great|nice|beautiful|different)|your (?:face|outfit) (?:looks?|is|seems?)|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see (?:you|your (?:face|hair|eyes|shirt|clothes|outfit)))\b|(?:顔|髪型|笑顔)(?:が|は)(?:見え|いい|かわい|可愛|きれい|綺麗)|(?:映像|画面)(?:に|で).{0,24}(?:見え|映[っるり])/i.test(text) ||
+    asksForVisualObservation(speech)
+  ) return { comment: '', reason: 'visual' };
   return { comment: text, reason: 'accepted' };
-}
-
-export function cleanComment(value, recent = [], language = 'en') {
-  return inspectComment(value, recent, language).comment;
 }
 
 export function meaningfulSpeech(value) {

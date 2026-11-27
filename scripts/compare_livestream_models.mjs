@@ -1,7 +1,7 @@
 // Explicitly invoked only. Public asset downloads; all model execution stays in Chromium.
 import {chromium} from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import {previewServer} from './capture_screenshots.mjs';
-import {inspectComment, relatesToSpeech, echoesSpeech} from '../projects/ai-livestream/config.mjs';
+import {inspectComment} from '../projects/ai-livestream/config.mjs';
 import {readFile,writeFile} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {cpus, totalmem, platform} from 'node:os';
@@ -78,11 +78,7 @@ try {
         await page.waitForFunction(n=>evaluation.results.length===n||evaluation.error,index+1,{timeout:90000});
         const error=await page.evaluate(()=>evaluation.error);if(error)throw Error(error);
         const result=await page.evaluate(i=>evaluation.results[i],index);
-        const inspected = inspectComment(result.raw || '', [], fixture.language, result.transcript);
-        const finalReason = !inspected.comment ? inspected.reason :
-          !relatesToSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'topic' :
-          echoesSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'echo' : 'accepted';
-        const finalComment = finalReason === 'accepted' ? inspected.comment : '';
+        const {comment:finalComment,reason:finalReason} = inspectComment(result.raw, result.transcript);
         record.fixtures.push({file:fixture.file,expected:fixture.text,...result,finalComment,finalReason});
         console.log(mode.name, fixture.file, JSON.stringify(result));
       }

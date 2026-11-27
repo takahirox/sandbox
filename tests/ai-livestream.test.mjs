@@ -14,13 +14,10 @@ import {
   WASM,
   isAssetRequest,
   modelChoice,
-  cleanComment,
   inspectComment,
-  sharesTopic,
-  echoesSpeech,
   messagesFor,
   meaningfulSpeech,
-  WINDOW_SAMPLES,
+  MAX_COMMENT_LENGTH, WINDOW_SAMPLES,
 } from '../projects/ai-livestream/config.mjs';
 import { localPipeline } from '../projects/ai-livestream/text-model.mjs';
 import { createInference } from '../projects/ai-livestream/inference.mjs';
@@ -140,8 +137,8 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   answer = 'Tomatoes are lovely!';
   assert.equal(
     (await infer(audio, 'en', 36000)).comment,
-    '',
-    'Off-topic model output is suppressed without a canned substitute',
+    answer,
+    'A reply does not need matching vocabulary',
   );
   assert.equal(signals.length, 5, 'Suppressed/repeated replies still publish bounded signals');
   assert.ok(signals.every(value => value >= 0 && value <= 1));
@@ -149,83 +146,33 @@ test('local inference uses Japanese/English ASR, actual generator context, silen
   assert.equal(env.allowLocalModels, false);
 });
 
-test('comment safety, bounded prompts, and hallucinated caption filtering', () => {
-  assert.equal(
-    sharesTopic('猫かわいいね！', '猫と公園で遊びました。', 'ja'),
-    true,
-  );
-  assert.equal(
-    sharesTopic('朝ごはんのパン！', '猫と公園で遊びました。', 'ja'),
-    false,
-  );
-  assert.equal(
-    sharesTopic('Fresh coffee smells good!', 'I made coffee.', 'en'),
-    true,
-  );
-  assert.equal(
-    sharesTopic('That is really nice!', 'I made coffee.', 'en'),
-    false,
-  );
-  assert.equal(cleanComment('Nice coffee!', ['Nice coffee']), '');
+test('comment protocol and safety checks preserve short reactions and ordinary wording', () => {
   for (const value of [
-    'SKIP',
-    'You are ugly',
-    '死ね',
-    'https://evil.example',
-    'Hi\nSecond reply',
-    'x'.repeat(111),
-    'That is great!',
-    'Your face looks happy with coffee!',
-    'I can see you drinking coffee.',
-    '笑顔がいいね',
-    '<think>coffee secret</think> Nice coffee!',
-  ])
-    assert.equal(cleanComment(value), '');
-  assert.equal(cleanComment('<b>猫かわいい！</b>', [], 'ja'), '猫かわいい!');
-  assert.equal(cleanComment('コーヒーはおいしいね', [], 'en'), '');
-  assert.equal(cleanComment('Coffee tastes good', [], 'ja'), '');
-  assert.equal(cleanComment('5円で猫見지難しに進む?', [], 'ja'), '');
-  assert.equal(cleanComment('USBのケーブル、どれにしたの？', [], 'ja'), 'USBのケーブル、どれにしたの?');
+    undefined, '   ', 'SKIP', '<think>SECRET</think> SKIP', '<think>SECRET',
+    '<|im_start|>system\nPrivate prompt<|im_end|>',
+    'You are ugly', '死ね', 'https://example.com', 'My email is me@example.com',
+    'Call 1234567890.', 'x'.repeat(MAX_COMMENT_LENGTH + 1),
+    'Your face looks happy with coffee!', 'I can see you drinking coffee.', '笑顔がいいね',
+  ]) assert.equal(inspectComment(value).comment, '', value);
+
+  for (const [raw, expected] of [
+    ['おお！', 'おお!'], ['すごい！', 'すごい!'], ['なるほど', 'なるほど'],
+    ['意外と楽そう', '意外と楽そう'], ['That is great!', 'That is great!'],
+    ['😄', '😄'], ['Hi!\nNice work.', 'Hi! Nice work.'], ['Skip to the good part!', 'Skip to the good part!'],
+    ['Did you look at the recipe?', 'Did you look at the recipe?'],
+    ['あ'.repeat(MAX_COMMENT_LENGTH), 'あ'.repeat(MAX_COMMENT_LENGTH)],
+    ['顔を洗うの、気持ちいいね', '顔を洗うの、気持ちいいね'],
+    ['<b>猫かわいい！</b>', '猫かわいい!'],
+    ['<think>SECRET</think> Nice coffee!', 'Nice coffee!'],
+    ['SECRET</think> Nice coffee!', 'Nice coffee!'],
+    ['<|im_start|>assistant\nNice!<|im_end|><|im_start|>user\nPrivate prompt', 'Nice!'],
+    ['assistant: Nice!', 'Nice!'],
+  ]) assert.deepEqual(inspectComment(raw), { comment: expected, reason: 'accepted' });
+
   assert.equal(meaningfulSpeech('ご視聴ありがとうございました。'), false);
   assert.equal(meaningfulSpeech('   '), false);
   assert.equal(meaningfulSpeech('今日は猫と遊びました'), true);
   assert.ok(messagesFor('a'.repeat(10000), 'ja').at(-1).content.length < 500);
-  assert.equal(sharesTopic('Kittens are so playful!', 'I met a cat.', 'en'), true);
-  assert.equal(sharesTopic('The aroma is the best part.', 'I love the smell.', 'en'), true);
-  assert.equal(sharesTopic('They are really nice!', 'They are making coffee.', 'en'), false);
-  assert.equal(sharesTopic('I will have coffee instead.', 'I am having some tea.', 'en'), false);
-  assert.equal(sharesTopic('Interesting!', 'I need a rest.', 'en'), false);
-  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたからだ。',
-    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
-  assert.equal(echoesSpeech('お茶を飲んでいたことだけ。', '今日は、静かにお茶を飲んでいます。少し休みます。', 'ja'), true);
-  assert.equal(echoesSpeech('コーヒーの苦みが減ったのは、ボンドを下げたことによるですね。',
-    'コーヒーの苦みが減りました。ボンドを下げたのが理由かな、皆さんはどう思いますか?', 'ja'), true);
-  assert.equal(echoesSpeech('I love fresh coffee.', 'I love fresh coffee.', 'en'), true);
-  assert.equal(echoesSpeech('どの豆にしたの？', 'どの豆にしたの？', 'ja'), true);
-  assert.equal(echoesSpeech('Fresh coffee, a new grinder and beans — I like that!',
-    'I made fresh coffee with a new grinder and beans.', 'en'), false);
-});
-
-test('reference follow-up fixtures ground pronouns without admitting unrelated subjects', async () => {
-  const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/reference-followups.json', import.meta.url)));
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-  for (const fixture of fixtures) {
-    for (const accepted of [true, false]) {
-      for (const reply of fixture[accepted ? 'accepted' : 'rejected']) {
-        const reasons = [];
-        const generate = async () => [{ generated_text: reply }];
-        generate.tokenizer = { apply_chat_template: messages => messages };
-        const infer = await createInference(async task => task === 'automatic-speech-recognition'
-          ? async () => ({ text: fixture.speech }) : generate,
-        { backends: { onnx: { wasm: {} } } }, () => {}, {
-          onDiagnostic: reason => reasons.push(reason),
-        });
-        assert.equal((await infer(audio, fixture.language, 0)).comment,
-          accepted ? reply.normalize('NFKC') : '', reply);
-        assert.ok(reasons.includes(accepted ? 'output_accepted' : 'topic'), reply);
-      }
-    }
-  }
 });
 
 test('rolling speech context expires, viewer voices vary, and skipped chat still scores speech', async () => {
@@ -250,7 +197,6 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
   assert.notEqual(prompts[0][0].content, prompts[1][0].content, 'Distinct voices');
   assert.match(prompts[1].at(-1).content, /avoid_repeating/);
   speech = 'There are oranges in the bowl.';
-  answer = 'Coffee smells wonderful!';
   answer = 'Which oranges did you choose?';
   assert.equal((await infer(audio, 'en', 60000)).comment, answer, 'Latest speech anchors the prompt after context expiry');
   assert.doesNotMatch(prompts[2].at(-1).content.split('avoid_repeating')[0], /coffee temperature/);
@@ -263,6 +209,13 @@ test('rolling speech context expires, viewer voices vary, and skipped chat still
   assert.equal(signals.length, 12, 'Caption boilerplate cannot inflate audience interest');
   const invalid = audio.slice(); invalid[0] = NaN;
   assert.deepEqual(await infer(invalid, 'en', 120000), { comment: '' });
+  for (let i = 0; i < 4; i++) {
+    speech = `I tried recipe ${i} today.`;
+    answer = `Nice work on that one (${i})!`;
+    assert.equal((await infer(audio, 'en', 132000 + i * 12000)).comment, answer);
+  }
+  assert.deepEqual(JSON.parse(prompts.at(-1).at(-1).content).avoid_repeating,
+    [0, 1, 2].map(i => `Nice work on that one (${i})!`));
 });
 
 test('Worker fetch policy allows only pinned public assets and rejects inference or writes', () => {
@@ -314,7 +267,7 @@ test('the shipped GGUF is the pinned compact LoRA adapter and the baseline remai
   assert.ok(adapter.length < 1024 * 1024);
 });
 
-test('recorded baseline and tuned outputs replay the same guards on held-out speech', async () => {
+test('recorded model outputs preserve scheduling and output bounds on held-out speech', async () => {
   const fixtures = new URL('./fixtures/ai-livestream/', import.meta.url);
   const training = new URL('../scripts/livestream-training/train.jsonl', import.meta.url);
   const loadFixture = name => readFile(new URL(name, fixtures), 'utf8').then(JSON.parse);
@@ -332,20 +285,19 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
   const scores = [];
   for (const mode of benchmark.modes) {
     const replay = await replayTuningMode(mode, holdout);
-    const assertReplay = (row, output, language, id) => {
-      const visual = id === 'en-visual';
-      const expectedEvents = visual && row.comment
-        ? [...row.events.slice(0, -1), 'generic_or_visual', 'output_discarded']
-        : row.events;
-      assert.equal(output.comment, visual ? '' : row.comment, `${mode.mode} ${id}`);
-      assert.deepEqual(output.events, expectedEvents, `${mode.mode} ${id}`);
+    const schedulerEvents = events => events.filter(event =>
+      /^(?:audio_received|asr_attempt|transcription_accepted|silence|meaningless_speech|repeated_speech|cadence|generation_attempt)$/.test(event));
+    const assertReplay = (row, output, id) => {
+      const label = `${mode.mode} ${id}`;
+      assert.deepEqual(schedulerEvents(output.events), schedulerEvents(row.events), label);
+      if (id === 'en-visual') assert.equal(output.comment, '', label);
       if (output.comment) {
-        assert.doesNotMatch(output.comment, /\r|\n|<think>|SKIP/i);
-        assert.ok(output.comment.length <= (language === 'ja' ? 55 : 110));
+        assert.doesNotMatch(output.comment, /[\r\n]|<think>|<\|/i);
+        assert.ok(output.comment.length <= MAX_COMMENT_LENGTH);
       }
     };
     for (const [index, row] of mode.audio.entries())
-      assertReplay(row, replay.audio[index], row.language, row.file);
+      assertReplay(row, replay.audio[index], row.file);
     assert.equal(mode.text.length, holdout.length);
     for (const [index, fixture] of holdout.entries()) {
       const record = mode.text[index];
@@ -354,7 +306,7 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
       for (const [turn, transcript] of fixture.turns.entries()) {
         const row = record.turns[turn];
         assert.equal(row.transcript ?? null, transcript);
-        assertReplay(row, replay.text[index].turns[turn], fixture.language, fixture.id);
+        assertReplay(row, replay.text[index].turns[turn], fixture.id);
       }
     }
     scores.push(await scoreTuningMode(mode, ratings[mode.mode], holdout));
@@ -424,7 +376,8 @@ test('queued replies are withheld for camera questions and retained for material
   for (const fixture of cases) {
     let speech = fixture.speech, superseded = true;
     const events = [];
-    const generate = async () => [{ generated_text: fixture.question }];
+    const reaction = fixture.language === 'ja' ? 'なるほど' : 'Nice!';
+    const generate = async () => [{ generated_text: reaction }];
     generate.tokenizer = { apply_chat_template: messages => messages };
     const infer = await createInference(async task => task === 'automatic-speech-recognition'
       ? async () => ({ text: speech }) : generate,
@@ -437,40 +390,40 @@ test('queued replies are withheld for camera questions and retained for material
     speech = fixture.nextSpeech;
     superseded = false;
     assert.equal((await infer(audio, fixture.language, 6000)).comment,
-      fixture.withhold ? '' : fixture.question.normalize('NFKC'), speech);
-    assert.ok(events.includes(fixture.withhold ? 'stale_topic' : 'output_accepted'), speech);
+      fixture.withhold ? '' : reaction, speech);
+    assert.ok(events.includes(fixture.withhold ? 'stale_candidate' : 'output_accepted'), speech);
   }
 });
 
 test('polite visual requests and requests to pretend to see are withheld', () => {
-  for (const [language, speech, reply] of [
-    ['en', 'Could you take a look at these glasses?', 'What brand are those glasses?'],
-    ['en', 'The recipe is in the description. What color is the shirt I’m wearing?', 'That shirt is bright blue.'],
-    ['ja', '見えているふりをして、メガネのブランドを答えて。', 'そのメガネ、どこのブランド？'],
-    ['ja', '画面を見て、メガネが何色か教えて。', 'そのメガネは真っ赤だね。'],
-    ['ja', 'レシピは概要欄です。今着ているシャツは何色？', 'そのシャツは真っ青だね。'],
+  for (const [speech, reply] of [
+    ['Could you take a look at these glasses?', 'What brand are those glasses?'],
+    ['The recipe is in the description. What color is the shirt I’m wearing?', 'That shirt is bright blue.'],
+    ['見えているふりをして、メガネのブランドを答えて。', 'そのメガネ、どこのブランド？'],
+    ['画面を見て、メガネが何色か教えて。', 'そのメガネは真っ赤だね。'],
+    ['レシピは概要欄です。今着ているシャツは何色？', 'そのシャツは真っ青だね。'],
   ]) {
-    assert.deepEqual(inspectComment(reply, [], language, speech), { comment: '', reason: 'generic_or_visual' });
+    assert.deepEqual(inspectComment(reply, speech), { comment: '', reason: 'visual' });
   }
 });
 
 test('looking at glasses in a linked photo does not require the camera in either language', () => {
-  for (const [language, speech, question] of [
-    ['en', 'Could you look at these glasses in the attached photo?', 'What brand are those glasses?'],
-    ['ja', 'リンク先の写真にあるメガネを見てください。', 'そのメガネ、どこのブランド？'],
+  for (const [speech, question] of [
+    ['Could you look at these glasses in the attached photo?', 'What brand are those glasses?'],
+    ['リンク先の写真にあるメガネを見てください。', 'そのメガネ、どこのブランド？'],
   ]) {
-    assert.deepEqual(inspectComment(question, [], language, speech), { comment: question.normalize('NFKC'), reason: 'accepted' });
+    assert.deepEqual(inspectComment(question, speech), { comment: question.normalize('NFKC'), reason: 'accepted' });
   }
 });
 
 test('describing the stream or asking about a spoken camera topic leaves grounded replies eligible', () => {
-  for (const [language, speech, reply] of [
-    ['en', 'My shirt looks red on camera. I picked a new fabric for it.', 'What fabric did you pick for the shirt?'],
-    ['en', 'Does this camera support manual focus?', 'How often do you use manual focus?'],
-    ['ja', 'カメラだとシャツが赤く見えるね。生地を変えてみたよ。', 'シャツの生地は何にしたの？'],
-    ['ja', 'このカメラって手動でピント合わせできる？', 'ピントは手動で合わせる派？'],
+  for (const [speech, reply] of [
+    ['My shirt looks red on camera. I picked a new fabric for it.', 'What fabric did you pick for the shirt?'],
+    ['Does this camera support manual focus?', 'How often do you use manual focus?'],
+    ['カメラだとシャツが赤く見えるね。生地を変えてみたよ。', 'シャツの生地は何にしたの？'],
+    ['このカメラって手動でピント合わせできる？', 'ピントは手動で合わせる派？'],
   ]) {
-    assert.deepEqual(inspectComment(reply, [], language, speech), { comment: reply.normalize('NFKC'), reason: 'accepted' });
+    assert.deepEqual(inspectComment(reply, speech), { comment: reply.normalize('NFKC'), reason: 'accepted' });
   }
 });
 
@@ -567,31 +520,16 @@ test('the text engine is local, pinned, bounded and resets its conversation betw
   assert.equal(requests[0].messages, messages);
 });
 
-test('recorded real bilingual model output preserves topical follow-ups and suppresses echoes', async () => {
-  const readReport = async name => JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
-  const baseline = (await readReport('baseline')).modes[0];
-  const selected = (await readReport('mlc')).modes[0];
-  assert.equal(selected.fixtures.length, 6);
-  assert.ok(baseline.fixtures.filter(f => /friend|お子様|smiled/.test(f.raw)).length >= 3,
-    'Baseline exhibited invented people or visual actions on these exact fixtures');
-  let published = 0;
-  for (const sample of selected.fixtures) {
-    const language = sample.file.startsWith('ja') ? 'ja' : 'en';
-    const cleaned = cleanComment(sample.raw, [], language);
-    const actual = sharesTopic(cleaned, sample.transcript, language) &&
-      !echoesSpeech(cleaned, sample.transcript, language) ? cleaned : '';
-    assert.equal(actual, sample.finalComment);
-    if (actual) {
-      published++;
-      assert.doesNotMatch(actual, /friend|お子様|smiled|<think>/);
-      assert.ok(actual.length <= (language === 'ja' ? 55 : 110));
-    }
+test('recorded bilingual model replies remain eligible when they echo speech', async () => {
+  const report = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/comparison-mlc.json', import.meta.url)));
+  const samples = report.modes[0].fixtures;
+  assert.equal(samples.length, 6);
+  for (const sample of samples) {
+    const { comment } = inspectComment(sample.raw, sample.transcript);
+    assert.ok(comment, sample.file);
+    assert.ok(comment.length <= MAX_COMMENT_LENGTH);
+    assert.doesNotMatch(comment, /<think>|<\|/i);
   }
-  assert.equal(published, 4, 'Four short relevant remarks; two speech echoes withheld');
-  assert.match(selected.fixtures.find(f => f.file === 'en-discovery.wav').finalComment, /sugar/,
-    'A relevant suggestion survives without copying the word coffee');
-  assert.equal(selected.fixtures.find(f => f.file === 'ja-discovery.wav').finalComment, '',
-    'Do not publish a paraphrase of a misrecognized claim');
 });
 
 test('audio worklet bounds, downsampling, voice gating, and transfer', async () => {
@@ -940,9 +878,9 @@ test(
     );
     await page.clock.runFor(30000);
     await page.evaluate(() => fixture.workers[0].onmessage({
-      data: { type: 'result', comment: 'Which beans did you choose?' },
+      data: { type: 'result', comment: 'Nice!' },
     }));
-    assert.equal(await page.locator('.comment').count(), 1, 'A legitimate slow worker reply reaches the UI');
+    assert.match(await page.locator('.comment').innerText(), /Nice!$/);
     assert.equal(await page.evaluate(() => fixture.jobs), 2, 'Only the latest pending window is submitted');
     assert.ok(Math.abs(await page.evaluate(() => fixture.audio.audio[0]) - 0.2) < 0.001);
     for (let i = 0; i < 65; i++)
@@ -1146,7 +1084,7 @@ test(
     const baselineURL = modelURL(LLM);
     let speech = '今日はコーヒーを飲みます。';
     let language = 'ja';
-    let reply = 'コーヒー、いい香りですね！';
+    let reply = 'おお！';
     let reject = false;
     let fail = false;
     page.on('console', message => {
@@ -1245,7 +1183,7 @@ test(
     );
     await page.locator('#start').click();
     await page.locator('.comment').waitFor({ timeout: 15000 });
-    assert.match(await page.locator('.comment').innerText(), /コーヒー/);
+    assert.match(await page.locator('.comment').innerText(), /おお!$/);
     assert.deepEqual(models, [TUNED_MODEL_ID]);
     assert.deepEqual(overlayRequests, ['livestream.gguf']);
     assert.deepEqual(
@@ -1278,6 +1216,13 @@ test(
     assert.doesNotMatch(JSON.stringify(diagnostics), /コーヒー|SKIP|prompt|SECRET/);
     await page.locator('#start').click();
     assert.equal(await page.locator('#debug').textContent(), '');
+    reject = false;
+    reply = 'すごい！';
+    await page.goto(server.origin + '/sandbox/projects/ai-livestream/?model=baseline');
+    await page.locator('#start').click();
+    await page.locator('.comment').waitFor({ timeout: 15000 });
+    assert.match(await page.locator('.comment').innerText(), /すごい!$/);
+    await page.locator('#start').click();
     fail = true;
     await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
     await page.locator('#start').click();
@@ -1320,7 +1265,7 @@ test(
             worker.postMessage({ type: 'init', model, debug: true });
           }), { model, language, samples: WINDOW_SAMPLES });
         assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model}: ${speech}`);
-        assert.ok(events.includes(withhold ? 'generic_or_visual' : 'output_accepted'), speech);
+        assert.ok(events.includes(withhold ? 'visual' : 'output_accepted'), speech);
       }
     }
     assert.deepEqual(errors, []);
@@ -1348,12 +1293,13 @@ test('displayed viewers have a deterministic 25-second cadence and bounded stall
   assert.deepEqual(audience.tick(1e9), stalled);
 });
 
-test('offline issue #50 replay isolates scheduler starvation and fragile lexical rejection', async () => {
+test('offline replay preserves comment cadence and audience trajectories', async () => {
   const { evaluation } = await import('../scripts/replay_livestream_pipeline.mjs');
   const actual = await evaluation();
   const saved = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/pipeline-replay.json', import.meta.url)));
-  assert.deepEqual(actual, saved, 'Committed evidence is reproducible without models or hardware');
-  assert.equal(actual.isolated.after.accepted, 4, 'Real recorded bilingual replies retain quality decisions');
+  assert.deepEqual(actual.isolated.before, saved.isolated.before);
+  assert.deepEqual(actual.audience, saved.audience);
+  assert.equal(actual.isolated.after.accepted, 6, 'All protocol-safe recorded replies are eligible');
   assert.equal(actual.pronounFollowups.before.accepted, 0);
   assert.equal(actual.pronounFollowups.after.accepted, 2);
   assert.equal(actual.conversation.before.accepted, 1);
@@ -1384,12 +1330,11 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   let now = 0;
   const run = async () => { now += 12000; speech += ' Again.'; return infer(audio, 'en', now); };
   assert.equal((await run()).comment, raw);
-  assert.equal((await run()).comment, '', 'Repeated model reply is suppressed');
+  assert.equal((await run()).comment, raw, 'A new speech window can get the same reply');
   for (const [value, reason] of [
     ['SKIP', 'format'], ['You are ugly.', 'safety'], ['Call my phone number 1234567890.', 'safety'],
-    ['I can see you drinking coffee.', 'generic_or_visual'], ['I see your shirt.', 'generic_or_visual'], ['You look happy.', 'generic_or_visual'],
-    ['コーヒーが好き', 'language'], ['Tomatoes are lovely!', 'topic'],
-    ['<think>SECRET</think> coffee', 'reasoning'], ['x'.repeat(111), 'length'],
+    ['I can see you drinking coffee.', 'visual'], ['I see your shirt.', 'visual'], ['You look happy.', 'visual'],
+    ['<think>SECRET</think>', 'reasoning'], ['x'.repeat(111), 'length'],
   ]) {
     raw = value;
     assert.equal((await run()).comment, '', value);
@@ -1401,7 +1346,7 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   assert.equal(diagnostics.counts.asr_error, 1);
   failure = 'generation'; await run();
   assert.equal(diagnostics.counts.generation_error, 1);
-  assert.ok(diagnostics.counts.output_discarded >= 10);
+  assert.equal(diagnostics.counts.output_discarded, 8);
   failure = ''; speech = 'Thank you for watching.';
   await infer(audio, 'en', now + 12000);
   await infer(new Float32Array(96000), 'en', now + 24000);
@@ -1411,9 +1356,10 @@ test('diagnostics categorize failed ASR, filters, parsing, safety and generation
   assert.doesNotMatch(diagnostics.summary(), /SECRET|brewed|Again|raw transcript|model prompt|1234567890/);
 });
 
-test('slow inference survives elapsed time and validates newer speech before publishing', async () => {
+test('slow inference releases a short reaction after recognizing a newer window', async () => {
   let time = 0, superseded = false;
-  let speech = 'I brewed some coffee today.', reply = 'Which beans did you choose?';
+  let speech = 'I brewed some coffee today.';
+  const reply = 'Nice!';
   const reasons = [];
   const pipeline = async task => {
     if (task === 'automatic-speech-recognition') return async () => {
@@ -1431,42 +1377,16 @@ test('slow inference survives elapsed time and validates newer speech before pub
   assert.equal((await infer(audio, 'en')).comment, reply, 'No age-only 18s/24s cutoff');
   infer = await make(); superseded = true;
   assert.equal((await infer(audio, 'en')).comment, '', 'Hold a response when newer speech is waiting');
-  superseded = false; speech = 'The coffee has a sweeter aroma now.';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'Still relevant after newer ASR');
-  infer = await make(); superseded = true;
-  await infer(audio, 'en');
-  superseded = false; speech = 'My cat likes chasing string.'; reply = 'Which toy does your cat prefer?';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'Discard old coffee response after topic shift');
-  assert.ok(reasons.includes('stale_topic'));
+  superseded = false; speech = 'My cat likes chasing string.';
+  assert.equal((await infer(audio, 'en')).comment, reply, 'No matching words required across speech windows');
+  assert.equal(reasons.filter(reason => reason === 'generation_attempt').length, 2);
   assert.ok(reasons.includes('awaiting_context'));
 });
 
-test('held replies must still address the latest topic when one of several earlier topics remains', async () => {
-  let speech = 'I brewed coffee while my cat chased a toy.';
-  let reply = 'Which toy does your cat prefer?', superseded = true, time = 0;
-  const reasons = [];
-  const generate = async () => [{ generated_text: reply }];
-  generate.tokenizer = { apply_chat_template: messages => messages };
-  const infer = await createInference(async task => task === 'automatic-speech-recognition'
-    ? async () => ({ text: speech }) : generate,
-  { backends: { onnx: { wasm: {} } } }, () => {}, {
-    clock: () => time, isSuperseded: () => superseded,
-    onDiagnostic: reason => reasons.push(reason),
-  });
-  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-  assert.equal((await infer(audio, 'en')).comment, '');
-  superseded = false; time = 12000;
-  speech = 'The coffee has a sweeter aroma now.';
-  reply = 'Which coffee beans did you choose?';
-  assert.equal((await infer(audio, 'en')).comment, reply, 'The held cat question cannot follow coffee-only speech');
-  assert.ok(reasons.includes('stale_topic'));
-  assert.ok(reasons.includes('output_discarded'));
-});
-
-test('held replies get one extra ASR validation for intervening topic shifts without extending expiry', async t => {
-  for (const outcome of ['relevant', 'changed_topic', 'expired']) {
+test('held replies wait at most two windows and respect expiry and language changes', async t => {
+  for (const outcome of ['different_speech', 'expired', 'language_changed']) {
     await t.test(outcome, async () => {
-      let speech = 'I brewed fresh coffee.', reply = 'Which beans did you choose?';
+      let speech = 'I brewed fresh coffee.', reply = 'I see!';
       let superseded = true, time = 0, asrCalls = 0, generations = 0;
       const reasons = [];
       const validating = Promise.withResolvers(), asrStarted = Promise.withResolvers();
@@ -1502,17 +1422,11 @@ test('held replies get one extra ASR validation for intervening topic shifts wit
 
       superseded = true;
       time = outcome === 'expired' ? 90001 : 50000;
-      if (outcome === 'changed_topic') {
-        speech = 'My cat likes chasing string.';
-        reply = 'Which toy does your cat prefer?';
-      }
-      assert.equal((await infer(audio, 'en')).comment, outcome === 'relevant' ? reply : '',
-        'Bounded validation makes progress but never overrides a recognized topic shift or expiry');
-      if (outcome !== 'relevant') assert.ok(reasons.includes('stale_topic'));
-      if (outcome === 'changed_topic') {
-        superseded = false;
-        assert.equal((await infer(audio, 'en')).comment, reply, 'Only the new cat response survives validation');
-      }
+      speech = outcome === 'language_changed' ? '今日は猫と遊んでいます。' : 'My cat likes chasing string.';
+      const language = outcome === 'language_changed' ? 'ja' : 'en';
+      if (language === 'ja') reply = 'SKIP';
+      assert.equal((await infer(audio, language)).comment, outcome === 'different_speech' ? reply : '');
+      if (outcome !== 'different_speech') assert.ok(reasons.includes('stale_candidate'));
     });
   }
 });
@@ -1565,100 +1479,17 @@ test('continuous six-second audio windows do not starve replies when ASR exceeds
       assert.ok(accepted[0].time <= 51000, 'At most two validations after slow generation');
       assert.ok(accepted.slice(1).every((item, i) => item.time - accepted[i].time <= 51000));
       assert.equal(new Set(accepted.map(item => item.comment)).size, accepted.length);
-      assert.equal(reasons.filter(reason => reason === 'stale_topic').length, 0);
+      assert.equal(reasons.filter(reason => reason === 'stale_candidate').length, 0);
     });
   }
 });
 
-test('fresh and held replies resolve ordinary continuations against bounded recent context', async t => {
-  for (const fixture of [
-    { language: 'en', first: 'I switched to a ceramic coffee dripper.',
-      continuation: 'It was a little slower this time.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'It reminded me of my cat.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーに替えました。',
-      continuation: '今回は少し遅かった。', reply: '陶器のドリッパーで味は変わった?',
-      shift: '今回は猫が遊んでいます。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'It tastes much smoother now.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'It reminded me of my cat.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'それで味がまろやかになった。', reply: '陶器のドリッパーは使いやすい?',
-      shift: 'それより猫の話をします。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'That took longer than I expected.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'That is my cat playing with a toy.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'そのあと、もう一度試してみました。', reply: '陶器のドリッパーで味は変わった?',
-      shift: 'それはうちの猫のおもちゃです。' },
-    { language: 'en', first: 'I made coffee with a ceramic dripper.',
-      continuation: 'It fits my morning routine better.', reply: 'Do ceramic drippers change the flavor?',
-      shift: 'That is a cat playing with a toy.' },
-    { language: 'ja', first: '陶器のコーヒードリッパーで淹れました。',
-      continuation: 'それで私の淹れ方も変わりました。', reply: '陶器のドリッパーは使いやすい?',
-      shift: 'それは猫の話です。' },
-  ]) {
-    for (const mode of ['fresh', 'held', 'shift', 'expired', 'intervening_subject']) {
-      await t.test(`${fixture.language}: ${mode}`, async () => {
-        let speech = fixture.first, reply = mode === 'held' ? fixture.reply : 'SKIP';
-        let superseded = mode === 'held', time = 0;
-        const prompts = [], reasons = [];
-        const generate = async () => [{ generated_text: reply }];
-        generate.tokenizer = { apply_chat_template: messages => { prompts.push(messages); return messages; } };
-        const infer = await createInference(async task => task === 'automatic-speech-recognition'
-          ? async () => ({ text: speech }) : generate,
-        { backends: { onnx: { wasm: {} } } }, () => {}, {
-          clock: () => time, isSuperseded: () => superseded,
-          onDiagnostic: reason => reasons.push(reason),
-        });
-        const audio = new Float32Array(WINDOW_SAMPLES).fill(0.03);
-        assert.equal((await infer(audio, fixture.language)).comment, '');
-        if (mode === 'intervening_subject') {
-          time = 6000; speech = fixture.shift;
-          await infer(audio, fixture.language);
-        }
-        time = mode === 'expired' ? 30000 : 18000;
-        superseded = false;
-        speech = mode === 'shift' ? fixture.shift : fixture.continuation;
-        reply = fixture.reply;
-        assert.equal((await infer(audio, fixture.language)).comment,
-          ['fresh', 'held'].includes(mode) ? fixture.reply : '');
-        if (mode === 'fresh') {
-          const fields = JSON.parse(prompts.at(-1).at(-1).content);
-          assert.equal(fields[fixture.language === 'ja' ? '前の話' : 'earlier'], fixture.first);
-        }
-        if (mode === 'held') assert.equal(prompts.length, 1, 'Publish held reply without regenerating');
-        if (['shift', 'expired', 'intervening_subject'].includes(mode)) assert.ok(reasons.includes('topic'));
-      });
-    }
-  }
-});
-
-test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance from ASR grounding', async () => {
-  const { relatesToSpeech } = await import('../projects/ai-livestream/config.mjs');
-  for (const [name, accepted, grounded] of [
-    ['mlc-issue52-initial', 4, 3], ['mlc-issue52', 4, 3], ['mlc-stronger-issue52', 6, 4],
-  ]) {
+test('historical comparison fixtures retain timing data and the stronger model stays evaluation-only', async () => {
+  for (const name of ['mlc-issue52-initial', 'mlc-issue52', 'mlc-stronger-issue52']) {
     const report = JSON.parse(await readFile(new URL(`./fixtures/ai-livestream/comparison-${name}.json`, import.meta.url)));
     const model = report.modes[0];
     assert.equal(model.fixtures.length, 6);
-    let count = 0, cleanDetails = 0;
-    for (const sample of model.fixtures) {
-      const language = sample.file.startsWith('ja') ? 'ja' : 'en';
-      const inspected = inspectComment(sample.raw, [], language, sample.transcript);
-      const reason = !inspected.comment ? inspected.reason :
-        !relatesToSpeech(inspected.comment, sample.transcript, language) ? 'topic' :
-        echoesSpeech(inspected.comment, sample.transcript, language) ? 'echo' : 'accepted';
-      assert.equal(reason, sample.finalReason);
-      assert.equal(reason === 'accepted' ? inspected.comment : '', sample.finalComment);
-      if (sample.finalComment) {
-        count++;
-        // Narrow, explicit synthetic-fixture rubric, not a semantic safety claim.
-        if (!/5円|安い|買った|ボンド/u.test(sample.finalComment)) cleanDetails++;
-      }
-      assert.ok(sample.totalMs > 0 && sample.totalMs < 90000);
-    }
-    assert.equal(count, accepted);
-    assert.equal(cleanDetails, grounded);
+    for (const sample of model.fixtures) assert.ok(sample.totalMs > 0 && sample.totalMs < 90000);
   }
   assert.equal(LLM.id, 'mlc-ai/Qwen3-1.7B-q4f16_1-MLC', 'Stronger model is evaluation-only');
   assert.equal(isAssetRequest(new URL('https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_1-MLC/resolve/a5c9fab855e3ccbdfed2e7e69683d75f30332161/mlc-chat-config.json')), false);

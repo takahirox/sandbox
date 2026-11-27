@@ -5,8 +5,8 @@ import { ASR, LLM, TUNED_MODEL_ID } from './config.mjs';
 const events = new Set(`audio_windows vad_silence vad_busy audio_submitted audio_pending
   audio_received invalid_audio silence asr_attempt asr_error meaningless_speech
   transcription_accepted repeated_speech cadence generation_attempt generation_error
-  reasoning format language safety generic_or_visual length duplicate echo topic
-  no_lexical_overlap awaiting_context stale_topic output_discarded output_accepted worker_result
+  reasoning format safety visual length awaiting_context stale_candidate
+  output_discarded output_accepted worker_result
   ui_comment ui_discard engagement_tick`.split(/\s+/));
 export class Diagnostics {
   constructor(model = 'tuned') {

@@ -1,6 +1,6 @@
 import {
   ASR, LLM, WASM, messagesFor, meaningfulSpeech, inspectComment,
-  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech, asksForVisualObservation,
+  asksForVisualObservation,
   MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
 } from './config.mjs';
 import { speechInterest } from './audience.mjs';
@@ -29,13 +29,13 @@ export async function createInference(pipeline, env, progress, {
   const recent = [], context = [];
   const remember = comment => {
     recent.push(comment);
-    if (recent.length > 20) recent.shift();
+    if (recent.length > 3) recent.shift();
   };
   return async (audio, language, now = clock()) => {
     const finish = (reason, extra = {}) => {
       onDiagnostic(reason);
-      if (['reasoning', 'format', 'language', 'safety', 'generic_or_visual',
-        'length', 'duplicate', 'topic', 'echo'].includes(reason)) onDiagnostic('output_discarded');
+      if (['reasoning', 'format', 'safety', 'visual', 'length'].includes(reason))
+        onDiagnostic('output_discarded');
       return { comment: '', ...extra };
     };
     onDiagnostic('audio_received');
@@ -74,37 +74,19 @@ export async function createInference(pipeline, env, progress, {
     const interest = speechInterest(text, language, rms) * (repeated ? 0.5 : 1);
     onEngagement(interest);
     const previous = context.map(item => item.text).join(' ').slice(-400);
-    // Resolve reference-led continuations through contiguous, bounded context.
-    // An explicit new subject stops the chain, even if an older topic remains
-    // in the prompt. Never revive an expired subject through stored resolutions.
-    const groundingParts = [text];
-    if (isReferenceContinuation(text, language)) {
-      for (let i = context.length - 1; i >= 0; i--) {
-        groundingParts.unshift(context[i].text);
-        if (!isReferenceContinuation(context[i].text, language)) break;
-      }
-    }
-    const grounding = groundingParts.join(' ').slice(-400);
     if (!repeated) {
       context.push({ text, now });
       while (context.length > 3) context.shift();
     } else if (context.length) context.at(-1).now = now;
     lastSpeech = text;
 
-    // A newer voiced window arrived during inference. Validate the held reply
-    // against that recognition before publishing it; transcripts stay in this realm.
+    // Check the newer window before releasing a held reply. Wait at most one
+    // additional window so continuous capture cannot starve chat.
     if (candidate) {
       const held = candidate;
       candidate = null;
       if (held.language === language && clock() - held.started <= 90000 &&
-          !asksForVisualObservation(text) &&
-          sharesTopic(held.text, grounding, language) &&
-          relatesToSpeech(held.comment, grounding, language)) {
-        // Another window can arrive while the validating ASR call is pending.
-        // Allow one extra recognition to catch an intervening topic shift, then
-        // publish against the latest recognized context. Waiting for an empty
-        // queue starves continuous speech when ASR exceeds the capture interval.
-        // The original deadline still bounds the age of the candidate.
+          !asksForVisualObservation(text)) {
         if (isSuperseded() && ++held.validations < 2) {
           candidate = held;
           return finish('awaiting_context', { interest });
@@ -112,7 +94,7 @@ export async function createInference(pipeline, env, progress, {
         remember(held.comment);
         return finish('output_accepted', { comment: held.comment, interest, voice: held.voice });
       }
-      onDiagnostic('stale_topic');
+      onDiagnostic('stale_candidate');
       onDiagnostic('output_discarded');
     }
     if (repeated) return finish('repeated_speech', { interest });
@@ -139,15 +121,11 @@ export async function createInference(pipeline, env, progress, {
       return finish('generation_error', { interest });
     }
     onDiagnostic('generation_ms', Math.max(0, clock() - generationStarted));
-    const inspected = inspectComment(raw || '', recent, language, text);
+    const inspected = inspectComment(raw, text);
     if (!inspected.comment) return finish(inspected.reason, { interest });
     const comment = inspected.comment;
-    // Natural pronoun-based reactions need not copy the speaker's nouns.
-    if (!sharesTopic(comment, grounding, language)) onDiagnostic('no_lexical_overlap');
-    if (!relatesToSpeech(comment, grounding, language)) return finish('topic', { interest });
-    if (echoesSpeech(comment, grounding, language)) return finish('echo', { interest });
     if (isSuperseded()) {
-      candidate = { comment, text: grounding, language, started, voice: speaker, validations: 0 };
+      candidate = { comment, language, started, voice: speaker, validations: 0 };
       return finish('awaiting_context', { interest });
     }
     remember(comment);
