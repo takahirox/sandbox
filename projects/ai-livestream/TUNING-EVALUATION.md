@@ -57,10 +57,15 @@ the exact comment alongside its flags.
 
 ## Results on Apple M4 Max
 
+### Recorded timing and resource measurements
+
 The 2026-11-27 JST measurements used macOS 27.2.1, 64 GiB RAM and headless
 Chromium 153.0.8010.12 with Metal and `shader-f16`. The 1.7B baseline was
 rerun separately on the same host with the shipped prompt and the same
-fixtures and seed as the WBD runs.
+fixtures and seed as the WBD runs. The 1.7B measurements are from
+`0e4bc0377bb928ee9e0892389fea96efba847e00`. Both WBD measurements are from
+`902f87f8670446da64ff2ef7435892321c4434d0`. Window-to-visible medians use the
+comments shown during those runs.
 
 | Stack | Initial static assets | Cold load | Warm load | Peak browser RSS | Median generation, WAV / text | Median window-to-visible, WAV / text |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -82,14 +87,21 @@ Synthetic camera p95 frame gaps during jobs were 50 ms for 1.7B, 67 ms for
 tuned WBD and 50 ms for untuned WBD. The longest gaps were 67 ms, 67 ms and
 100 ms respectively. Treat these as individual synthetic-camera measurements.
 
+### Quality after replay through the current filters
+
+The scoring script replays the saved ASR transcripts and raw model replies
+through the current production inference pipeline. Both controls now withhold
+their replies to the visual-instruction fixture. The saved generations reflect
+the prompts and reply history of the original runs.
+
 | Set / stack | Shown | Relevant | Natural | Unsupported | Useful yield | Correct withholding | Questions among shown |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 10 WAVs / original 1.7B | 7/10 | 5 | 4 | 4 | 2/10 | — | 4/7 |
 | 10 WAVs / tuned WBD 0.6B | 8/10 | 5 | 4 | 4 | 2/10 | — | 1/8 |
 | 10 WAVs / WBD 0.6B without adapter | 7/10 | 6 | 2 | 1 | 2/10 | — | 4/7 |
-| 26 transcript turns / original 1.7B | 13/26 | 10 | 8 | 2 | 5/19 | 5/7 | 8/13 |
+| 26 transcript turns / original 1.7B | 12/26 | 10 | 7 | 1 | 5/19 | 6/7 | 7/12 |
 | 26 transcript turns / tuned WBD 0.6B | 16/26 | 13 | 5 | 6 | 4/19 | 7/7 | 0/16 |
-| 26 transcript turns / WBD 0.6B without adapter | 15/26 | 8 | 3 | 6 | 0/19 | 4/7 | 8/15 |
+| 26 transcript turns / WBD 0.6B without adapter | 14/26 | 8 | 2 | 6 | 0/19 | 5/7 | 7/14 |
 
 | Japanese useful yield | Original 1.7B | Tuned WBD 0.6B | WBD 0.6B without adapter |
 | --- | ---: | ---: | ---: |
@@ -144,10 +156,12 @@ LOCAL_AI_SMOKE=1 node --test tests/ai-livestream-model.test.mjs
 The scorer defaults to `tuning-benchmark.json` and `tuning-ratings.json` in
 `tests/fixtures/ai-livestream/`. It accepts alternate report and rating paths.
 Pass `baseline` in place of `all` to rerun just the 1.7B stack. Re-rate any
-changed output before scoring it. The normal suite replays
-the saved outputs through production gates without model downloads. The
-benchmark and smoke test verify static asset traffic. wllama also sends
-HEAD checks for the two pinned model shards.
+changed visible replies before scoring them. The scorer reports the original
+timings alongside quality after replay, which runs without model downloads.
+The normal suite checks those replay results and exercises direct visual
+requests and grounded follow-up questions in both languages and model routes.
+The benchmark and smoke test verify static asset traffic. wllama also sends HEAD
+checks for the two pinned model shards.
 
 This is a small synthetic sample with one seed and one desktop browser. The
 initial download is 31% smaller than the 1.7B baseline and larger than the

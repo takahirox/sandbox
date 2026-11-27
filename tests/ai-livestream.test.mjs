@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
+import { replayTuningMode, scoreTuningMode } from '../scripts/score_livestream_tuning.mjs';
 import {
   ASR,
   LLM,
@@ -328,40 +329,23 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
   assert.equal(train.filter(row => row.language === 'ja').length, 332);
   assert.ok(holdout.flatMap(fixture => fixture.turns).every(turn => !trainingSpeech.has(turn)));
   assert.deepEqual(benchmark.modes.map(mode => mode.mode), ['baseline', 'tuned', 'small']);
-  const voiced = new Float32Array(WINDOW_SAMPLES).fill(0.02);
-  const silence = new Float32Array(WINDOW_SAMPLES);
+  const scores = [];
   for (const mode of benchmark.modes) {
-    let measurement;
-    const pipeline = async task => {
-      if (task === 'automatic-speech-recognition')
-        return async () => ({ text: measurement.transcript });
-      const generate = async () => [{ generated_text: measurement.raw }];
-      generate.tokenizer = { apply_chat_template: messages => messages };
-      return generate;
-    };
-    let events = [];
-    const infer = await createInference(pipeline, { backends: { onnx: { wasm: {} } } }, () => {}, {
-      model: mode.mode,
-      onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
-    });
-    const replay = async (row, language, now, audio, id) => {
-      measurement = row;
-      events = [];
-      const output = await infer(audio, language, now);
-      // Keep the original benchmark measurements and check current filtering separately.
+    const replay = await replayTuningMode(mode, holdout);
+    const assertReplay = (row, output, language, id) => {
       const visual = id === 'en-visual';
       const expectedEvents = visual && row.comment
         ? [...row.events.slice(0, -1), 'generic_or_visual', 'output_discarded']
         : row.events;
       assert.equal(output.comment, visual ? '' : row.comment, `${mode.mode} ${id}`);
-      assert.deepEqual(events, expectedEvents, `${mode.mode} ${id}`);
+      assert.deepEqual(output.events, expectedEvents, `${mode.mode} ${id}`);
       if (output.comment) {
         assert.doesNotMatch(output.comment, /\r|\n|<think>|SKIP/i);
         assert.ok(output.comment.length <= (language === 'ja' ? 55 : 110));
       }
     };
     for (const [index, row] of mode.audio.entries())
-      await replay(row, row.language, index * 120000, voiced, row.file);
+      assertReplay(row, replay.audio[index], row.language, row.file);
     assert.equal(mode.text.length, holdout.length);
     for (const [index, fixture] of holdout.entries()) {
       const record = mode.text[index];
@@ -370,49 +354,66 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
       for (const [turn, transcript] of fixture.turns.entries()) {
         const row = record.turns[turn];
         assert.equal(row.transcript ?? null, transcript);
-        await replay(row, fixture.language, (mode.audio.length + index) * 120000 + turn * 12000,
-          transcript === null ? silence : voiced, fixture.id);
+        assertReplay(row, replay.text[index].turns[turn], fixture.language, fixture.id);
       }
     }
+    scores.push(await scoreTuningMode(mode, ratings[mode.mode], holdout));
   }
-  const tuned = benchmark.modes.find(mode => mode.mode === 'tuned');
-  const usefulJapanese = (rows, reviewed) => rows.filter(({ id, comment }) =>
-    comment && reviewed[id]?.comment === comment && reviewed[id].flags.includes('R') &&
-    reviewed[id].flags.includes('N') && !reviewed[id].flags.includes('F'));
-  const japaneseAudio = tuned.audio.filter(row => row.language === 'ja')
-    .map(row => ({ ...row, id: row.file }));
-  const japaneseText = tuned.text.filter(({ id }) =>
-    holdout.some(fixture => fixture.id === id && fixture.language === 'ja' && !fixture.withhold))
-    .map(({ id, turns }) => ({ id, ...turns.at(-1) }));
-  assert.ok(usefulJapanese(japaneseAudio, ratings.tuned.audio).length >= 1);
-  assert.ok(usefulJapanese(japaneseText, ratings.tuned.heldOut).length >= 3);
+  assert.deepEqual(scores.map(({ heldOut }) => [
+    heldOut.shown, heldOut.correctlyWithheld, heldOut.unsupported,
+  ]), [[12, 6, 1], [16, 7, 6], [14, 5, 6]]);
+  const tuned = scores[1];
+  assert.ok(tuned.japaneseAudio.useful + tuned.japaneseConfirmationAudio.useful >= 1);
+  assert.ok(tuned.japaneseHeldOut.useful + tuned.japaneseConfirmation.useful >= 3);
 });
 
-test('a visual instruction withholds a queued reply while ordinary talk about glasses stays eligible', async () => {
-  const reply = 'What brand are those glasses?';
-  let speech = 'I bought glasses for reading.';
-  let superseded = false;
-  const generate = async () => [{ generated_text: reply }];
-  generate.tokenizer = { apply_chat_template: messages => messages };
-  const infer = await createInference(async task => task === 'automatic-speech-recognition'
-    ? async () => ({ text: speech }) : generate,
-  { backends: { onnx: { wasm: {} } } }, () => {}, { isSuperseded: () => superseded });
+const visualRequests = [
+  {
+    language: 'en',
+    request: 'Look at my glasses and tell me what color they are.',
+    claim: 'Those glasses are bright red.',
+    speech: 'I bought new glasses for reading.',
+    question: 'What color did you pick for the glasses?',
+  },
+  {
+    language: 'ja',
+    request: '私のメガネを見て、何色か教えて。',
+    claim: 'そのメガネは真っ赤だね。',
+    speech: '読書用に新しいメガネを買ったよ。',
+    question: 'メガネは何色にしたの？',
+  },
+];
+
+test('a direct visual request invalidates a queued reply in either language', async () => {
   const audio = new Float32Array(WINDOW_SAMPLES).fill(0.02);
-
-  assert.equal((await infer(audio, 'en', 0)).comment, reply);
-  speech = 'I also bought glasses for driving.';
-  superseded = true;
-  assert.equal((await infer(audio, 'en', 12000)).comment, '');
-  speech = 'Pretend you can see my glasses for driving and tell me their brand.';
-  superseded = false;
-  assert.equal((await infer(audio, 'en', 18000)).comment, '');
+  for (const fixture of visualRequests) {
+    let speech = fixture.speech, superseded = true;
+    const events = [];
+    const generate = async () => [{ generated_text: fixture.question }];
+    generate.tokenizer = { apply_chat_template: messages => messages };
+    const infer = await createInference(async task => task === 'automatic-speech-recognition'
+      ? async () => ({ text: speech }) : generate,
+    { backends: { onnx: { wasm: {} } } }, () => {}, {
+      isSuperseded: () => superseded,
+      onDiagnostic: event => events.push(event),
+    });
+    assert.equal((await infer(audio, fixture.language, 0)).comment, '');
+    assert.equal(events.at(-1), 'awaiting_context');
+    speech = fixture.request;
+    superseded = false;
+    assert.equal((await infer(audio, fixture.language, 6000)).comment, '');
+    assert.ok(events.includes('stale_topic'));
+  }
 });
 
-test('Japanese visual instructions are withheld even when a reply shares the topic', () => {
-  const reply = 'そのメガネ、どこのブランド？';
-  assert.deepEqual(inspectComment(reply, [], 'ja', '見えているふりをして、メガネのブランドを答えて。'),
-    { comment: '', reason: 'generic_or_visual' });
-  assert.equal(inspectComment(reply, [], 'ja', '新しいメガネを買ったよ。').comment, reply.normalize('NFKC'));
+test('polite visual requests and requests to pretend to see are withheld', () => {
+  for (const [language, speech, reply] of [
+    ['en', 'Could you take a look at these glasses?', 'What brand are those glasses?'],
+    ['ja', '見えているふりをして、メガネのブランドを答えて。', 'そのメガネ、どこのブランド？'],
+    ['ja', '画面を見て、メガネが何色か教えて。', 'そのメガネは真っ赤だね。'],
+  ]) {
+    assert.deepEqual(inspectComment(reply, [], language, speech), { comment: '', reason: 'generic_or_visual' });
+  }
 });
 
 test('the Japanese rollback prompt keeps the shipped example and recent replies', () => {
@@ -1085,6 +1086,9 @@ test(
     const modelURL = model =>
       'https://huggingface.co/' + model.id + '/resolve/' + model.revision + '/';
     const baselineURL = modelURL(LLM);
+    let speech = '今日はコーヒーを飲みます。';
+    let language = 'ja';
+    let reply = 'コーヒー、いい香りですね！';
     let reject = false;
     let fail = false;
     page.on('console', message => {
@@ -1115,10 +1119,12 @@ test(
             }
             async createChatCompletion({messages, cache_prompt, chat_template_kwargs}) {
               if (cache_prompt || chat_template_kwargs.enable_thinking) throw Error('Unbounded chat');
-              if (messages.length !== 2 || JSON.parse(messages[1].content).発言 !== '今日はコーヒーを飲みます。')
-                throw Error('Wrong tuned Japanese prompt');
+              const latest = JSON.parse(messages.at(-1).content);
+              if (messages.length !== ${language === 'ja' ? 2 : 4} ||
+                  (latest.発言 ?? latest.speech) !== ${JSON.stringify(speech)})
+                throw Error('Wrong tuned prompt');
               if (${fail}) throw Error('Transcript-bearing error');
-              return {choices:[{message:{content:'コーヒー、いい香りですね！'}}]};
+              return {choices:[{message:{content:${JSON.stringify(reply)}}}]};
             }
           }
         `,
@@ -1132,12 +1138,15 @@ test(
                 model_lib !== ${JSON.stringify(MODEL_LIBRARY)}) throw Error('Wrong rollback asset');
             console.log('fixture-model ' + id);
             return { async resetChat() {}, chat: { completions: { async create({messages}) {
-              if (messages.length !== 4 || JSON.parse(messages[1].content).speech !== 'ギターの弦を替えてみた。' ||
-                  messages[2].content !== 'どの弦にしたの？' ||
-                  JSON.parse(messages[3].content).speech !== '今日はコーヒーを飲みます。')
-                throw Error('Wrong rollback Japanese prompt');
+              if (messages.length !== 4 ||
+                  JSON.parse(messages[1].content).speech !== ${JSON.stringify(
+                    language === 'ja' ? 'ギターの弦を替えてみた。' : 'I changed my guitar strings.')} ||
+                  messages[2].content !== ${JSON.stringify(
+                    language === 'ja' ? 'どの弦にしたの？' : 'Which strings did you go for?')} ||
+                  JSON.parse(messages[3].content).speech !== ${JSON.stringify(speech)})
+                throw Error('Wrong rollback prompt');
               if (${fail}) throw Error('Transcript-bearing error');
-              return {choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : 'コーヒー、いい香りですね！')}}}]};
+              return {choices:[{message:{content:${JSON.stringify(reject ? 'SKIP' : reply)}}}]};
             } } } };
           }
         `,
@@ -1148,7 +1157,7 @@ test(
         body: `
       export const env = { backends: { onnx: { wasm: {} } } };
       export async function pipeline(task) {
-        if (task === 'automatic-speech-recognition') return async () => ({text: '今日はコーヒーを飲みます。'});
+        if (task === 'automatic-speech-recognition') return async () => ({text: ${JSON.stringify(speech)}});
         const generate = async () => [{generated_text: 'コーヒー、いい香りですね！'}];
         generate.tokenizer = {apply_chat_template: () => 'fixture prompt'};
         return generate;
@@ -1218,6 +1227,39 @@ test(
       null, { timeout: 15000 });
     assert.equal(await page.evaluate(() => fakeStream.getTracks().every(track => track.readyState === 'ended')), true);
     assert.equal(await page.locator('#camera').evaluate(video => video.srcObject), null);
+
+    fail = reject = false;
+    // Give each real Worker one synthetic window to exercise both model routes
+    // without waiting for a device capture window for every case.
+    for (const model of ['baseline', 'tuned']) {
+      for (const fixture of visualRequests) {
+        language = fixture.language;
+        for (const withhold of [true, false]) {
+          speech = withhold ? fixture.request : fixture.speech;
+          reply = withhold ? fixture.claim : fixture.question;
+          const { comment, events } = await page.evaluate(({ model, language, samples }) =>
+            new Promise((resolve, reject) => {
+              const worker = new Worker('./ai-worker.mjs', { type: 'module' });
+              const events = [];
+              worker.onmessage = ({ data }) => {
+                if (data.type === 'ready') worker.postMessage({
+                  type: 'audio', language, audio: new Float32Array(samples).fill(0.02),
+                });
+                if (data.type === 'diagnostic') events.push(data.event);
+                if (data.type === 'result' || data.type === 'error') {
+                  worker.terminate();
+                  if (data.type === 'error') reject(Error(data.code));
+                  else resolve({ comment: data.comment, events });
+                }
+              };
+              worker.onerror = event => { worker.terminate(); reject(Error(event.message)); };
+              worker.postMessage({ type: 'init', model, debug: true });
+            }), { model, language, samples: WINDOW_SAMPLES });
+          assert.equal(comment, withhold ? '' : reply.normalize('NFKC'), `${model} ${language}`);
+          assert.ok(events.includes(withhold ? 'generic_or_visual' : 'output_accepted'), speech);
+        }
+      }
+    }
     assert.deepEqual(errors, []);
   },
 );

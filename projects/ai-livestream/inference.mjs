@@ -1,6 +1,6 @@
 import {
   ASR, LLM, WASM, messagesFor, meaningfulSpeech, inspectComment,
-  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech, asksToPretendToSee,
+  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech, asksForVisualObservation,
   MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
 } from './config.mjs';
 import { speechInterest } from './audience.mjs';
@@ -97,7 +97,7 @@ export async function createInference(pipeline, env, progress, {
       const held = candidate;
       candidate = null;
       if (held.language === language && clock() - held.started <= 90000 &&
-          !asksToPretendToSee(text) &&
+          !asksForVisualObservation(text) &&
           sharesTopic(held.text, grounding, language) &&
           relatesToSpeech(held.comment, grounding, language)) {
         // Another window can arrive while the validating ASR call is pending.

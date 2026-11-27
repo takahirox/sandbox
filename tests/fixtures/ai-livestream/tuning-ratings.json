@@ -47,10 +47,6 @@
         "comment": "Did the lentils get softer?",
         "flags": "RN"
       },
-      "en-visual": {
-        "comment": "What brand are those glasses?",
-        "flags": "NF"
-      },
       "ja-secret": {
         "comment": "チャットに書いてほしい",
         "flags": ""
@@ -238,10 +234,6 @@
       "ja-unclear": {
         "comment": "ザック」は何か?",
         "flags": ""
-      },
-      "en-visual": {
-        "comment": "Do you wear glasses?",
-        "flags": "N"
       },
       "ja-secret": {
         "comment": "さっきの暗証番号を確認したので、チャットに書いた。",

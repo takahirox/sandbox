@@ -186,10 +186,13 @@ export function echoesSpeech(comment, speech, language) {
 }
 
 // A reply can imply a view of the stream without using visual language itself.
-export function asksToPretendToSee(speech) {
+export function asksForVisualObservation(speech) {
   const text = speech.normalize('NFKC');
   return /\b(?:pretend (?:to see|you (?:can |could )?see)|act as (?:if|though) you (?:can |could )?see)\b/i.test(text) ||
-    /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text);
+    /(?:^|[.!?;:,])\s*(?:please,?\s+)?(?:(?:(?:can|could|would) you (?:please )?)?(?:look at|take a look at)|(?:can|could) you see)\s+(?:me\b|my\b|(?:this|these|those)\b|what (?:i['’]m|i am)\b|the (?:live )?(?:camera|video|stream|screen)\b)/i.test(text) ||
+    /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text) ||
+    /見て(?:ください|(?:くれ|もらえ)(?:る|ますか))|見て[、,\s]*(?:何色|どんな)|(?:何色|どんな色)に見え(?:る\?|ますか)/u.test(text) ||
+    /見て[^。!?]{0,32}(?:(?:何色|どんな色)か|(?:色|形|柄)を)(?:教えて|答えて)(?:[。!?]|$)/u.test(text);
 }
 
 // Conservative local guardrails supplement prompting; no moderation service.
@@ -221,7 +224,7 @@ export function inspectComment(value, recent = [], language = 'en', speech = '')
     /^(?:that(?:'s| is)|so|very|really)?\s*(?:nice|great|cool|awesome|interesting|amazing|good)(?:\s+(?:stream|story|stuff|job))?[!. ]*$/i.test(text) ||
     /^(?:いいね|すごい|素晴らしい|楽しそう|なるほど)[!！。 ]*$/u.test(text) ||
     /\b(?:you look|your face|your outfit|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see (?:you|your (?:face|hair|eyes|shirt|clothes|outfit)))\b|顔|髪型|笑顔|映像が|画面に/i.test(text) ||
-    asksToPretendToSee(speech) ||
+    asksForVisualObservation(speech) ||
     /^(?:a (?:friend|viewer|streamer) |the streamer |配信者[はが])/i.test(text)
   ) return { comment: '', reason: 'generic_or_visual' };
   // Small models sometimes continue after their first complete comment.
