@@ -57,7 +57,7 @@ self.onmessage = async ({data}) => {
         return wrapped;
       };
       const start = performance.now();
-      infer = await createInference(measuredPipeline, env, () => {}, {random: () => 0});
+      infer = await createInference(measuredPipeline, env, () => {}, {random: () => 0, model: 'baseline'});
       self.postMessage({type:'ready', loadMs: performance.now()-start, assetBytes: Object.values(files).reduce((a,b)=>a+b,0), files});
     } else {
       transcript = ''; raw = ''; timings = {};

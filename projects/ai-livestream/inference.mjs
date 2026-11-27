@@ -1,6 +1,6 @@
 import {
   ASR, LLM, WASM, messagesFor, meaningfulSpeech, inspectComment,
-  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech,
+  sharesTopic, relatesToSpeech, isReferenceContinuation, echoesSpeech, asksToPretendToSee,
   MIN_COMMENT_INTERVAL, WINDOW_SAMPLES, VOICES,
 } from './config.mjs';
 import { speechInterest } from './audience.mjs';
@@ -97,6 +97,7 @@ export async function createInference(pipeline, env, progress, {
       const held = candidate;
       candidate = null;
       if (held.language === language && clock() - held.started <= 90000 &&
+          !asksToPretendToSee(text) &&
           sharesTopic(held.text, grounding, language) &&
           relatesToSpeech(held.comment, grounding, language)) {
         // Another window can arrive while the validating ASR call is pending.
@@ -138,7 +139,7 @@ export async function createInference(pipeline, env, progress, {
       return finish('generation_error', { interest });
     }
     onDiagnostic('generation_ms', Math.max(0, clock() - generationStarted));
-    const inspected = inspectComment(raw || '', recent, language);
+    const inspected = inspectComment(raw || '', recent, language, text);
     if (!inspected.comment) return finish(inspected.reason, { interest });
     const comment = inspected.comment;
     // Natural pronoun-based reactions need not copy the speaker's nouns.

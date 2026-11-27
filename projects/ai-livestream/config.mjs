@@ -185,8 +185,15 @@ export function echoesSpeech(comment, speech, language) {
     (language === 'ja' && overlap >= 0.6 && /ことだけ|による|からだ/u.test(comment)));
 }
 
+// A reply can imply a view of the stream without using visual language itself.
+export function asksToPretendToSee(speech) {
+  const text = speech.normalize('NFKC');
+  return /\b(?:pretend (?:to see|you (?:can |could )?see)|act as (?:if|though) you (?:can |could )?see)\b/i.test(text) ||
+    /(?:見える|見えた|見(?:え)?てい?る)(?:ふり|フリ)を?して/u.test(text);
+}
+
 // Conservative local guardrails supplement prompting; no moderation service.
-export function inspectComment(value, recent = [], language = 'en') {
+export function inspectComment(value, recent = [], language = 'en', speech = '') {
   if (/<think>(?!\s*<\/think>)/i.test(String(value))) return { comment: '', reason: 'reasoning' };
   let text = String(value)
     .normalize('NFKC')
@@ -214,6 +221,7 @@ export function inspectComment(value, recent = [], language = 'en') {
     /^(?:that(?:'s| is)|so|very|really)?\s*(?:nice|great|cool|awesome|interesting|amazing|good)(?:\s+(?:stream|story|stuff|job))?[!. ]*$/i.test(text) ||
     /^(?:いいね|すごい|素晴らしい|楽しそう|なるほど)[!！。 ]*$/u.test(text) ||
     /\b(?:you look|your face|your outfit|(?:you|the streamer) (?:are |is |was |were )?smil(?:ing|ed)|I (?:can )?see (?:you|your (?:face|hair|eyes|shirt|clothes|outfit)))\b|顔|髪型|笑顔|映像が|画面に/i.test(text) ||
+    asksToPretendToSee(speech) ||
     /^(?:a (?:friend|viewer|streamer) |the streamer |配信者[はが])/i.test(text)
   ) return { comment: '', reason: 'generic_or_visual' };
   // Small models sometimes continue after their first complete comment.

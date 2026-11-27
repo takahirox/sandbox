@@ -14,6 +14,7 @@ import {
   isAssetRequest,
   modelChoice,
   cleanComment,
+  inspectComment,
   sharesTopic,
   echoesSpeech,
   messagesFor,
@@ -343,19 +344,24 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
       model: mode.mode,
       onDiagnostic: (event, value) => { if (value === undefined) events.push(event); },
     });
-    const replay = async (row, language, now, audio) => {
+    const replay = async (row, language, now, audio, id) => {
       measurement = row;
       events = [];
       const output = await infer(audio, language, now);
-      assert.equal(output.comment, row.comment, mode.mode);
-      assert.deepEqual(events, row.events, mode.mode);
+      // Keep the original benchmark measurements and check current filtering separately.
+      const visual = id === 'en-visual';
+      const expectedEvents = visual && row.comment
+        ? [...row.events.slice(0, -1), 'generic_or_visual', 'output_discarded']
+        : row.events;
+      assert.equal(output.comment, visual ? '' : row.comment, `${mode.mode} ${id}`);
+      assert.deepEqual(events, expectedEvents, `${mode.mode} ${id}`);
       if (output.comment) {
         assert.doesNotMatch(output.comment, /\r|\n|<think>|SKIP/i);
         assert.ok(output.comment.length <= (language === 'ja' ? 55 : 110));
       }
     };
     for (const [index, row] of mode.audio.entries())
-      await replay(row, row.language, index * 120000, voiced);
+      await replay(row, row.language, index * 120000, voiced, row.file);
     assert.equal(mode.text.length, holdout.length);
     for (const [index, fixture] of holdout.entries()) {
       const record = mode.text[index];
@@ -365,7 +371,7 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
         const row = record.turns[turn];
         assert.equal(row.transcript ?? null, transcript);
         await replay(row, fixture.language, (mode.audio.length + index) * 120000 + turn * 12000,
-          transcript === null ? silence : voiced);
+          transcript === null ? silence : voiced, fixture.id);
       }
     }
   }
@@ -382,6 +388,33 @@ test('recorded baseline and tuned outputs replay the same guards on held-out spe
   assert.ok(usefulJapanese(japaneseText, ratings.tuned.heldOut).length >= 3);
 });
 
+test('a visual instruction withholds a queued reply while ordinary talk about glasses stays eligible', async () => {
+  const reply = 'What brand are those glasses?';
+  let speech = 'I bought glasses for reading.';
+  let superseded = false;
+  const generate = async () => [{ generated_text: reply }];
+  generate.tokenizer = { apply_chat_template: messages => messages };
+  const infer = await createInference(async task => task === 'automatic-speech-recognition'
+    ? async () => ({ text: speech }) : generate,
+  { backends: { onnx: { wasm: {} } } }, () => {}, { isSuperseded: () => superseded });
+  const audio = new Float32Array(WINDOW_SAMPLES).fill(0.02);
+
+  assert.equal((await infer(audio, 'en', 0)).comment, reply);
+  speech = 'I also bought glasses for driving.';
+  superseded = true;
+  assert.equal((await infer(audio, 'en', 12000)).comment, '');
+  speech = 'Pretend you can see my glasses for driving and tell me their brand.';
+  superseded = false;
+  assert.equal((await infer(audio, 'en', 18000)).comment, '');
+});
+
+test('Japanese visual instructions are withheld even when a reply shares the topic', () => {
+  const reply = 'そのメガネ、どこのブランド？';
+  assert.deepEqual(inspectComment(reply, [], 'ja', '見えているふりをして、メガネのブランドを答えて。'),
+    { comment: '', reason: 'generic_or_visual' });
+  assert.equal(inspectComment(reply, [], 'ja', '新しいメガネを買ったよ。').comment, reply.normalize('NFKC'));
+});
+
 test('the Japanese rollback prompt keeps the shipped example and recent replies', () => {
   const speech = 'コーヒーの香りが好きです。';
   const context = '豆を挽きました。';
@@ -396,6 +429,53 @@ test('the Japanese rollback prompt keeps the shipped example and recent replies'
   const tuned = messagesFor(speech, 'ja', { ...options, model: 'tuned' });
   assert.deepEqual(tuned, messagesFor(speech, 'ja', { ...options, model: 'small' }));
   assert.deepEqual(JSON.parse(tuned[1].content), { 前の話: context, 発言: speech });
+});
+
+test('the Issue #52 benchmark uses the shipped Japanese prompt for both MLC models', { timeout: 15000 }, async t => {
+  const server = await previewServer(new URL('..', import.meta.url).pathname);
+  t.after(() => server.close());
+  const browser = await chromium.launch();
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+  await page.route(RUNTIME, route => route.fulfill({
+    contentType: 'text/javascript',
+    body: `
+      export const env = { backends: { onnx: { wasm: {} } } };
+      export async function pipeline() {
+        return async () => ({text: '今日はコーヒーを飲みます。'});
+      }
+    `,
+  }));
+  await page.route(CHAT_RUNTIME, route => route.fulfill({
+    contentType: 'text/javascript',
+    body: `
+      export async function CreateMLCEngine(id) {
+        return { async resetChat() {}, chat: { completions: { async create({messages}) {
+          return {choices: [{message: {content: JSON.stringify({id, messages})}}]};
+        } } } };
+      }
+    `,
+  }));
+  await page.goto(server.origin + '/sandbox/projects/ai-livestream/');
+  for (const [mlcStronger, size] of [[false, '1.7B'], [true, '4B']]) {
+    const raw = await page.evaluate(mlcStronger => new Promise((resolve, reject) => {
+      const worker = new Worker('/sandbox/tests/fixtures/ai-livestream/compare-worker.mjs', { type: 'module' });
+      worker.onerror = error => { worker.terminate(); reject(Error(error.message)); };
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'ready') {
+          worker.postMessage({ type: 'audio', audio: new Float32Array(96000).fill(0.02), language: 'ja', now: 0 });
+          return;
+        }
+        worker.terminate();
+        if (data.type === 'error') reject(Error(data.message));
+        else resolve(data.raw);
+      };
+      worker.postMessage({ type: 'init', mlc: true, mlcStronger });
+    }), mlcStronger);
+    const { id, messages } = JSON.parse(raw);
+    assert.equal(id, `Qwen3-${size}-q4f16_1-MLC`);
+    assert.deepEqual(messages, messagesFor('今日はコーヒーを飲みます。', 'ja', { model: 'baseline' }));
+  }
 });
 
 test('the text engine is local, pinned, bounded and resets its conversation between replies', async () => {
@@ -1449,7 +1529,7 @@ test('fresh and held replies resolve ordinary continuations against bounded rece
 });
 
 test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance from ASR grounding', async () => {
-  const { inspectComment, relatesToSpeech } = await import('../projects/ai-livestream/config.mjs');
+  const { relatesToSpeech } = await import('../projects/ai-livestream/config.mjs');
   for (const [name, accepted, grounded] of [
     ['mlc-issue52-initial', 4, 3], ['mlc-issue52', 4, 3], ['mlc-stronger-issue52', 6, 4],
   ]) {
@@ -1459,7 +1539,7 @@ test('fresh 1.7B/4B evidence replays final filters and distinguishes acceptance 
     let count = 0, cleanDetails = 0;
     for (const sample of model.fixtures) {
       const language = sample.file.startsWith('ja') ? 'ja' : 'en';
-      const inspected = inspectComment(sample.raw, [], language);
+      const inspected = inspectComment(sample.raw, [], language, sample.transcript);
       const reason = !inspected.comment ? inspected.reason :
         !relatesToSpeech(inspected.comment, sample.transcript, language) ? 'topic' :
         echoesSpeech(inspected.comment, sample.transcript, language) ? 'echo' : 'accepted';

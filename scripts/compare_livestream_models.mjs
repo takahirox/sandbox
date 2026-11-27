@@ -78,7 +78,7 @@ try {
         await page.waitForFunction(n=>evaluation.results.length===n||evaluation.error,index+1,{timeout:90000});
         const error=await page.evaluate(()=>evaluation.error);if(error)throw Error(error);
         const result=await page.evaluate(i=>evaluation.results[i],index);
-        const inspected = inspectComment(result.raw || '', [], fixture.language);
+        const inspected = inspectComment(result.raw || '', [], fixture.language, result.transcript);
         const finalReason = !inspected.comment ? inspected.reason :
           !relatesToSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'topic' :
           echoesSpeech(inspected.comment, result.transcript || '', fixture.language) ? 'echo' : 'accepted';
