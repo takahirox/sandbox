@@ -109,9 +109,11 @@ has a 90-second limit. A slow connection can require another attempt.
 ## Utterance endpointing
 
 The AudioWorklet uses 20 ms frames, DC-corrected energy and adjacent-sample
-differences to reject broadband noise. Rejected frames and frames with
-noise-like sample variation update the noise floor. This lets steady filtered
-noise raise the thresholds even when it initially passes the voice gate.
+differences to reject broadband noise. To learn smoother background noise, it
+checks frames that pass the energy and smoothness gates for repetition in the
+80–400 Hz pitch range. Frames without a normalized correlation of at least 0.6
+can raise the noise floor. The floor rises more slowly during speech for these
+smooth frames to limit the effect of syllables without a clear pitch.
 
 Onset requires three consecutive voiced frames (60 ms) above roughly 2.5 times
 the noise RMS, with a minimum RMS of 0.003 in normalized PCM. During speech the
@@ -152,11 +154,17 @@ node tests/fixtures/ai-livestream/capture.mjs --compare
 | Continuous voice at 0.40–15.40 | 0–6 at 6 (+0), 6–12 at 12 (+0), 12–18 at 18 (+2.60) | 0.20–6.20 at 6.20 (+0), 6.04–12.04 at 12.04 (+0), 11.88–15.56 at 16 (+0.60) | 3 / 18 s → 3 / 15.68 s |
 | Seeded broadband noise at 0–6.40 | 0–6 at 6 | No submission | 1 / 6 s → 0 / 0 s |
 
+The audio tests also replay 20 seconds of steady filtered noise at RMS 0.006
+with two filter strengths. Noise alone submits no PCM. When the stronger
+filtered noise starts during speech, the submission delay falls from 5.4 s
+with the previous detector to 760 ms. The quiet-speech fixture reaches
+recognition in under two seconds.
+
 Across these patterns, the idle Worker would run ASR seven times before the
 change and eight times after it. Delivered PCM fell from 42 s to 22 s. On an
-arm64 Mac (Mac16,5, Node 24.22.3), a capture-only pass over 5,040 s of replayed 16 kHz input
-took 698 ms of process CPU time (687 ms wall time) for fixed windows and 326 ms
-(312 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
+arm64 Mac (Mac16,5, Node 26.12.1), a capture-only pass over 5,040 s of replayed 16 kHz input
+took 727 ms of process CPU time (712 ms wall time) for fixed windows and 354 ms
+(339 ms wall time) for endpointing. The worklet keeps about 391 KiB in fixed
 PCM buffers. The transfer, pending slot and active job each hold at most 375 KiB
 of PCM, excluding model and browser internals.
 

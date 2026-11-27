@@ -107,38 +107,37 @@ test('the noise estimate follows the room while quiet speech above it can still 
   assert.deepEqual(segments.map(bounds), [[1.8, 2.46, 2.904]]);
 });
 
-test('steady filtered noise stays quiet and does not mask utterance endpoints', () => {
-  const duration = 20;
-  const noise = synthesize(SAMPLE_RATE, duration, [], 1);
-  let filtered = 0, energy = 0;
-  for (let i = 0; i < noise.length; i++) {
-    filtered = 0.6 * filtered + 0.4 * noise[i];
-    noise[i] = filtered;
-    energy += filtered * filtered;
-  }
-  const scale = 0.006 / Math.sqrt(energy / noise.length);
-  const speech = synthesize(SAMPLE_RATE, duration, [[2, 2.4, 0.025], [11, 11.4, 0.025]]);
-  const withLateNoise = speech.slice();
-  for (let i = 0; i < noise.length; i++) {
-    noise[i] *= scale;
-    speech[i] += noise[i];
-  }
+for (const smoothing of [0.6, 0.9]) {
+  test(`steady filtered noise (smoothing ${smoothing}) stays quiet and does not mask utterance endpoints`, () => {
+    const duration = 20;
+    const noise = synthesize(SAMPLE_RATE, duration, [], 1);
+    let filtered = 0, energy = 0;
+    for (let i = 0; i < noise.length; i++) {
+      filtered = smoothing * filtered + (1 - smoothing) * noise[i];
+      noise[i] = filtered;
+      energy += filtered * filtered;
+    }
+    const scale = 0.006 / Math.sqrt(energy / noise.length);
+    const speech = synthesize(SAMPLE_RATE, duration, [[2, 2.4, 0.025], [11, 11.4, 0.025]]);
+    const withLateNoise = speech.slice();
+    for (let i = 0; i < noise.length; i++) {
+      noise[i] *= scale;
+      speech[i] += noise[i];
+    }
 
-  assert.deepEqual({
-    noiseOnly: recordPcm(SAMPLE_RATE, noise).map(bounds),
-    withSpeech: recordPcm(SAMPLE_RATE, speech).map(bounds),
-  }, {
-    noiseOnly: [],
-    withSpeech: [[1.8, 2.56, 3], [10.8, 11.56, 12]],
+    assert.deepEqual(recordPcm(SAMPLE_RATE, noise).map(bounds), [], 'Noise alone never submits');
+    assert.deepEqual(recordPcm(SAMPLE_RATE, speech).map(bounds), [[1.8, 2.56, 3], [10.8, 11.56, 12]]);
+
+    // Speech ends at 2.4 s. Allow up to 200 ms of noise adaptation on top of
+    // the 600 ms endpoint pause, and verify that the next utterance can start.
+    const lateNoiseStart = 2.2 * SAMPLE_RATE;
+    withLateNoise.set(speech.subarray(lateNoiseStart), lateNoiseStart);
+    const [first, ...remaining] = recordPcm(SAMPLE_RATE, withLateNoise);
+    assert.deepEqual(remaining.map(bounds), [[10.8, 11.56, 12]]);
+    assert.equal(roundSeconds(first.start), 1.8);
+    assert.ok(first.submitted >= 3 && first.submitted < 3.2);
   });
-
-  // A new background sound during an active utterance must also let it close.
-  const lateNoiseStart = 2.2 * SAMPLE_RATE;
-  withLateNoise.set(speech.subarray(lateNoiseStart), lateNoiseStart);
-  const lateNoiseSegments = recordPcm(SAMPLE_RATE, withLateNoise);
-  assert.equal(lateNoiseSegments.length, 2);
-  assert.ok(lateNoiseSegments[0].submitted >= 3 && lateNoiseSegments[0].submitted < 3.2);
-});
+}
 
 test('a stalled UI holds only one transferred segment and capture resumes on acknowledgement', () => {
   const messages = [];
