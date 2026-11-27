@@ -52,7 +52,10 @@ jobs:
         working-directory: workers/persistent-counter
         run: npm run test:browser
       - name: Test screenshot gallery, static games, and local livestream
-        run: node --test tests/gallery.test.mjs tests/walk-to-hospital.test.mjs tests/learn-the-clock.test.mjs tests/ai-livestream.test.mjs
+        run: >-
+          node --test tests/gallery.test.mjs tests/walk-to-hospital.test.mjs
+          tests/learn-the-clock.test.mjs tests/kids-ai-quiz.test.mjs
+          tests/kids-ai-quiz-browser.test.mjs tests/ai-livestream.test.mjs
       - name: Provision D1 and discover Worker URL
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         working-directory: workers/persistent-counter
