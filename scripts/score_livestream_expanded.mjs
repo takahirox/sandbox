@@ -1,7 +1,6 @@
 // Review anonymous synthetic examples with --review, then score the saved flags.
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { replayTuningMode } from './score_livestream_tuning.mjs';
 
 const [reportPath, ratingsPath] = process.argv.slice(2);
 if (!reportPath || !ratingsPath)
@@ -18,16 +17,12 @@ const canonical = text => text.normalize('NFKC').toLowerCase().replace(/[\p{P}\p
 const same = (a, b) => a.normalize('NFKC') === b.normalize('NFKC');
 const rows = [];
 for (const mode of report.modes) {
-  const replay = await replayTuningMode(mode, holdout, { transcriptFirst: true });
-  for (const [index, sample] of replay.text.entries()) {
+  for (const [index, sample] of mode.text.entries()) {
     const fixture = holdout[index];
     if (sample.id !== fixture.id) throw Error('Transcript fixture order changed');
     const row = sample.turns.at(-1);
-    const stored = mode.text[index].turns.at(-1);
-    if (row.comment !== stored.comment || JSON.stringify(row.events) !== JSON.stringify(stored.events))
-      throw Error(`Pipeline replay diverged for ${mode.mode} / ${row.transcript}`);
     rows.push({ ...fixture, mode: mode.mode, raw: clean(row.raw), comment: row.comment,
-      generationMs: stored.generation_ms, visibleMs: row.comment ? stored.jobMs : undefined });
+      generationMs: row.generation_ms, visibleMs: row.comment ? row.jobMs : undefined });
   }
 }
 

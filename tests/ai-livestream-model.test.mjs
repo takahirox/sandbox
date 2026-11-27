@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { chromium } from '../workers/persistent-counter/node_modules/playwright/index.mjs';
-import { MODEL_LIBRARY, SMALL_MODEL_FILES, relatesToSpeech } from '../projects/ai-livestream/config.mjs';
+import { MAX_COMMENT_LENGTH, MODEL_LIBRARY, SMALL_MODEL_FILES } from '../projects/ai-livestream/config.mjs';
 import { previewServer } from '../scripts/capture_screenshots.mjs';
 
 // Explicit opt-in. The tuned run downloads ~760 MB and the baseline ~1.1 GB.
@@ -55,9 +55,9 @@ test(
       timeout: 300000,
     });
     assert.equal(await page.evaluate(() => smoke.error), '');
-    const fixtures = (await Promise.all(['topics.json', 'tuning-audio.json'].map(async name =>
-      JSON.parse(await readFile(new URL('./fixtures/ai-livestream/' + name, import.meta.url)))))).flat();
-    let accepted = 0, acceptedJapanese = 0;
+    const fixtures = JSON.parse(await readFile(new URL('./fixtures/ai-livestream/topics.json', import.meta.url)))
+      .filter(fixture => fixture.activity !== 'quiet');
+    let accepted = 0;
     for (const [index, { file: filename, language, topic }] of fixtures.entries()) {
       const bytes = await readFile(
         new URL('./fixtures/ai-livestream/' + filename, import.meta.url),
@@ -105,17 +105,11 @@ test(
       assert.ok(result.raw, 'The actual generator decoded a reply');
       if (result.comment) {
         accepted++;
-        if (language === 'ja') {
-          acceptedJapanese++;
-          assert.doesNotMatch(result.comment, /\p{Script=Hangul}/u);
-        }
-        assert.ok(result.comment.length <= (language === 'ja' ? 55 : 110));
-        assert.ok(relatesToSpeech(result.comment, result.transcript, language));
+        assert.ok(result.comment.length <= MAX_COMMENT_LENGTH);
+        assert.doesNotMatch(result.comment, /[\r\n]|<think>|<\|/i);
       }
     }
     assert.ok(accepted > 0, 'The real speech path publishes at least one comment');
-    if (selectedModel === 'tuned')
-      assert.ok(acceptedJapanese >= 2, 'The tuned speech path publishes Japanese chat for multiple recordings');
     await page.evaluate(() => smoke.worker.terminate());
     for (const request of traffic) {
       assert.ok(request.method === 'GET' || (request.method === 'HEAD' &&

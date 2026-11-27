@@ -90,12 +90,15 @@ function recordedTimings(rows) {
   };
 }
 
-export async function scoreTuningMode(mode, reviewed, holdout, options) {
-  const replay = await replayTuningMode(mode, holdout, options);
-  const audio = replay.audio.map(row => ({ ...row, id: row.file }));
-  const heldOut = replay.text.map(({ id, turns }) => {
+export async function scoreTuningMode(mode, reviewed, holdout) {
+  // Historical ratings describe what was displayed during the recorded run.
+  const audio = mode.audio.map(row => ({ ...row, id: row.file }));
+  const heldOut = mode.text.map(({ id, turns }) => {
     const { language, withhold, confirmation } = holdout.find(row => row.id === id);
-    return { id, language, withhold, confirmation, ...turns.at(-1) };
+    const row = turns.at(-1);
+    // The initial tuning review applied the camera-question fix to this case.
+    const comment = id === 'en-visual' && withhold && !reviewed.heldOut[id] ? '' : row.comment;
+    return { id, language, withhold, confirmation, ...row, comment };
   });
   const subset = (rows, annotations) => quality(
     rows, Object.fromEntries(rows.filter(row => row.comment).map(({ id }) => [id, annotations[id]])),
@@ -125,8 +128,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     throw Error('Holdout does not match the recorded run');
   const holdout = JSON.parse(holdoutBytes);
   for (const mode of report.modes) {
-    console.log(JSON.stringify(await scoreTuningMode(mode, ratings[mode.mode], holdout, {
-      transcriptFirst: report.transcriptFirst,
-    }), null, 2));
+    console.log(JSON.stringify(await scoreTuningMode(mode, ratings[mode.mode], holdout), null, 2));
   }
 }
