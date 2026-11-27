@@ -1,5 +1,5 @@
 // node scripts/compare_livestream_tuning.mjs [all|baseline|tuned|small] [output.json]
-// Append --follow-up <candidate.gguf> to compare the two adapters and the baseline.
+// Append --follow-up or --expanded and the candidate GGUF for a three-arm comparison.
 import { readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -13,18 +13,19 @@ const fixtureDir = new URL('tests/fixtures/ai-livestream/', root);
 const readJSON = async path => JSON.parse(await readFile(path, 'utf8'));
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const [variant, output, flag, candidatePath] = process.argv.slice(2);
-const followUp = flag === '--follow-up' && Boolean(candidatePath);
-if (flag && !followUp) throw Error('Expected --follow-up <candidate.gguf>');
+const compareAdapters = ['--follow-up', '--expanded'].includes(flag) && Boolean(candidatePath);
+if (flag && !compareAdapters) throw Error('Expected --follow-up or --expanded and a candidate GGUF');
 const modes = variant && variant !== 'all' ? [variant]
-  : followUp ? ['baseline', 'tuned', 'candidate'] : ['baseline', 'tuned', 'small'];
-if (modes.some(model => !['baseline', 'tuned', followUp ? 'candidate' : 'small'].includes(model)))
+  : compareAdapters ? ['baseline', 'tuned', 'candidate'] : ['baseline', 'tuned', 'small'];
+if (modes.some(model => !['baseline', 'tuned', compareAdapters ? 'candidate' : 'small'].includes(model)))
   throw Error('Unknown model');
 const oldAdapter = new URL('projects/ai-livestream/models/resolve/e3866302664199c2/livestream.gguf', root);
-const adapters = followUp ? {
+const adapters = compareAdapters ? {
   tuned: await readFile(oldAdapter),
   candidate: await readFile(candidatePath),
 } : {};
-const holdoutPath = followUp ? 'follow-up-holdout.json' : 'tuning-holdout.json';
+const holdoutPath = flag === '--expanded' ? 'expanded-holdout.json'
+  : compareAdapters ? 'follow-up-holdout.json' : 'tuning-holdout.json';
 const [originalSpeech, confirmationSpeech, heldOutBytes] = await Promise.all([
   readJSON(new URL('topics.json', fixtureDir)),
   readJSON(new URL('tuning-audio.json', fixtureDir)),
@@ -37,7 +38,7 @@ const report = {
   date: new Date().toISOString(),
   host: { cpu: cpus()[0].model, memoryGiB: totalmem() / 2**30, platform: platform(), release: release() },
   generationSeed: 42,
-  ...(followUp ? { holdout: holdoutPath, transcriptFirst: true } : {}),
+  ...(compareAdapters ? { holdout: holdoutPath, transcriptFirst: true } : {}),
   holdoutSha256: sha256(heldOutBytes),
   modes: [],
 };
@@ -173,12 +174,12 @@ async function run(mode) {
           ...(fixture.confirmation ? { confirmation: true } : {}), ...result });
       }
     };
-    if (!followUp) await runAudio();
+    if (!compareAdapters) await runAudio();
     const voiced = Array(96000).fill(0.02);
     for (const [index, fixture] of heldOut.entries()) {
       const turns = [];
       for (const [turn, transcript] of fixture.turns.entries()) {
-        const now = (index + (followUp ? 0 : speech.length)) * 120000 + turn * 12000;
+        const now = (index + (compareAdapters ? 0 : speech.length)) * 120000 + turn * 12000;
         turns.push(await feed(transcript === null ? null : voiced, fixture.language, now, transcript));
       }
       text.push({ id: fixture.id, turns });
@@ -187,8 +188,8 @@ async function run(mode) {
     console.log(`${mode}: warm load`);
     const warm = await load();
     const cameraDuringWarm = await frames();
-    if (followUp) await runAudio();
-    const cameraDuringAudio = followUp ? await frames() : undefined;
+    if (compareAdapters) await runAudio();
+    const cameraDuringAudio = compareAdapters ? await frames() : undefined;
     const baseline = mode === 'baseline';
     const selected = baseline ? LLM : SMALL_LLM;
     const assets = {

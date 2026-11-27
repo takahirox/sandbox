@@ -125,3 +125,108 @@ decision.
 [exported candidate]: ./artifacts/3385b8fa05610879/livestream.gguf
 [Apache-2.0 license]: ../../projects/ai-livestream/models/LICENSE
 [follow-up evaluation]: ../../projects/ai-livestream/FOLLOW-UP-EVALUATION.md
+
+## Expanded-corpus round
+
+The [owner's expanded-corpus request] called for a substantially larger
+livestream-specific trial. `expanded-topics.txt` lists 200 topic seeds in 10
+domains. A seeded grid combines each seed with four distinct conversation
+situations and rotates the viewer voice and language. The offline teacher
+drafts new fictional utterances and targets for each combination. It never
+receives the preceding training datasets or any evaluation transcript.
+The situations cover changed methods, self-correction, discoveries and
+open decisions. The targets include questions, surprise, preferences, gentle
+jokes, and reactions to a change. The 4B Qwen pilot had poor format compliance
+and frequent unnatural or incoherent Japanese. The included teacher rows
+come from the cached Apache-2.0 [Gemma MLX conversion] of the [Gemma teacher].
+Batch size 64 exceeded Metal memory. Batch size 16 fit on the M4 Max, with a
+bounded pass through the first 240 seeded prompts.
+
+`expanded-authored.txt` supplies additional supervision for corrupted
+transcripts, repeated speech, silence, fragments without a referent, visual
+queries, and private-information requests. It also pairs the same speech with
+two meaningfully different viewer voices where the replies were authored
+together. The new examples and fixtures are synthetic. The authored material
+and corpus contributions are offered under [CC0 1.0] to the extent applicable.
+The teacher saw no recordings, real chat logs, or private data.
+
+`curate_expanded.py` rejects malformed lines, script mismatches, inappropriate
+language, boilerplate, direct visual claims, new numerals, transcript echoes,
+and near-duplicates. It compares normalized character-trigram sets after
+Unicode NFKC, case folding and removal of punctuation. Speech is compared
+against earlier training rows and already accepted examples at Jaccard 0.76.
+Replies of 12 or more normalized characters are compared at 0.86, with a cap
+of two for exact teacher reply matches. The authored voice pairs and `SKIP`
+are intentional exceptions to within-training duplicate removal. Both context
+and current speech are compared with all three rounds of held-out transcripts
+and the ten WAV scripts at Jaccard 0.70. These checks screen lexical overlap
+and common unsupported details. They cannot prove semantic independence or
+perfect grounding. The checked-in audit records sample review verdicts
+for groundedness, spoken language, chat style and appropriateness. A bounded
+second Gemma pass screens the first 512 surviving teacher rows in seeded
+order for those same issues. The curator drops failures from these reviews
+and gives the manual audit priority where both verdicts exist.
+
+The candidate starts from the same pinned Japanese WBD base with a fresh
+rank-8 adapter. It uses two shuffled passes (seed 62, batch size 8, learning
+rate 0.0003, clipping at 1) with loss on replies and the end token only.
+This keeps the update count in the same range as the original 384-update
+run while seeing more distinct examples. The training schedule and single
+exported checkpoint were chosen before generation
+on the new holdout. See the [expanded experiment report] for quality results
+and the deployment decision.
+
+On the M4 Max, 402 updates took 108.3 seconds and peaked at 2.91 GiB in
+the MLX allocator. Mean assistant loss was 3.4825 and 2.8566 for the two
+epochs. The [candidate GGUF] uses Apache 2.0 and has 32 FP16 LoRA arrays in
+919,968 bytes.
+
+| File | SHA-256 |
+| --- | --- |
+| `expanded.jsonl` | `035b883547623c3342d360deede49917bf5733a9f317e855796920fa2fad35bb` |
+| `expanded-drafts.jsonl.gz` | `7cddcbaa4d44fed9c2df96d96ab8c9ce74543e45908dcdddbf480ee9ebce3773` |
+| `livestream.gguf` | `3ec890afedd57fd7071692f158ba166f613279803e81cba1445a261d27d76a43` |
+
+After installing the environment above, run these commands from the repository
+root to reproduce the candidate from the frozen `expanded.jsonl`.
+
+```sh
+"$work/venv/bin/python" scripts/livestream-training/train.py "$work" "$work/expanded.gguf" --expanded
+shasum -a 256 scripts/livestream-training/expanded.jsonl "$work/expanded.gguf"
+```
+
+These commands replay curation from the archived local drafts and screen verdicts.
+
+```sh
+gzip -dc scripts/livestream-training/expanded-drafts.jsonl.gz > "$work/expanded-drafts.jsonl"
+python3 scripts/livestream-training/curate_expanded.py "$work/expanded-drafts.jsonl" "$work/expanded.jsonl" \
+  --review scripts/livestream-training/expanded-audit.json \
+  --screen scripts/livestream-training/expanded-screen.json
+cmp "$work/expanded.jsonl" scripts/livestream-training/expanded.jsonl
+```
+
+The optional draft and screen steps download only public pinned files and
+run locally. Use the archived drafts for the recorded audit, since hardware
+and sampling kernels can change the output.
+
+```sh
+teacher_pin=535c5606372deb5d5ab7e29280f111ef2a8e084e
+teacher_dir="$work/$teacher_pin"
+uv venv --python 3.12 "$work/teacher-venv"
+uv pip install --python "$work/teacher-venv/bin/python" \
+  mlx==0.32.5 mlx-lm==0.32.2 transformers==5.24.1 huggingface-hub==2.5.0 tokenizers==0.23.3
+HF_HUB_DISABLE_TELEMETRY=1 HF_HUB_DISABLE_IMPLICIT_TOKEN=1 \
+  "$work/teacher-venv/bin/hf" download mlx-community/gemma-4-31b-it-4bit \
+  --revision "$teacher_pin" --local-dir "$teacher_dir"
+HF_HUB_OFFLINE=1 "$work/teacher-venv/bin/python" scripts/livestream-training/draft_expanded.py \
+  "$teacher_dir" "$work/expanded-drafts.jsonl"
+python3 scripts/livestream-training/curate_expanded.py "$work/expanded-drafts.jsonl" "$work/prescreen.jsonl"
+HF_HUB_OFFLINE=1 "$work/teacher-venv/bin/python" scripts/livestream-training/screen_expanded.py \
+  "$teacher_dir" "$work/prescreen.jsonl" "$work/expanded-screen.json"
+```
+
+[owner's expanded-corpus request]: https://github.com/takahirox/sandbox/pull/63#issuecomment-7209745304
+[Gemma MLX conversion]: https://huggingface.co/mlx-community/gemma-4-31b-it-4bit/tree/535c5606372deb5d5ab7e29280f111ef2a8e084e
+[Gemma teacher]: https://huggingface.co/google/gemma-4-31B-it/tree/3548789868c5356dbf307c98e6f609007b82b3eb
+[candidate GGUF]: ./artifacts/3ec890afedd57fd7/livestream.gguf
+[expanded experiment report]: ../../projects/ai-livestream/EXPANDED-EVALUATION.md

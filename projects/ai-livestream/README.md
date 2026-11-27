@@ -28,7 +28,8 @@ Expect about **755 MB** on first use, plus temporary inference memory. Append
 `?model=baseline` to use the original 1.7B generator (about 1.1 GB) on the
 same recognition and comment pipeline. Actual speed and memory depend on the
 GPU, CPU, browser and device. The [tuning evaluation](./TUNING-EVALUATION.md)
-reports desktop browser results and mobile feasibility limits. Japanese recognition
+and [expanded-corpus evaluation](./EXPANDED-EVALUATION.md) report desktop
+browser results and mobile feasibility limits. Japanese recognition
 with Base can miss words, particularly with noise, quiet speech, or partial sentences. Select the spoken language before starting.
 Downloads stop with End; completed model assets can be reused from browser cache.
 Failed downloads, lost devices, GPU/runtime errors and slow operations end cleanly

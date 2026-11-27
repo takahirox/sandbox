@@ -68,3 +68,15 @@ three stacks, with WAV and text runs in separate fields. The accompanying
 `follow-up-ratings.json` annotates displayed final turns and WAV replies.
 See the [follow-up evaluation](../../../projects/ai-livestream/FOLLOW-UP-EVALUATION.md)
 for scoring and reproduction.
+
+## Expanded-corpus holdout
+
+`expanded-holdout.json` contains 49 fictional clean transcript scenarios
+authored apart from the training data, including multi-turn references and
+topic shifts. It has 30 Japanese and 12 English opportunities for a reply
+plus seven withholding scenarios. The two direct clothing-color questions
+reproduce the review regression. All other turns use new synthetic wording
+and story details. The teacher receives only training prompts, and the trainer
+does not read this fixture. The corpus curator checks it for lexical leakage.
+The [expanded-corpus evaluation](../../../projects/ai-livestream/EXPANDED-EVALUATION.md)
+explains the rubric, raw and displayed evidence, and separate WAV runs.

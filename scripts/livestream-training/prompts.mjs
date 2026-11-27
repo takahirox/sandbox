@@ -4,9 +4,11 @@ import { messagesFor } from '../../projects/ai-livestream/config.mjs';
 
 const readRows = file => readFileSync(new URL(file, import.meta.url), 'utf8').trim().split('\n').map(JSON.parse);
 const original = readRows('./train.jsonl');
-const rows = process.argv[2] === '--follow-up'
-  ? [...readRows('./follow-up.jsonl'), ...original.filter(row => row.language === 'en' || row.reply === 'SKIP')]
-  : original;
+const selection = process.argv[2];
+const rows = selection === '--expanded' ? readRows('./expanded.jsonl')
+  : selection === '--follow-up'
+    ? [...readRows('./follow-up.jsonl'), ...original.filter(row => row.language === 'en' || row.reply === 'SKIP')]
+    : original;
 for (const { language, voice, speech, earlier, avoid_repeating, reply } of rows) {
   const messages = messagesFor(speech, language, { voice, context: earlier, recent: avoid_repeating });
   console.log(JSON.stringify({ messages, reply }));

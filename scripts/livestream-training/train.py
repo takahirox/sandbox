@@ -106,10 +106,10 @@ def lora_modules(model):
         yield layer.mlp, "down_proj", f"blk.{index}.ffn_down.weight"
         yield layer.self_attn, "o_proj", f"blk.{index}.attn_output.weight"
 
-def training_rows(tokenizer, follow_up):
+def training_rows(tokenizer, selection):
     command = ["node", SOURCE / "prompts.mjs"]
-    if follow_up:
-        command.append("--follow-up")
+    if selection:
+        command.append(selection)
     rows = subprocess.check_output(command, text=True)
     examples = []
     for line in rows.splitlines():
@@ -159,9 +159,10 @@ def resume_adapter(modules):
         module.b = mx.array(tensors[f"{name}.lora_b"].reshape(module.b.shape), dtype=mx.float32)
 
 
-def tune(base, shards, output, follow_up):
+def tune(base, shards, output, selection):
     mx.random.seed(SEED)
     rng = random.Random(SEED)
+    follow_up = selection == "--follow-up"
     model = load_gguf_model(base, shards)
     tokenizer = AutoTokenizer.from_pretrained(base, local_files_only=True)
     modules = []
@@ -175,16 +176,18 @@ def tune(base, shards, output, follow_up):
     for _, module in modules:
         module.unfreeze(keys=["a", "b"])
 
-    examples = training_rows(tokenizer, follow_up)
-    epochs = 2 if follow_up else EPOCHS
+    examples = training_rows(tokenizer, selection)
+    epochs = 2 if selection else EPOCHS
+    batch_size = 8 if selection == "--expanded" else BATCH_SIZE
     grad = nn.value_and_grad(model, assistant_loss)
     optimizer = optim.Adam(learning_rate=0.00012 if follow_up else LR)
+    print(f"{len(examples)} examples, batch size {batch_size}", flush=True)
     started = perf_counter()
     for epoch in range(epochs):
         rng.shuffle(examples)
         losses = []
-        for offset in range(0, len(examples), BATCH_SIZE):
-            loss, gradients = grad(model, *batch_for(examples[offset:offset + BATCH_SIZE]))
+        for offset in range(0, len(examples), batch_size):
+            loss, gradients = grad(model, *batch_for(examples[offset:offset + batch_size]))
             gradients, _ = optim.clip_grad_norm(gradients, 1.0)
             optimizer.update(model, gradients)
             mx.eval(model.trainable_parameters(), optimizer.state, loss)
@@ -212,7 +215,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("work", type=Path, help="Scratch directory for pinned downloads")
     parser.add_argument("output", type=Path, help="Output path for the trained GGUF adapter")
-    parser.add_argument("--follow-up", action="store_true", help="Continue the pinned initial adapter")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--follow-up", dest="selection", action="store_const", const="--follow-up",
+                           help="Continue the pinned initial adapter")
+    selection.add_argument("--expanded", dest="selection", action="store_const", const="--expanded",
+                           help="Train a new adapter on the expanded corpus")
     args = parser.parse_args()
     base = args.work / "base"
     for name in ("config.json", "tokenizer.json", "tokenizer_config.json"):
@@ -221,7 +228,7 @@ def main():
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(lambda path: download(WBD + path.name, path), shards))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    tune(base, shards, args.output, args.follow_up)
+    tune(base, shards, args.output, args.selection)
 
 
 if __name__ == "__main__":
