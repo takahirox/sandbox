@@ -1,12 +1,40 @@
-import { pathToFileURL } from 'node:url';
-import assert from 'node:assert/strict';
-import { facts, topics } from '../../projects/kids-ai-quiz/content.mjs';
-import { decode, hasOneAnswer, limits, validate } from '../../projects/kids-ai-quiz/quiz.mjs';
+// Original supervision for a small Japanese quiz language model. Only the
+// offline teacher constructs gold rows. The browser samples every field.
+import { fileURLToPath } from 'node:url';
+import { modelRelations } from '../../projects/kids-ai-quiz/content.mjs';
 
-export const heldOut = new Set([
-  'cat', 'sheep', 'strawberry', 'corn', 'plane', 'fire-engine', 'yellow', 'purple',
-  'triangle', 'oval', 'apples-4', 'apples-7', 'umbrella', 'clock',
-]);
+// Preserve the original training vocabulary and order for the shipped weights.
+const names = [
+  'りんご', 'いちご', 'ほし', 'さかな', 'ぼーる', 'みかん', 'くるま', 'きのこ', 'ばなな', 'はな',
+  'かさ', 'くつ', 'えんぴつ', 'どんぐり', 'はっぱ', 'ほん', 'ぼうし', 'さくらんぼ', 'ぶどう', 'ふね',
+];
+
+const countPrompts = {
+  count: ['いくつ ある？', 'ぜんぶで なんこ？'],
+  add: ['あわせて なんこ？', 'ぜんぶで いくつ？'],
+  take: ['ばつの ものを とると、いくつ のこる？', 'ばつの ものを へらすと、のこりは なんこ？'],
+};
+const positionPrompts = [
+  ['ひだりの はしは どれ？', 'いちばん ひだりに あるのは？'],
+  ['まんなかは どれ？', 'まんなかに あるのは？'],
+  ['みぎの はしは どれ？', 'いちばん みぎに あるのは？'],
+];
+const sequencePrompts = [
+  'おなじ ぶんずつ へるよ。つぎの かずは？',
+  'おなじ ぶんずつ ふえるよ。つぎの かずは？',
+];
+const comparePrompts = [['いちばん すくないのは？', 'どれが いちばん すくない？'],
+  ['いちばん おおいのは？', 'どれが いちばん おおい？']];
+
+function factPrompts(family, wording, name) {
+  const question = wording.replace('{subject}', name);
+  if (question.endsWith('のは？')) return [question, question.replace(/のは？$/, 'のは どれ？')];
+  if (question.endsWith('のは どれ？')) return [question, question.replace(/のは どれ？$/, 'のは？')];
+  if (family === 'shape') return [question, 'この かたちと おなじなのは？'];
+  if (family === 'color') return [question, 'この いろと おなじなのは？'];
+  if (family === 'corners') return [question, 'かどは なんこ ある？'];
+  return [question];
+}
 
 export function seeded(seed) {
   return () => {
@@ -15,71 +43,115 @@ export function seeded(seed) {
   };
 }
 
-function choose(weights, random) {
-  let target = random() * weights.reduce((sum, weight) => sum + weight, 0);
-  return weights.findIndex(weight => (target -= weight) < 0);
+export function memoryStorage() {
+  const data = new Map();
+  return { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value) };
 }
 
-const formWeights = [
-  [6, 3, 2], [6, 4, 2], [4, 6, 2], [5, 2, 5], [4, 3, 5], [5, 5, 3], [6, 4, 3],
-];
+export function heldOut(key) {
+  const [rule, a, b, c, d] = key.split(':');
+  if (rule === 'add') return (3 * Number(a) + Number(b)) % 7 === 1;
+  if (rule === 'take' || rule === 'select') return (3 * Number(a) + Number(b)) % 7 === 3;
+  if (rule === 'compare') return (Number(b) + 3 * Number(c) + Number(d)) % 7 === 0;
+  if (rule === 'sequence') return (Number(a) + Number(b) + 2) % 7 === 0;
+  if (rule === 'position') return names.indexOf(b) % 5 === Number(a);
+  return false;
+}
 
-function trainingData() {
-  const random = seeded(64);
-  const baseline = [], adaptation = [];
-  const training = facts.filter(fact => !heldOut.has(fact.id));
-  assert.equal(new Set(facts.map(fact => fact.id)).size, facts.length);
-  for (const topic of topics) {
-    assert.equal(topic.forms.length, limits[0]);
-    assert.equal(new Set(topic.facts.map(fact => fact.label)).size, topic.facts.length);
-    assert.equal(topic.facts.filter(fact => heldOut.has(fact.id)).length, 2);
-  }
+export function* dataset(seed = 68, examplesPerTopic = 1400) {
+  const random = seeded(seed);
+  const pick = values => values[Math.floor(random() * values.length)];
+  const examples = new Map();
+  const add = (topic, make) => {
+    if (!examples.has(topic)) examples.set(topic, []);
+    examples.get(topic).push(make);
+  };
+  const integers = Array.from({ length: 10 }, (_, i) => String(i));
+  const negatives = (correct, options) => {
+    const pool = options.filter(value => value !== correct);
+    const one = pool.splice(Math.floor(random() * pool.length), 1)[0];
+    return [correct, one, pick(pool)];
+  };
 
-  for (const fact of training) {
-    const topic = fact.topic;
-    for (let n = 0; n < 36; n++) {
-      // Conventional wording and a mix of easy and nearby same-topic distractors.
-      const generalWeights = [5, 5, 4, 4, 4];
-      const generalFirst = choose(generalWeights, random);
-      generalWeights[generalFirst] = 0;
-      const general = [
-        choose([2, 2, 2, 4, 4, 3], random),
-        generalFirst,
-        choose(generalWeights, random),
-        n % 3,
-      ];
-      const generalItem = decode(fact, general);
-      assert.ok(hasOneAnswer(fact, generalItem));
-      assert.ok(generalItem.choices.every(choice => choice.topic === topic));
-      baseline.push({ topic, tokens: general });
-
-      // A near neighbor and a second, distinct answer from the same topic.
-      const first = choose([7, 6, 5, 4, 3], random);
-      const related = [6, 6, 5, 5, 4];
-      related[first] = 0;
-      const second = choose(related, random);
-      const tokens = [
-        choose(formWeights[topic], random),
-        first,
-        second,
-        (n + 1) % 3,
-      ];
-      const approved = validate(fact, tokens);
-      assert.ok(approved && hasOneAnswer(fact, approved));
-      assert.match(approved.question, /^[ぁ-ゖー0-9 「」、。！？]+$/u);
-      assert.ok([...approved.question].length <= 45);
-      const negatives = [[0, 3 + n % 3], [1, 5 + n % 3], [2, first], [2, 5 + (n + 1) % 3]];
-      for (const [stage, token] of negatives) {
-        const corrupted = [...tokens];
-        corrupted[stage] = token;
-        assert.equal(validate(fact, corrupted), null);
+  for (const [topic, family, wording, illustration, groups] of modelRelations) {
+    const options = groups.map(([[, label]]) => label);
+    for (const [[, correct], subjects] of groups) {
+      for (const [, name] of subjects) {
+        add(topic, () => [topic, illustration ? '-' : name, pick(factPrompts(family, wording, name)),
+          ...negatives(correct, options)]);
       }
-      adaptation.push({ topic, tokens, negatives });
     }
   }
-  return { baseline, adaptation, limits, topicCount: topics.length };
+
+  for (let a = 1; a <= 9; a++) {
+    add('counting', () => ['counting', pick(names) + ' ' + a, pick(countPrompts.count),
+      ...negatives(String(a), integers)]);
+    for (let b = 1; b <= 9; b++) {
+      if (a + b <= 9 && !heldOut('add:' + Math.min(a, b) + ':' + Math.max(a, b))) {
+        add('counting', () => ['counting', pick(names) + ' ' + a + ' + ' + b, pick(countPrompts.add),
+          ...negatives(String(a + b), integers)]);
+      }
+      if (b <= a && !heldOut('take:' + a + ':' + b)) {
+        add('counting', () => ['counting', pick(names) + ' ' + a + ' - ' + b, pick(countPrompts.take),
+          ...negatives(String(a - b), integers)]);
+      }
+    }
+  }
+
+  for (let wanted = 1; wanted <= 8; wanted++) {
+    for (let other = 1; wanted + other <= 9; other++) {
+      if (heldOut('select:' + wanted + ':' + other)) continue;
+      add('select', () => {
+        const name = pick(names);
+        const distractor = pick(names.filter(candidate => candidate !== name));
+        const groups = [name + ' ' + wanted, distractor + ' ' + other];
+        if (random() < 0.5) groups.reverse();
+        const question = name + ' は ' + pick(['なんこ？', 'いくつ ある？']);
+        return ['counting', groups.join(' + '), question, ...negatives(String(wanted), integers)];
+      });
+    }
+  }
+
+  for (let a = 1; a <= 5; a++) {
+    for (let b = a + 1; b <= 6; b++) {
+      for (let c = b + 1; c <= 7; c++) {
+        for (let direction = 0; direction < 2; direction++) {
+          if (heldOut(['compare', direction, a, b, c].join(':'))) continue;
+          const values = [String(a), String(b), String(c)];
+          add('comparing', () => ['comparing', pick(names), pick(comparePrompts[direction]),
+            ...negatives(values[direction ? 2 : 0], values)]);
+        }
+      }
+    }
+  }
+
+  for (let index = 0; index < positionPrompts.length; index++) {
+    for (const target of names) {
+      if (heldOut('position:' + index + ':' + target)) continue;
+      add('positions', () => {
+        const labels = negatives(target, names);
+        const picture = labels.slice(1);
+        picture.splice(index, 0, target);
+        return ['positions', picture.join(' '), pick(positionPrompts[index]),
+          ...labels.map(label => '@' + (picture.indexOf(label) + 1))];
+      });
+    }
+  }
+
+  for (let a = 0; a <= 9; a++) {
+    for (const step of [-2, -1, 1, 2]) {
+      const next = a + 3 * step;
+      if (next < 0 || next > 9 || heldOut('sequence:' + a + ':' + step)) continue;
+      add('sequence', () => ['sequence', [a, a + step, a + 2 * step].join(' '), sequencePrompts[Number(step > 0)],
+        ...negatives(String(next), integers)]);
+    }
+  }
+
+  for (const makers of examples.values()) {
+    for (let i = 0; i < examplesPerTopic; i++) yield pick(makers)();
+  }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.stdout.write(JSON.stringify(trainingData()));
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  console.log(JSON.stringify([...dataset()]));
 }

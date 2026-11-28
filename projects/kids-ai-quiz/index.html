@@ -10,11 +10,11 @@
   <script type="module" src="./game.mjs"></script>
 </head>
 <body>
-  <main class="game" data-topic="animals">
+  <main class="game">
     <div class="challenge">
       <div class="illustration" id="illustration" aria-hidden="true"></div>
       <div class="prompt">
-        <h1 id="question" tabindex="-1" aria-describedby="clue">わんわん なくのは？</h1>
+        <h1 id="question" tabindex="-1" aria-describedby="clue"></h1>
         <span class="sr-only" id="clue"></span>
         <button type="button" id="speak" class="speak" aria-label="もんだいを きく" hidden>🔊</button>
       </div>
@@ -22,8 +22,7 @@
     <div class="answers" id="answers" role="group" aria-label="こたえを えらぶ"></div>
     <div class="controls">
       <p id="feedback" role="status"></p>
-      <button type="button" id="next" class="pill">つぎへ</button>
-      <button type="button" id="retry" class="pill retry" hidden>もういちど つくる</button>
+      <button type="button" id="next" class="pill" disabled>つぎへ</button>
     </div>
   </main>
 </body>

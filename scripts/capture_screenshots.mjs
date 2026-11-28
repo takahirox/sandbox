@@ -89,6 +89,7 @@ export async function captureSite(output, projects) {
         });
         await page.clock.setFixedTime(new Date('2026-01-01T12:00:00Z'));
         await page.addInitScript(() => {
+          globalThis.__sandboxCapture = true;
           let seed = 1;
           Math.random = () => ((seed = Math.imul(seed, 16807) >>> 0) / 4294967296);
         });

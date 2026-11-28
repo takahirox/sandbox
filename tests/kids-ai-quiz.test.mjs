@@ -1,150 +1,263 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { distractorPool, facts, starter, topics } from '../projects/kids-ai-quiz/content.mjs';
-import { attempts, createGenerator, generateTokens, loadModel, maxModelBytes, modelURL } from '../projects/kids-ai-quiz/model.mjs';
-import { childForms, createSession, fallback, firstQuestion, hasOneAnswer, hasStructure, validate } from '../projects/kids-ai-quiz/quiz.mjs';
-import { independentAnswers } from '../scripts/kids-ai-quiz/answer-key.mjs';
-import { seeded } from '../scripts/kids-ai-quiz/dataset.mjs';
+import { relations } from '../projects/kids-ai-quiz/content.mjs';
+import { createSession, historyKey, historyLimit, makeRound, puzzles } from '../projects/kids-ai-quiz/quiz.mjs';
+import { memoryStorage, seeded, heldOut } from '../scripts/kids-ai-quiz/dataset.mjs';
+import { attempts, generateRound } from '../projects/kids-ai-quiz/generate.mjs';
+import { loadModel, modelURL } from '../projects/kids-ai-quiz/model.mjs';
+import { verifyRound } from '../projects/kids-ai-quiz/verify.mjs';
 
-test('accepts only approved wording, one distinct correct choice, and two related decoys', () => {
-  assert.equal(firstQuestion.choices[firstQuestion.correct], starter);
-  for (const tokens of [
-    null, {}, [], [0, 0, 1], [0, 0, 1, 0, 1], ['なまえを おしえて', 0, 1, 0],
-    [0, 0, 1, 3], [0, 0, -1, 0], [0, 0, 1.1, 0], [0, 0, NaN, 0],
-    [3, 0, 1, 0], // Longer wording with kanji.
-    [0, 7, 1, 0], // The answer appears twice.
-    [0, 0, 0, 1], // Repeated distractors.
-    [0, 0, 5, 0], // An unrelated choice from another topic.
-  ]) assert.equal(validate(starter, tokens), null, JSON.stringify(tokens));
+const hiragana = /^[ぁ-ゖー0-9 、。！？]+$/u;
+const byKey = new Map(puzzles.map(puzzle => [puzzle.key, puzzle]));
+const topics = new Set(puzzles.map(puzzle => puzzle.topic));
+const rubric = {
+  'call:dog': ['わんわん なくのは？', 'いぬ'],
+  'coat:owl': ['ふくろうの せなかを おおうのは？', 'はね'],
+  'move:whale': ['くじらは どうやって すすむ？', 'ひれで およぐ'],
+  'home:mole': ['もぐらが くらす ところは？', 'つちの なか'],
+  'use:broom': ['ゆかの ごみを はくとき つかうのは？', 'ほうき'],
+  'wear:gloves': ['てに つけるのは？', 'てぶくろ'],
+  'next:thirsty': ['のどが かわいたよ。なにを する？', 'みずを のむ'],
+  'place:library': ['おうちで よむ ほんを かりるのは どこ？', 'としょかん'],
+  'kind:pear': ['なしは どの なかま？', 'くだもの'],
+  'ingredient:corn': ['ぽっぷこーんを つくる もとに なるのは？', 'とうもろこし'],
+  'travel:bullet': ['しんかんせんは どこを すすむ？', 'せんろ'],
+  'job:ambulance': ['けがを した ひとを びょういんへ はこぶのは どれ？', 'きゅうきゅうしゃ'],
+  'shape:triangle': ['おなじ かたちは どれ？', 'さんかく'],
+  'corners:circle': ['かどは いくつ？', '0'],
+  'corners:rectangle': ['かどは いくつ？', '4'],
+  'color:purple': ['おなじ いろは どれ？', 'むらさき'],
+};
 
-  for (const fact of facts) {
-    for (let form = 0; form < 3; form++) {
-      const item = validate(fact, [form, 1, 3, form]);
-      assert.ok(item);
-      assert.equal(item.choices[item.correct], fact);
-      assert.equal(item.choices.filter(choice => choice === fact).length, 1);
-      assert.equal(new Set(item.choices.map(choice => choice.label)).size, 3);
-      assert.match(item.question, /^[ぁ-ゖー0-9 「」、。！？]+$/u);
-      assert.ok([...item.question].length <= 45);
-      if (item.topic === 'counting') assert.equal(Number(item.choices[item.correct].label), item.clue.count);
-      if (item.topic === 'colors' || item.topic === 'shapes') {
-        assert.equal(item.choices.filter(choice => choice.icon === item.clue.icon).length, 1);
-        assert.equal(item.choices[item.correct].icon, item.clue.icon);
-      }
-    }
-  }
-});
+test('every semantic plan has three distinct child-readable choices and one defensible answer', () => {
+  assert.equal(byKey.size, puzzles.length);
+  assert.equal(topics.size, 10);
+  const contrastSets = new Map(relations.map(([, family, , , groups]) => [family, groups]));
+  assert.equal(new Set(Object.keys(rubric).map(key => key.split(':')[0])).size, contrastSets.size);
 
-test('the ball clue distinguishes the ball from shoes in both model and fallback rounds', () => {
-  const ball = facts.find(fact => fact.id === 'ball');
-  const pool = distractorPool(ball);
-  const first = pool.findIndex(choice => choice.id === 'shoes');
-  const second = pool.findIndex(choice => choice.id === 'umbrella');
-  const proposal = validate(ball, [0, first, second, 0]);
-  assert.ok(proposal);
-  const legacy = { ...proposal, question: 'けって あそぶのに つかうのは？' };
-  assert.deepEqual(independentAnswers(legacy).map(choice => choice.label), ['ぼーる', 'くつ']);
-  assert.equal(hasOneAnswer(ball, legacy), false);
-
-  for (const item of [proposal, fallback(ball, () => 0.99)]) {
-    assert.ok(item.choices.some(choice => choice.id === 'shoes'));
-    assert.deepEqual(independentAnswers(item), [ball]);
-    assert.equal(item.choices[item.correct], ball);
-  }
-});
-
-test('all distinct same-topic distractor combinations keep the fallback playable', () => {
-  for (const fact of facts) {
-    for (let form = 0; form < childForms; form++) {
-      for (let first = 0; first < 5; first++) {
-        for (let second = first + 1; second < 5; second++) {
-          assert.ok(validate(fact, [form, first, second, 0]), `${fact.id}: ${form}, ${first}, ${second}`);
+  for (const puzzle of puzzles) {
+    for (const random of [() => 0, () => 0.99999, seeded(68)]) {
+      const item = makeRound(puzzle, random);
+      const labels = item.choices.map(choice => choice.label);
+      const correct = labels[item.correct];
+      assert.equal(labels.length, 3, item.key);
+      assert.equal(new Set(labels).size, 3, item.key);
+      assert.ok([item.question, ...labels].every(text => hiragana.test(text) && [...text].length <= 50), item.key);
+      const [family, subject] = item.key.split(':');
+      if (rubric[item.key]) assert.deepEqual([item.question, correct], rubric[item.key]);
+      let expected;
+      if (puzzle.rule === 'relation') {
+        const groups = contrastSets.get(family);
+        const valid = groups.filter(([, members]) => members.some(([id]) => id === subject));
+        assert.equal(valid.length, 1, item.key);
+        expected = valid[0][0][1];
+        if (family === 'shape' || family === 'color') {
+          assert.equal(item.clue.icon, item.choices[item.correct].icon);
+          assert.ok(item.choices.filter(choice => choice.icon === item.clue.icon).length === 1);
         }
+      } else if (puzzle.rule === 'compare') {
+        const options = item.choices.map(choice => choice.count).sort((a, b) => a - b);
+        assert.deepEqual(options, item.key.split(':').slice(1).map(Number));
+        assert.ok(item.choices.every(choice => choice.icon === item.clue.icon && choice.label.includes(String(choice.count))));
+        expected = item.choices.find(choice => choice.count === (item.question.includes('おおい') ? options[2] : options[0])).label;
+      } else {
+        const { count, crossed, split, spoken } = item.clue;
+        const [a, b] = item.key.split(':').slice(1).map(Number);
+        assert.equal(spoken.split('、').length, count, item.key);
+        if (family === 'add') {
+          assert.ok(a <= b, item.key);
+          assert.equal(split, a, item.key);
+          assert.equal(count - split, b, item.key);
+        } else {
+          assert.equal(count, a, item.key);
+          assert.equal(crossed, b ?? 0, item.key);
+          assert.equal(spoken.match(/ばつの/g)?.length ?? 0, crossed, item.key);
+        }
+        expected = String(count - crossed);
       }
+      assert.equal(correct, expected, item.key);
+      assert.equal(labels.filter(label => label === expected).length, 1, item.key);
     }
   }
 });
 
-test('vetted fallback yields varied choice sets and session rotation spaces topics and repeated facts', () => {
-  for (const seed of [0, 1, 64, 65536]) {
-    const random = seeded(seed);
-    const session = createSession(random);
-    const history = [starter];
-    for (let i = 1; i < facts.length * 10; i++) {
-      const fact = session.next();
-      assert.notEqual(history.at(-1).topic, fact.topic);
-      assert.ok(!history.slice(-12).includes(fact));
-      history.push(fact);
-      const item = fallback(fact, random);
-      assert.equal(item.choices[item.correct], fact);
-    }
-    for (let i = 0; i < history.length; i += facts.length) {
-      assert.equal(new Set(history.slice(i, i + facts.length)).size, facts.length);
-    }
-    const variants = Array.from({ length: 64 }, () => {
-      const item = fallback(starter, random);
-      return [item.question, ...item.choices.map(choice => choice.id)].join('/');
-    });
-    assert.ok(new Set(variants).size > 30);
+test('seeded fresh sessions vary, and reloads avoid recently seen IDs even with the same seed', () => {
+  const opener = seed => createSession({ random: seeded(seed) }).next();
+  assert.deepEqual(opener(68), opener(68));
+  assert.ok(new Set(Array.from({ length: 24 }, (_, i) => opener(68 + i).key)).size >= 8);
+
+  const storage = memoryStorage();
+  const keys = [];
+  for (let i = 0; i < 24; i++) {
+    const { next } = createSession({ random: seeded(68), storage });
+    const item = next();
+    assert.ok(!keys.slice(-12).includes(item.key));
+    if (i) assert.notEqual(item.topic, byKey.get(keys.at(-1)).topic);
+    keys.push(item.key);
+  }
+  assert.ok(new Set(keys).size >= 20);
+  assert.deepEqual(JSON.parse(storage.getItem(historyKey)), [...new Set(keys.toReversed())].reverse());
+});
+
+test('the first fallback skips the preceding model target', () => {
+  for (const [seed, modelKey, fallbackKey] of [
+    [68, 'shape:heart', 'shape:heart'],
+    [79, 'compare:0:1:2:7', 'compare:1:2:7'],
+  ]) {
+    assert.equal(createSession({ random: seeded(seed) }).next().key, fallbackKey);
+    const item = createSession({ random: seeded(seed) }).next(modelKey);
+    assert.notEqual(item.key, fallbackKey);
+    assert.equal(item.choices.length, 3);
   }
 });
 
-test('loads the real one-page WASM model and rejects failed, corrupt, oversized and unsupported versions', async () => {
-  const bytes = await readFile(modelURL);
-  await assert.rejects(loadModel(new Response(null, { status: 404 })), /unavailable/);
-  await assert.rejects(loadModel(new Response(new Uint8Array(maxModelBytes + 1))), /too large/);
-  await assert.rejects(loadModel(new Response(new Uint8Array([0, 1]))), WebAssembly.CompileError);
-  await assert.rejects(loadModel(new Response(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))), /Unsupported model/);
-  const model = await loadModel(new Response(bytes));
-  assert.equal(model.memoryBytes, 65536);
-  const random = seeded(14);
-  for (let topic = 0; topic < topics.length; topic++) {
-    const samples = Array.from({ length: 40 }, () => generateTokens(model.sample, topic, random));
-    assert.ok(samples.every(hasStructure));
-    const fact = topics[topic].facts[0];
-    assert.ok(samples.filter(tokens => validate(fact, tokens)).length >= 30);
-    assert.ok(new Set(samples.map(tokens => tokens.join(','))).size > 20);
+test('topic cycles exhaust IDs before recycling and persist only a bounded list of IDs', () => {
+  const storage = memoryStorage();
+  const { next } = createSession({ random: seeded(68), storage });
+  const seen = new Set();
+  const expectedPerTopic = new Map([...topics].map(topic => [topic, puzzles.filter(puzzle => puzzle.topic === topic).length]));
+  const servedByTopic = new Map();
+  let recent = [], lastTopic;
+  for (let i = 0; i < 900; i++) {
+    const item = next();
+    assert.notEqual(item.topic, lastTopic);
+    assert.ok(!recent.includes(item.key), item.key);
+    const served = (servedByTopic.get(item.topic) ?? 0) + 1;
+    servedByTopic.set(item.topic, served);
+    if (served <= expectedPerTopic.get(item.topic)) assert.ok(!seen.has(item.key), item.key);
+    seen.add(item.key);
+    recent = [...recent.slice(-11), item.key];
+    lastTopic = item.topic;
   }
+  assert.equal(seen.size, puzzles.length);
+  const saved = JSON.parse(storage.getItem(historyKey));
+  assert.ok(saved.length <= historyLimit);
+  assert.equal(new Set(saved).size, saved.length);
+  assert.ok(saved.every(key => byKey.has(key)));
+  assert.ok(storage.getItem(historyKey).length < 4096);
 });
 
-test('worker client handles unsupported, loading failure, busy, stop, retry, stale replies and timeout', async () => {
-  const workers = [];
-  const client = createGenerator({ supported: true, timeout: 40, spawn() {
-    const worker = {
-      postMessage(request) { this.request = request; },
-      reply(candidates, id = this.request.id) { this.onmessage({ data: { id, candidates } }); },
-      terminate() { this.terminated = true; },
-    };
-    workers.push(worker);
-    return worker;
-  } });
-  assert.deepEqual(await createGenerator({ supported: false }).generate(0), { kind: 'unsupported' });
-  assert.deepEqual(await createGenerator({ supported: true, spawn() { throw new Error(); } }).generate(0), { kind: 'error' });
+test('solver errors, invalid proposals and inaccessible or damaged storage still give varied playable rounds', () => {
+  const broken = {
+    getItem() { throw new Error(); },
+    setItem() { throw new Error(); },
+  };
+  for (const getItem of [broken.getItem, () => '{', () => '[{}]', () => 'nope'.repeat(9999)]) {
+    const storage = { ...broken, getItem };
+    const { next } = createSession({ random: seeded(68), storage, solve() { throw new Error('offline'); } });
+    const items = Array.from({ length: 20 }, next);
+    assert.deepEqual(new Set(items.map(item => item.topic)), topics);
+    assert.equal(new Set(items.map(item => item.key)).size, 20);
+    assert.ok(items.every(item => item.choices.length === 3 && item.choices[item.correct]));
+    assert.equal(new Set(items.map(item => item.correct)).size, 3);
+  }
+  const session = createSession({ random: seeded(69), solve: () => ({ key: 'fabricated' }) });
+  assert.ok(byKey.has(session.next().key));
+});
 
-  const failed = client.generate(0);
-  assert.deepEqual(await client.generate(0), { kind: 'busy' });
-  workers[0].reply(undefined);
-  assert.deepEqual(await failed, { kind: 'error' });
-  assert.ok(workers[0].terminated);
+test('semantic validation rejects malformed, ambiguous and incorrect proposals', () => {
+  const fact = ['animals', '-', 'あひるの あしは なんぼん？', '2', '6', '4'];
+  const addition = ['counting', 'みかん 2 + 3', 'あわせて なんこ？', '5', '4', '3'];
+  const position = ['positions', 'はな はっぱ みかん', 'まんなかは どれ？', '@2', '@1', '@3'];
+  const sequence = ['sequence', '3 4 5', 'おなじ ぶんずつ ふえるよ。つぎの かずは？', '6', '8', '3'];
+  assert.equal(verifyRound(['weather', ...addition.slice(1)]).key, 'add:2:3');
+  const rows = [[fact, '2'], [addition, '5'], [position, 'はっぱ'], [sequence, '6']];
+  for (const [row, expected] of rows) {
+    const item = verifyRound(row, seeded(68));
+    assert.equal(item.choices[item.correct].label, expected);
+    assert.equal(item.source, 'model');
+    assert.equal(verifyRound(row.slice(1)), null);
+    assert.equal(verifyRound([...row.slice(0, 4), row[3], row[5]]), null);
+    assert.equal(verifyRound([...row.slice(0, 3), row[4], row[3], row[5]]), null);
+  }
+  assert.equal(verifyRound(['counting', 'りんご 2 - 3', 'ばつの ものを とると、いくつ のこる？', '1', '2', '3']), null);
+  assert.equal(verifyRound(['positions', 'はな はな みかん', 'まんなかは どれ？', '@2', '@1', '@3']), null);
+  assert.equal(verifyRound(['sequence', '3 4 7', 'おなじ ぶんずつ ふえるよ。つぎの かずは？', '8', '6', '5']), null);
+  assert.equal(verifyRound([...fact.slice(0, 4), '9', '4']), null);
+  assert.equal(verifyRound([fact[0], fact[1], '<script>？', ...fact.slice(3)]), null);
 
-  const stopped = client.generate(2);
-  client.stop();
-  assert.deepEqual(await stopped, { kind: 'stopped' });
-  const recovered = client.generate(3);
-  const candidates = Array.from({ length: attempts }, () => [0, 1, 2, 0]);
-  workers[1].reply(candidates);
-  workers[1].onerror();
-  workers[2].reply(candidates, workers[2].request.id - 1);
-  workers[2].reply(candidates);
-  assert.deepEqual(await recovered, { kind: 'ok', candidates });
-  assert.equal(workers.length, 3);
+  let count = 0;
+  const model = { generate: () => (++count === 1 ? [] : fact) };
+  const recovered = generateRound(model, [], seeded(68));
+  assert.equal(recovered.attempts, 2);
+  assert.equal(recovered.invalid, 1);
+  assert.equal(recovered.item.key, 'legs:duck');
+  assert.deepEqual(generateRound(model, [recovered.item], seeded(68)), { item: null, attempts, invalid: 0 });
+  assert.deepEqual(generateRound({ generate: () => [] }, [], seeded(68)), { item: null, attempts, invalid: attempts });
+});
 
-  assert.deepEqual(await client.generate(4), { kind: 'timeout' });
-  assert.equal(workers.length, 3, 'The loaded worker is reused');
-  assert.ok(workers[2].terminated);
-  const retried = client.generate(5);
-  workers[3].reply(candidates);
-  assert.deepEqual(await retried, { kind: 'ok', candidates });
-  client.stop();
+test('mixed pictures are checked against the named objects and quantities', () => {
+  const row = ['counting', 'はな 2 + かさ 3', 'かさ は いくつ ある？', '3', '2', '5'];
+  const item = verifyRound(row, seeded(68));
+  assert.equal(item.key, 'select:3:2');
+  assert.equal(item.choices[item.correct].label, '3');
+  assert.equal(item.clue.split, 2);
+  assert.equal(item.clue.secondIcon, '☂️');
+  assert.equal(item.clue.separate, true);
+  const reversed = ['counting', 'かさ 3 + はな 2', 'かさ は なんこ？', '3', '2', '5'];
+  assert.equal(verifyRound(reversed).key, item.key);
+  assert.equal(verifyRound(['counting', row[1], 'ぜんぶで なんこ？', '5', '2', '3']).key, 'add:2:3');
+  assert.equal(verifyRound(['counting', row[1], row[2], '5', '2', '3']), null);
+  assert.equal(verifyRound(['counting', row[1], 'ほし は なんこ？', ...row.slice(3)]), null);
+  assert.equal(verifyRound(['counting', 'かさ 2 + かさ 3', ...row.slice(2)]), null);
+  assert.equal(verifyRound(['counting', 'はな 7 + かさ 3', ...row.slice(2)]), null);
+});
+
+test('counted pictures omit clusters and use a single leaf per tile', () => {
+  for (const [name, icon] of [['さくらんぼ', '🍒'], ['ぶどう', '🍇']]) {
+    for (const row of [
+      ['counting', name + ' 3', 'いくつ ある？', '3', '2', '4'],
+      ['counting', name + ' 3 + りんご 2', 'ぜんぶで なんこ？', '5', '2', '3'],
+      ['counting', 'りんご 2 + ' + name + ' 3', 'りんご は いくつ ある？', '2', '3', '5'],
+      ['counting', name + ' 3 - 2', 'ばつの ものを とると、いくつ のこる？', '1', '2', '3'],
+      ['comparing', name, 'いちばん おおいのは？', '4', '2', '3'],
+    ]) assert.equal(verifyRound(row), null, row[1]);
+    const position = verifyRound(['positions', 'はな ' + name + ' みかん', 'まんなかは どれ？', '@2', '@1', '@3']);
+    assert.deepEqual(position.choices[position.correct], { label: name, icon });
+  }
+  const leaf = verifyRound(['counting', 'はっぱ 3', 'いくつ ある？', '3', '2', '4'], seeded(68));
+  assert.equal(leaf.clue.icon, '🍁');
+  assert.equal(leaf.clue.count, 3);
+  assert.equal(leaf.choices[leaf.correct].label, '3');
+});
+
+test('excavator answers use text and the chestnut picture never represents an acorn', () => {
+  const excavator = verifyRound(['vehicles', '-', 'つちを すくう ばけっとが あるのは どれ？',
+    'しょべるかー', 'よっと', 'へりこぷたー']);
+  assert.equal(excavator.choices[excavator.correct].label, 'しょべるかー');
+  assert.equal(excavator.choices[excavator.correct].icon, '');
+  const chestnut = verifyRound(['food', '-', 'とげとげの いがに はいって いるのは どれ？',
+    'くり', 'いちご', 'すいか']);
+  assert.equal(chestnut.choices[chestnut.correct].icon, '🌰');
+  for (const row of [
+    ['counting', 'どんぐり 3', 'いくつ ある？', '3', '2', '4'],
+    ['counting', 'りんご 2 + どんぐり 3', 'どんぐり は いくつ ある？', '3', '2', '5'],
+    ['comparing', 'どんぐり', 'いちばん おおいのは？', '4', '2', '3'],
+    ['positions', 'はな どんぐり みかん', 'まんなかは どれ？', '@2', '@1', '@3'],
+  ]) assert.equal(verifyRound(row), null);
+});
+
+test('the shipped weights generate varied verified questions including held-out problem instances', async () => {
+  assert.throws(() => loadModel(new ArrayBuffer(12)), /Unrecognized/);
+  const model = loadModel((await readFile(modelURL)).buffer);
+  assert.deepEqual(model.generate(seeded(68)), model.generate(seeded(68)));
+  const recent = [], keys = new Set(), topicsSeen = new Set();
+  let unseenTeacherInstance = false;
+  for (let i = 0; i < 288; i++) {
+    const { item } = generateRound(model, recent, seeded(68 + 997 * i));
+    assert.ok(item, 'exhausted attempts at round ' + i);
+    assert.equal(item.source, 'model');
+    assert.ok(item.correct >= 0 && item.correct < 3);
+    assert.equal(new Set(item.choices.map(choice => choice.label)).size, 3);
+    assert.ok(item.choices.every(choice => hiragana.test(choice.label)));
+    assert.ok(!recent.slice(-6).some(previous => previous.key === item.key));
+    keys.add(item.key);
+    topicsSeen.add(item.topic);
+    unseenTeacherInstance ||= heldOut(item.key);
+    recent.push(item);
+  }
+  assert.ok(keys.size >= 180);
+  assert.ok(topicsSeen.size >= 11);
+  assert.ok(unseenTeacherInstance);
 });

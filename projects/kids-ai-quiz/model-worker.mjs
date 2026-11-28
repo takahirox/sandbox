@@ -1,18 +1,48 @@
-import { topics } from './content.mjs';
-import { attempts, generateTokens, loadModel, modelURL } from './model.mjs';
+import { generateRound } from './generate.mjs';
+import { loadModel, modelByteLimit, modelURL } from './model.mjs';
 
-let model;
-let busy = false;
-self.onmessage = async ({ data: { id, topic } }) => {
-  if (busy || !Number.isInteger(topic) || topic < 0 || topic >= topics.length) return;
-  busy = true;
+const temporarilyUnavailable = new Error('Quiz weights temporarily unavailable');
+let loading;
+async function load(retry) {
+  const response = await fetch(modelURL, {
+    mode: 'same-origin', credentials: 'omit', redirect: 'error', cache: retry ? 'reload' : 'default',
+  });
+  if (response.status === 503) throw temporarilyUnavailable;
+  if (!response.ok || !response.body) throw new Error('Quiz weights unavailable');
+  const reader = response.body.getReader();
+  const bytes = new Uint8Array(modelByteLimit);
+  let offset = 0;
   try {
-    model ??= await loadModel(await fetch(modelURL, { mode: 'same-origin', credentials: 'omit' }));
-    const candidates = Array.from({ length: attempts }, () => generateTokens(model.sample, topic));
-    self.postMessage({ id, candidates });
-  } catch {
-    self.postMessage({ id });
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (offset + value.length > bytes.length) throw new Error('Quiz weights exceeded size limit');
+      bytes.set(value, offset);
+      offset += value.length;
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
   } finally {
-    busy = false;
+    reader.releaseLock();
+  }
+  return loadModel(bytes.buffer.slice(0, offset));
+}
+
+self.onmessage = async ({ data: { seed, recent, retry } }) => {
+  try {
+    loading ??= load(retry).then(model => {
+      self.postMessage({ ready: true });
+      return model;
+    });
+    const model = await loading;
+    const started = performance.now();
+    const result = generateRound(model, recent, () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    });
+    self.postMessage({ ...result, ms: performance.now() - started, numericBytes: model.numericBytes });
+  } catch (error) {
+    self.postMessage({ failed: true, retryable: error === temporarilyUnavailable });
   }
 };
