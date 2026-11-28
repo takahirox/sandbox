@@ -204,6 +204,24 @@ test('mixed pictures are checked against the named objects and quantities', () =
   assert.equal(verifyRound(['counting', 'はな 7 + かさ 3', ...row.slice(2)]), null);
 });
 
+test('counted pictures omit clusters and use a single leaf per tile', () => {
+  for (const [name, icon] of [['さくらんぼ', '🍒'], ['ぶどう', '🍇']]) {
+    for (const row of [
+      ['counting', name + ' 3', 'いくつ ある？', '3', '2', '4'],
+      ['counting', name + ' 3 + りんご 2', 'ぜんぶで なんこ？', '5', '2', '3'],
+      ['counting', 'りんご 2 + ' + name + ' 3', 'りんご は いくつ ある？', '2', '3', '5'],
+      ['counting', name + ' 3 - 2', 'ばつの ものを とると、いくつ のこる？', '1', '2', '3'],
+      ['comparing', name, 'いちばん おおいのは？', '4', '2', '3'],
+    ]) assert.equal(verifyRound(row), null, row[1]);
+    const position = verifyRound(['positions', 'はな ' + name + ' みかん', 'まんなかは どれ？', '@2', '@1', '@3']);
+    assert.deepEqual(position.choices[position.correct], { label: name, icon });
+  }
+  const leaf = verifyRound(['counting', 'はっぱ 3', 'いくつ ある？', '3', '2', '4'], seeded(68));
+  assert.equal(leaf.clue.icon, '🍁');
+  assert.equal(leaf.clue.count, 3);
+  assert.equal(leaf.choices[leaf.correct].label, '3');
+});
+
 test('excavator answers use text and the chestnut picture never represents an acorn', () => {
   const excavator = verifyRound(['vehicles', '-', 'つちを すくう ばけっとが あるのは どれ？',
     'しょべるかー', 'よっと', 'へりこぷたー']);

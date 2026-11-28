@@ -181,6 +181,38 @@ test('the real model asks which objects to count in a held-out mixed picture', a
   assert.equal(await status(page).textContent(), 'せいかい！');
 });
 
+test('the real model skips proposals that count cherry and grape clusters', async t => {
+  // Both seeds originally opened with an addition round using clusters.
+  for (const seed of [188, 243]) {
+    const { page } = await open(t, { seed });
+    assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
+    assert.equal(await page.locator('.counters').locator('[data-icon="🍒"], [data-icon="🍇"]').count(), 0);
+    assert.equal(await choices(page).count(), 3);
+    assert.equal(new Set(await labels(page).allTextContents()).size, 3);
+  }
+});
+
+test('model and fallback tissue rounds render a playable text answer', async t => {
+  for (const [source, options] of [
+    ['model', { seed: 435 }],
+    ['fallback', { seed: 1483036646, init: () => { window.Worker = undefined; } }],
+  ]) {
+    const { page } = await open(t, options);
+    assert.equal(await page.locator('main').getAttribute('data-source'), source);
+    assert.equal(await heading(page).textContent(), 'はなみずが でてきたよ。なにを する？');
+    assert.equal(await choices(page).count(), 3);
+    assert.equal(new Set(await labels(page).allTextContents()).size, 3);
+    const tissue = page.getByRole('button', { name: 'てぃっしゅを つかう', exact: true });
+    assert.equal(await tissue.locator('.art').count(), 0);
+    for (const other of await choices(page).filter({ hasNotText: 'てぃっしゅを つかう' }).all()) {
+      await other.click();
+      assert.equal(await status(page).textContent(), 'もういちど えらんでね。');
+    }
+    await tissue.click();
+    assert.equal(await status(page).textContent(), 'せいかい！');
+  }
+});
+
 test('touch and keyboard stay responsive on phone viewports with no workers, WASM, storage or speech', async t => {
   const seed = 70;
   const { context, page, paths } = await open(t, {
