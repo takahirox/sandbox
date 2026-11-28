@@ -3,12 +3,16 @@
 // invented by the model because the clue supplies the information needed.
 import { modelRelations } from './content.mjs';
 
+// Each tile must depict one object so its visible count matches the answer.
 const counters = new Map([
   ['りんご', '🍎'], ['いちご', '🍓'], ['ほし', '⭐'], ['さかな', '🐟'], ['ぼーる', '⚽'],
   ['みかん', '🍊'], ['くるま', '🚗'], ['きのこ', '🍄'], ['ばなな', '🍌'], ['はな', '🌷'],
-  ['かさ', '☂️'], ['くつ', '👟'], ['えんぴつ', '✏️'], ['はっぱ', '🍃'],
-  ['ほん', '📕'], ['ぼうし', '🧢'], ['さくらんぼ', '🍒'], ['ぶどう', '🍇'], ['ふね', '⛵'],
+  ['かさ', '☂️'], ['くつ', '👟'], ['えんぴつ', '✏️'], ['はっぱ', '🍁'],
+  ['ほん', '📕'], ['ぼうし', '🧢'], ['ふね', '⛵'],
 ]);
+
+// Position questions can show clusters because they ask where an object is.
+const positionIcons = new Map([...counters, ['さくらんぼ', '🍒'], ['ぶどう', '🍇']]);
 
 // Parse the relation and then look up its subject independently.
 function factPattern(family, wording) {
@@ -115,7 +119,7 @@ function comparing(picture, question, labels) {
 
 function positions(picture, question, labels) {
   const names = picture.split(' ');
-  const icons = names.map(name => counters.get(name));
+  const icons = names.map(name => positionIcons.get(name));
   const index = positionQuestions.findIndex(pattern => pattern.test(question));
   if (names.length !== 3 || index < 0 || icons.some(icon => !icon) || new Set(icons).size !== 3
     || !labels.every(label => /^@[123]$/.test(label))) return null;
