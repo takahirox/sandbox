@@ -100,6 +100,18 @@ test('seeded fresh sessions vary, and reloads avoid recently seen IDs even with 
   assert.deepEqual(JSON.parse(storage.getItem(historyKey)), [...new Set(keys.toReversed())].reverse());
 });
 
+test('the first fallback skips the preceding model target', () => {
+  for (const [seed, modelKey, fallbackKey] of [
+    [68, 'shape:heart', 'shape:heart'],
+    [79, 'compare:0:1:2:7', 'compare:1:2:7'],
+  ]) {
+    assert.equal(createSession({ random: seeded(seed) }).next().key, fallbackKey);
+    const item = createSession({ random: seeded(seed) }).next(modelKey);
+    assert.notEqual(item.key, fallbackKey);
+    assert.equal(item.choices.length, 3);
+  }
+});
+
 test('topic cycles exhaust IDs before recycling and persist only a bounded list of IDs', () => {
   const storage = memoryStorage();
   const { next } = createSession({ random: seeded(68), storage });
@@ -190,6 +202,22 @@ test('mixed pictures are checked against the named objects and quantities', () =
   assert.equal(verifyRound(['counting', row[1], 'ほし は なんこ？', ...row.slice(3)]), null);
   assert.equal(verifyRound(['counting', 'かさ 2 + かさ 3', ...row.slice(2)]), null);
   assert.equal(verifyRound(['counting', 'はな 7 + かさ 3', ...row.slice(2)]), null);
+});
+
+test('excavator answers use text and the chestnut picture never represents an acorn', () => {
+  const excavator = verifyRound(['vehicles', '-', 'つちを すくう ばけっとが あるのは どれ？',
+    'しょべるかー', 'よっと', 'へりこぷたー']);
+  assert.equal(excavator.choices[excavator.correct].label, 'しょべるかー');
+  assert.equal(excavator.choices[excavator.correct].icon, '');
+  const chestnut = verifyRound(['food', '-', 'とげとげの いがに はいって いるのは どれ？',
+    'くり', 'いちご', 'すいか']);
+  assert.equal(chestnut.choices[chestnut.correct].icon, '🌰');
+  for (const row of [
+    ['counting', 'どんぐり 3', 'いくつ ある？', '3', '2', '4'],
+    ['counting', 'りんご 2 + どんぐり 3', 'どんぐり は いくつ ある？', '3', '2', '5'],
+    ['comparing', 'どんぐり', 'いちばん おおいのは？', '4', '2', '3'],
+    ['positions', 'はな どんぐり みかん', 'まんなかは どれ？', '@2', '@1', '@3'],
+  ]) assert.equal(verifyRound(row), null);
 });
 
 test('the shipped weights generate varied verified questions including held-out problem instances', async () => {

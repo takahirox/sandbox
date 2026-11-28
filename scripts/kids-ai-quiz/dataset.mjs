@@ -2,7 +2,12 @@
 // offline teacher constructs gold rows. The browser samples every field.
 import { fileURLToPath } from 'node:url';
 import { modelRelations } from '../../projects/kids-ai-quiz/content.mjs';
-import { counters } from '../../projects/kids-ai-quiz/verify.mjs';
+
+// Preserve the original training vocabulary and order for the shipped weights.
+const names = [
+  'りんご', 'いちご', 'ほし', 'さかな', 'ぼーる', 'みかん', 'くるま', 'きのこ', 'ばなな', 'はな',
+  'かさ', 'くつ', 'えんぴつ', 'どんぐり', 'はっぱ', 'ほん', 'ぼうし', 'さくらんぼ', 'ぶどう', 'ふね',
+];
 
 const countPrompts = {
   count: ['いくつ ある？', 'ぜんぶで なんこ？'],
@@ -49,14 +54,13 @@ export function heldOut(key) {
   if (rule === 'take' || rule === 'select') return (3 * Number(a) + Number(b)) % 7 === 3;
   if (rule === 'compare') return (Number(b) + 3 * Number(c) + Number(d)) % 7 === 0;
   if (rule === 'sequence') return (Number(a) + Number(b) + 2) % 7 === 0;
-  if (rule === 'position') return [...counters.keys()].indexOf(b) % 5 === Number(a);
+  if (rule === 'position') return names.indexOf(b) % 5 === Number(a);
   return false;
 }
 
 export function* dataset(seed = 68, examplesPerTopic = 1400) {
   const random = seeded(seed);
   const pick = values => values[Math.floor(random() * values.length)];
-  const names = [...counters.keys()];
   const examples = new Map();
   const add = (topic, make) => {
     if (!examples.has(topic)) examples.set(topic, []);

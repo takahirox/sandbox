@@ -261,6 +261,50 @@ test('unreadable model weights fall back and the next visit can recover', async 
   assert.equal(await page.locator('main').getAttribute('data-source'), 'model');
 });
 
+for (const recovers of [true, false]) {
+  test(recovers ? 'a weight-load 503 serves fallback while one retry recovers'
+    : 'a second weight-load 503 keeps fallback playable', { timeout: 10_000 }, async t => {
+    let requests = 0, notify;
+    const retryStarted = new Promise(resolve => { notify = resolve; });
+    const { page } = await open(t, {
+      init: () => {
+        const RealWorker = Worker;
+        window.finishedAttempts = 0;
+        window.Worker = class extends RealWorker {
+          constructor(...args) {
+            super(...args);
+            this.addEventListener('message', ({ data }) => {
+              if (data.failed || data.item) window.finishedAttempts++;
+            });
+          }
+        };
+      },
+      handleModel: route => {
+        if (++requests === 2) notify(route);
+        else return route.fulfill({ status: 503 });
+      },
+    });
+    assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+    const first = await heading(page).textContent();
+    const retry = await retryStarted;
+    await next(page).click();
+    await page.locator('#answers button:enabled').first().waitFor();
+    assert.equal(await page.locator('main').getAttribute('data-source'), 'fallback');
+    assert.notEqual(await heading(page).textContent(), first);
+    assert.equal(await choices(page).count(), 3);
+    if (recovers) await retry.continue();
+    else await retry.fulfill({ status: 503 });
+    await page.waitForFunction(() => window.finishedAttempts >= 2);
+    for (let i = 0; i < 2; i++) {
+      await next(page).click();
+      await page.locator('#answers button:enabled').first().waitFor();
+      assert.equal(await page.locator('main').getAttribute('data-source'), recovers ? 'model' : 'fallback');
+      assert.equal(await choices(page).count(), 3);
+    }
+    assert.equal(requests, 2);
+  });
+}
+
 test('a stalled startup falls back and a later round adopts a successful retry', { timeout: 10_000 }, async t => {
   const held = [];
   let notify;

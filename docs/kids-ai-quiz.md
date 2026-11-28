@@ -76,11 +76,11 @@ renders the question and picture.
 The worker has up to 20 attempts of 56 tokens each per round and a
 1.5-second deadline covering load and generation. It prepares at most one
 future round off the main thread. Invalid or recent duplicate proposals
-are skipped. A startup timeout serves playable fallback at the deadline
-and permits one fresh worker attempt in the background. Children can keep
-playing fallback while that attempt is pending. A verified result can be
-used on a later advance. A second timeout, a generation timeout after the
-worker is ready, or a worker failure keeps that visit on fallback. The
+are skipped. A startup timeout or HTTP 503 from the weight request serves
+playable fallback and permits one fresh worker attempt in the background.
+Children can keep playing fallback while that attempt is pending. A verified
+result can be used on a later advance. A failed retry, a timeout after the
+worker is ready, or another startup failure keeps that visit on fallback. The
 fallback has 242 curated targets and single-digit puzzle instances across
 ten topics. Leaving the page terminates the worker. A back-forward cache
 restore can start a fresh worker.
@@ -88,8 +88,9 @@ restore can start a fresh worker.
 [Fallback](../projects/kids-ai-quiz/quiz.mjs)
 
 The model history keeps up to 160 recent nonpersonal content identifiers in
-local storage. The fallback uses its own bounded history. With storage
-blocked, recency still works in the tab until navigation. Concurrent tabs
+local storage. The fallback uses its own bounded history and skips the target
+of the immediately preceding model round. With storage blocked, recency
+still works in the tab until navigation. Concurrent tabs
 keep independent in-memory histories and can replace the saved list. Inference
 and read-aloud run locally. The only inference download is the same-origin
 static model and its runtime, with no account, telemetry, or backend inference.
@@ -97,9 +98,10 @@ The DOM's `data-source` attribute identifies the path for testing.
 
 ## Diversity and integrity
 
-The comparison uses 24 seeded visits of 12 rounds for each column. The
-original loads the 49-anchor implementation and its actual WASM artifact
-from Git. Reload tests preserve on-device history, and fresh sessions start
+The recorded sample uses 24 seeded visits of 12 rounds for each column and
+predates the picture corrections. The original loads the 49-anchor
+implementation and its actual WASM artifact from Git. Reload tests preserve
+on-device history, and fresh sessions start
 with an empty one. Each target is one relationship and subject, number
 problem, or position and target item. The counts collapse paraphrases,
 answer permutations, swapped addends, picture substitutions in number
@@ -114,16 +116,12 @@ the other count, regardless of object names or left-to-right order.
 | Distinct first rounds in 24 visits | 1 | 24 | 24 | 23 |
 | Exact revisits in 288 rounds | 240 (83.3%) | 57 (19.8%) | 124 (43.1%) | 105 (36.5%) |
 | Exact repeats in the preceding six rounds | 9 (3.1%) | 0 | 2 (0.7%) | 0 |
-| Same relationship or task in the preceding six rounds, including exact repeats | 112 (38.9%) | 32 (11.1%) | 36 (12.5%) | 38 (13.2%) |
 | Rounds served by the symbolic fallback | — | 0 | 0 | 288 |
 
-All columns count a near repeat when a round asks about the same
-relationship or uses the same reasoning task as any of the previous six.
-Any two addition rounds count, as do two questions about animal sounds.
-Animal sounds and number of legs count as different relationships. The
-evaluator classifies the original facts by their displayed clues using
-the same families, and the window crosses visit boundaries in every
-column. This is a proxy for perceived repetition.
+The six-round window crosses visit boundaries in every column. An exact
+repeat measures a return to the same target. The earlier percentages for
+related rounds depended on how each implementation grouped questions into
+families, so the table uses exact targets for comparison.
 
 Across the reload sample, the trained model covered animals (33 distinct
 targets), objects (19), vehicles (17), everyday situations (13), food (20),
@@ -138,9 +136,12 @@ mix of five pencils and two stars generated from the shipped weights.
 
 The integrity audit checked the first two distinct generated rounds per
 topic from the reload sample, two fallback rounds per topic, and the four
-reported held-out rounds including the browser test. Each of the 48 had
-one defensible answer among its displayed choices. The Japanese uses
-short hiragana-centered instructions. Terms such as `ごかくけい` and
+reported held-out rounds including the browser test. The audit reported one
+defensible choice in each of the 48 rounds. Subsequent review found a tractor
+picture paired with an excavator label and a chestnut picture paired with an
+acorn label. Excavator choices now use text, and acorn pictures are excluded
+from playable puzzles. The Japanese uses short hiragana-centered instructions.
+Terms such as `ごかくけい` and
 number sequences that step by two may be harder for some five-year-olds.
 The evaluator rejected 162 of 1,000 raw proposals, compared with 48 of
 1,000 in the first trained version. Counting and arithmetic accounted
@@ -160,7 +161,7 @@ factual option outside its checked contrast.
 | Fallback | おうちで よむ ほんを かりるのは どこ？ | ぱんやさん / えき / としょかん | としょかん |
 
 Factual coverage is limited to 169 supported targets. The single-digit
-bounds and the target counting rules give a ceiling of 396 targets,
+bounds and the target counting rules give a ceiling of 393 targets,
 including 36 mixed-count pairs. Some supported instances may be rare or
 unreachable at the chosen sampling settings. Evidence of extrapolation
 covers the reported holdouts and novel position scenes. Small topics can
@@ -168,6 +169,7 @@ recur as the recent history fills. A child's subjective experience is unmeasured
 
 ## Browser measurements
 
+These measurements predate the picture and retry corrections.
 Chromium 153.0.8010.12 on Apple M4 Max with Node 24.22.3 serving assets
 over loopback, a 390×740 mobile viewport and 4× CPU throttling on the page
 target. Each version used 24 fresh contexts and seven advances per context.
@@ -214,8 +216,9 @@ requires original revision `1d8075bbea02d3acf4191f2c33684a743cd5f295` in Git
 history. Browser tests exercise the actual weight file on fresh visits,
 reloads and advances, including selective counting with held-out quantities.
 They also exercise gallery isolation, touch, keyboard, speech cancellation,
-worker failure, startup retry and its limit, and page restoration. The deployment
-and live project link can be verified after merge.
+worker failure, startup timeout and HTTP 503 recovery, the single-retry limit,
+and page restoration. The deployment and live project link can be verified
+after merge.
 [Evaluation script](../scripts/kids-ai-quiz/evaluate.mjs)
 
 The historical symbolic evaluation is in the parent history at

@@ -39,7 +39,7 @@ async function showRound(focus) {
   if (generated) item = generated;
   else {
     fallback ??= createSession({ storage });
-    item = { ...fallback.next(), source: 'fallback' };
+    item = { ...fallback.next(item?.source === 'model' ? item.key : undefined), source: 'fallback' };
   }
   model.remember(item);
   feedback.textContent = '';
