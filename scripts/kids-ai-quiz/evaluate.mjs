@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
 import { dataset, heldOut, seeded, memoryStorage } from './dataset.mjs';
-import { createSession } from '../../projects/kids-ai-quiz/quiz.mjs';
+import { canonicalTarget, createSession } from '../../projects/kids-ai-quiz/quiz.mjs';
 import { generateRound } from '../../projects/kids-ai-quiz/generate.mjs';
 import { loadModel, modelURL } from '../../projects/kids-ai-quiz/model.mjs';
 import { verifyRound } from '../../projects/kids-ai-quiz/verify.mjs';
@@ -17,33 +17,12 @@ const visits = 24;
 const roundsPerVisit = 12;
 const nearWindow = 6;
 
-// Map the old fact IDs to the relationship or task in their displayed clues.
-// The new generator and fallback already prefix their keys with that family.
-const baselineFamilies = {
-  animals: 'call', colors: 'color', shapes: 'shape', counting: 'count', food: 'part',
-};
-const baselineRelations = {
-  train: 'travel', plane: 'travel', boat: 'travel', bicycle: 'job', bus: 'job', 'fire-engine': 'job', ambulance: 'job',
-  toothbrush: 'use', umbrella: 'use', spoon: 'use', towel: 'use', shoes: 'wear', ball: 'object-property', clock: 'use',
-};
-
-function baselineRound(item) {
-  const family = baselineFamilies[item.topic] ?? baselineRelations[item.key];
-  if (!family) throw new Error('Missing baseline relationship for ' + item.key);
-  return { ...item, key: family + ':' + item.key };
-}
-
 async function unpackBaseline(directory) {
   const git = (...args) => execFileSync('git', args, { cwd: root });
   const files = git('ls-tree', '--name-only', baseline + ':' + project).toString().trim().split('\n');
   await mkdir(join(directory, project), { recursive: true });
   await Promise.all(files.map(file =>
     writeFile(join(directory, project, file), git('show', baseline + ':' + project + '/' + file))));
-}
-
-function target(item) {
-  // Count largest/smallest of the same three groups as one stimulus.
-  return item.key.replace(/^compare:[01]:(\d+:\d+:\d+)$/, 'compare:$1');
 }
 
 function description(item) {
@@ -57,18 +36,16 @@ function sample(startVisit) {
   const seen = new Set(), first = new Set(), recent = [];
   const topics = {}, examples = {}, unseen = {}, newPositionScenes = new Set(), selectiveTargets = new Set();
   const teacherScenes = new Set([...dataset()].filter(row => row[0] === 'positions').map(row => row[1]));
-  let recentExact = 0, recentRelated = 0, fallback = 0;
+  let recentExact = 0, fallback = 0;
   for (let visit = 0; visit < visits; visit++) {
     const next = startVisit(seeded(68 + visit), visit);
     for (let round = 0; round < roundsPerVisit; round++) {
       const item = next();
-      const key = target(item);
+      const key = canonicalTarget(item.key);
       const family = key.split(':', 1)[0];
       if (!round) first.add(key);
-      const exact = recent.some(previous => previous.key === key);
-      recentExact += Number(exact);
-      recentRelated += Number(recent.some(previous => previous.family === family));
-      recent.push({ key, family });
+      recentExact += Number(recent.includes(key));
+      recent.push(key);
       if (recent.length > nearWindow) recent.shift();
       fallback += Number(item.source === 'fallback');
       const info = topics[item.topic] ??= { rounds: 0, distinct: 0 };
@@ -89,7 +66,7 @@ function sample(startVisit) {
   }
   return {
     distinct: seen.size, revisits: visits * roundsPerVisit - seen.size, distinctOpeners: first.size,
-    recentExact, recentRelated, fallback, topics, unseen,
+    recentExact, fallback, topics, unseen,
     selectiveTargets: selectiveTargets.size, novelPositionScenes: newPositionScenes.size, examples,
   };
 }
@@ -106,13 +83,12 @@ async function compareContent(directory) {
     return () => {
       if (first) {
         first = false;
-        return baselineRound(old.firstQuestion);
+        return old.firstQuestion;
       }
       const fact = session.next();
       const proposals = Array.from({ length: oldModel.attempts }, () =>
         oldModel.generateTokens(sampleToken, fact.topic, modelRandom));
-      const item = proposals.map(tokens => old.validate(fact, tokens)).find(Boolean) ?? old.fallback(fact, random);
-      return baselineRound(item);
+      return proposals.map(tokens => old.validate(fact, tokens)).find(Boolean) ?? old.fallback(fact, random);
     };
   });
 
@@ -130,7 +106,8 @@ async function compareContent(directory) {
         const result = generateRound(model, recent, seeded(seed));
         attempted += result.attempts;
         rejected += result.invalid;
-        const item = result.item ?? { ...fallback.next(), source: 'fallback' };
+        const last = recent.at(-1);
+        const item = result.item ?? { ...fallback.next(last?.source === 'model' ? last.key : undefined), source: 'fallback' };
         const previous = recent.findIndex(row => row.key === item.key);
         if (previous >= 0) recent.splice(previous, 1);
         recent.push(item);

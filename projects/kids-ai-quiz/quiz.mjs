@@ -6,6 +6,11 @@ export const nearWindow = 12;
 const counters = [['🍎', 'りんご'], ['🍓', 'いちご'], ['⭐', 'ほし'], ['🐟', 'さかな']];
 const numbers = Array.from({ length: 10 }, (_, value) => ({ label: String(value), value, kind: 'number' }));
 
+export function canonicalTarget(key) {
+  // The model records a comparison direction. Both directions use the same stimulus.
+  return key.replace(/^compare:[01]:(\d+:\d+:\d+)$/, 'compare:$1');
+}
+
 function relationPuzzles() {
   return relations.flatMap(([topic, family, wording, picture, groups]) => {
     const choices = groups.map(([[id, label, icon, kind]]) => ({ id, label, icon, kind }));
@@ -146,13 +151,16 @@ export function createSession({ random = Math.random, storage, solve = choosePuz
   const history = readHistory(storage);
   let order = [];
   return {
-    next() {
+    next(previousModelKey = '') {
       const recentTopics = new Set(history.slice(-4).map(key => byKey.get(key).topic));
       if (!order.length) order = shuffle([...byTopic.keys()], random);
       const freshTopic = order.findIndex(topic => !recentTopics.has(topic));
       const [topic] = order.splice(Math.max(0, freshTopic), 1);
       const lastUsed = new Map(history.map((key, index) => [key, index]));
-      const pool = byTopic.get(topic);
+      const avoidKey = canonicalTarget(previousModelKey);
+      const topicPuzzles = byTopic.get(topic);
+      const pool = byKey.get(avoidKey)?.topic === topic && topicPuzzles.length > 1
+        ? topicPuzzles.filter(puzzle => puzzle.key !== avoidKey) : topicPuzzles;
       const fresh = pool.filter(puzzle => !lastUsed.has(puzzle.key));
       // Once a topic has used every available ID, recycle its oldest one.
       const candidates = fresh.length ? fresh : [pool.reduce((oldest, puzzle) =>

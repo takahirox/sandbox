@@ -36,7 +36,7 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
     stop();
   }
 
-  function onTimeout() {
+  function recoverStartup() {
     if (ready || retried) {
       disable();
       return;
@@ -48,7 +48,7 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
 
   return {
     stop,
-    get recovering() { return recovering; },
+    get recovering() { return recovering && Boolean(pending); },
     generate() {
       if (pending) return pending.promise;
       if (unavailable || typeof Worker !== 'function') return Promise.resolve(null);
@@ -60,8 +60,10 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
             if (worker !== active || !pending) return;
             if (data?.ready) {
               ready = true;
-            } else if (data?.failed) disable();
-            else {
+            } else if (data?.failed) {
+              if (data.retryable) recoverStartup();
+              else disable();
+            } else {
               const item = data?.item;
               // A child may have already played this target in fallback while retrying.
               const repeatedWhileRecovering = recovering && item && recent.at(-1)?.key === item.key;
@@ -79,7 +81,7 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
         }
         let finish;
         const promise = new Promise(resolve => { finish = resolve; });
-        const timer = setTimeout(onTimeout, timeout);
+        const timer = setTimeout(recoverStartup, timeout);
         pending = {
           promise,
           finish(item) {
@@ -88,7 +90,7 @@ export function modelSession({ random = Math.random, storage, timeout = 1500 } =
             finish(item);
           },
         };
-        worker.postMessage({ seed: Math.floor(random() * 2 ** 32), recent });
+        worker.postMessage({ seed: Math.floor(random() * 2 ** 32), recent, retry: recovering });
         return promise;
       } catch {
         disable();

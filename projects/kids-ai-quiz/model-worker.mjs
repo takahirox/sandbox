@@ -1,9 +1,13 @@
 import { generateRound } from './generate.mjs';
 import { loadModel, modelByteLimit, modelURL } from './model.mjs';
 
+const temporarilyUnavailable = new Error('Quiz weights temporarily unavailable');
 let loading;
-async function load() {
-  const response = await fetch(modelURL, { mode: 'same-origin', credentials: 'omit', redirect: 'error' });
+async function load(retry) {
+  const response = await fetch(modelURL, {
+    mode: 'same-origin', credentials: 'omit', redirect: 'error', cache: retry ? 'reload' : 'default',
+  });
+  if (response.status === 503) throw temporarilyUnavailable;
   if (!response.ok || !response.body) throw new Error('Quiz weights unavailable');
   const reader = response.body.getReader();
   const bytes = new Uint8Array(modelByteLimit);
@@ -25,9 +29,9 @@ async function load() {
   return loadModel(bytes.buffer.slice(0, offset));
 }
 
-self.onmessage = async ({ data: { seed, recent } }) => {
+self.onmessage = async ({ data: { seed, recent, retry } }) => {
   try {
-    loading ??= load().then(model => {
+    loading ??= load(retry).then(model => {
       self.postMessage({ ready: true });
       return model;
     });
@@ -38,7 +42,7 @@ self.onmessage = async ({ data: { seed, recent } }) => {
       return seed / 2 ** 32;
     });
     self.postMessage({ ...result, ms: performance.now() - started, numericBytes: model.numericBytes });
-  } catch {
-    self.postMessage({ failed: true });
+  } catch (error) {
+    self.postMessage({ failed: true, retryable: error === temporarilyUnavailable });
   }
 };
